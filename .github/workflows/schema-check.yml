@@ -1,0 +1,50 @@
+name: Descriptor schema check
+
+# Validates the published reference descriptors against schema/tangos.schema.json so the
+# schema and the dialect the Console actually consumes (console/src/shared/types.ts) cannot
+# drift apart silently. The schema once shipped for months missing runtime.envKeyHelp,
+# data.liveApi/projectId and matchConventions.srcLayout - fields every production descriptor
+# used - and nothing failed until someone ran a strict validator by hand.
+#
+# Runs on any change to the schema, the shared descriptor types, or this workflow; weekly on
+# a cron so a reference-descriptor change upstream is caught too; and manually. mkds-decomp
+# is private, so CI covers the two public descriptors; validate the private one locally with
+#   node schema/validate.mjs ../mkds-decomp/tangos.json
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1' # Mondays 06:17 UTC
+  push:
+    branches: [main]
+    paths:
+      - 'schema/**'
+      - 'console/src/shared/types.ts'
+      - '.github/workflows/schema-check.yml'
+  pull_request:
+    paths:
+      - 'schema/**'
+      - 'console/src/shared/types.ts'
+      - '.github/workflows/schema-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # The validator needs only ajv; skip the full workspace install (electron etc.).
+      - name: Install ajv
+        run: npm install --no-save --no-package-lock ajv
+
+      - name: Validate reference descriptors against the schema
+        run: |
+          node schema/validate.mjs \
+            https://raw.githubusercontent.com/tangosdev/sm64ds-decomp/main/tangos.json \
+            https://raw.githubusercontent.com/tangOS-decomps/pictochat-decomp/main/tangos.json
