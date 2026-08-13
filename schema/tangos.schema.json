@@ -22,6 +22,7 @@
         "title": { "type": "string", "description": "Display name, e.g. \"Super Mario 64 DS\"." },
         "tagline": { "type": "string" },
         "github": { "type": "string", "description": "Repo URL." },
+        "githubClientId": { "type": "string", "description": "Optional GitHub OAuth app client_id for Console's \"Sign into GitHub\" device flow." },
         "language": { "type": "string", "description": "Primary source language, e.g. \"C\", \"C++\"." },
         "platform": { "type": "string", "description": "Console/arch hint, e.g. \"nds\", \"gc\", \"n64\", \"gba\", \"ps2\"." },
         "compiler": { "type": "string", "description": "Compiler + flags, free text." },
@@ -36,8 +37,8 @@
         "nearMissNote": { "type": "string" },
         "matchConventions": {
           "type": "object",
-          "description": "Optional matching conventions (attempt-tree logging, near-miss tip store, Ghidra scaffolds). Classic repos omit this; experimental forks set attemptTree so Console/next_batch surface MATCH_RESULT rules once per batch.",
-          "additionalProperties": false,
+          "description": "Optional matching conventions (attempt-tree logging, near-miss tip store, Ghidra scaffolds). Classic repos omit this; experimental forks set attemptTree so Console/next_batch surface MATCH_RESULT rules once per batch. Unknown extra keys are allowed: repos may keep private conventions here for their own tools; Console ignores what it does not read.",
+          "additionalProperties": true,
           "properties": {
             "attemptTree": {
               "type": "boolean",
@@ -58,6 +59,10 @@
             "nearMissDb": {
               "type": "string",
               "description": "Near-miss tip store path. Default: nearmiss/db.jsonl."
+            },
+            "srcLayout": {
+              "type": "string",
+              "description": "Where a matched source file belongs, e.g. \"src/arm9/<symbol>.c|.cpp and src/arm7/<symbol>.c|.cpp, one matched function each\". Emitted to the agent as its own WHERE A MATCH GOES directive in every batch: a repo that splits src/ by CPU or segment does not build a file dropped at the top of src/, and the byte gate does not catch the misplacement (it resolves each file from its own decomp marker, not from where the file sits)."
             },
             "defaultProvenance": {
               "type": "object",
@@ -85,6 +90,18 @@
           "type": "array",
           "description": "Names of environment variables some tools need (e.g. API keys). Values are NEVER stored here; tangOS reads them from the user's environment or prompts.",
           "items": { "type": "string" }
+        },
+        "envKeyHelp": {
+          "type": "object",
+          "description": "Per-key guidance for entries in envKeys, keyed by env var name: what the key unlocks and where to obtain it. Shown in Console's key vault UI. Values are still NEVER stored in the descriptor.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "note": { "type": "string", "description": "What the key is for / when it is needed." },
+              "url": { "type": "string", "description": "Where to create/obtain the key." }
+            }
+          }
         }
       }
     },
@@ -107,7 +124,10 @@
         "generate": { "type": "string", "description": "Command that (re)generates the normalized data file. May use {out}." },
         "dbPath": { "type": "string", "description": "Repo-relative path the generate command writes to." },
         "committedDbUrl": { "type": "string", "description": "URL of a committed/published data file (e.g. a raw GitHub URL on a data branch). Lets tangOS pull the whole team's live progress/contributions. Highly recommended for collaborative projects." },
-        "claimsApi": { "type": "string", "description": "Base URL of a claims/coordination service (e.g. https://belongto.us/api/claims) with a read-only GET /check?module=&start=&end= endpoint. Lets tangOS show who is working where." }
+        "claimsApi": { "type": "string", "description": "Base URL of a claims/coordination service (e.g. https://belongto.us/api/claims) with a read-only GET /check?module=&start=&end= endpoint. Lets tangOS show who is working where." },
+        "projectId": { "type": "string", "description": "This project's id on the claims service (e.g. \"pictochat\"). The service hosts one board per decomp; this scopes claim reads to this project's board. Absent means the service's primary project, which is what pre-project descriptors have always got." },
+        "liveApi": { "type": "string", "description": "This project's live stream on the tangos backend, e.g. https://tangos.dev/api/projects/pictochat. Publish events only: it says when this project's own CI has landed a fresh chaos-db, so the Atlas reloads then instead of waiting out its poll. Separate from claimsApi on purpose - that one brings claims, cosmetics and counts, which belong only to the project the backend serves." },
+        "claimsMdUrl": { "type": "string", "description": "Raw URL of the live CLAIMS.md. Optional: if absent the console derives it from committedDbUrl (same owner/repo, main branch, /CLAIMS.md)." }
       }
     },
     "categories": {
