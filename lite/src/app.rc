@@ -3,5 +3,5 @@
 101 ICON "../../console/build/icon.ico"
 202 RCDATA "../docs/licenses/libwinpthread.txt"
 203 RCDATA "../docs/licenses/GCC-Runtime-Exception.txt"
-204 RCDATA "../../LICENSE"
+204 RCDATA "../docs/licenses/TangOS-MIT.txt"
 205 RCDATA "../docs/licenses/GPL-3.0.txt"
