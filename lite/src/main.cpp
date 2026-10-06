@@ -454,7 +454,7 @@ void snapshot(const fs::path &path) {
   EnumChildWindows(
       window,
       [](HWND child, LPARAM param) -> BOOL {
-        if (!(GetWindowLongW(child, GWL_STYLE) & WS_VISIBLE))
+        if (GetParent(child) != window || !(GetWindowLongW(child, GWL_STYLE) & WS_VISIBLE))
           return TRUE;
         auto dc = (HDC)param;
         RECT bounds;
@@ -465,6 +465,19 @@ void snapshot(const fs::path &path) {
         IntersectClipRect(dc, 0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top);
         SendMessageW(child, WM_PRINT, (WPARAM)dc,
                      PRF_CLIENT | PRF_NONCLIENT | PRF_ERASEBKGND | PRF_CHILDREN);
+        // ComboBox WM_PRINT omits its owner-drawn selection on hidden windows.
+        wchar_t className[32];
+        GetClassNameW(child, className, 32);
+        if (std::wstring(className) == L"ComboBox") {
+          DRAWITEMSTRUCT selection{};
+          selection.CtlType = ODT_COMBOBOX;
+          selection.CtlID = GetDlgCtrlID(child);
+          selection.itemID = (UINT)SendMessageW(child, CB_GETCURSEL, 0, 0);
+          selection.hwndItem = child;
+          selection.hDC = dc;
+          selection.rcItem = {1, 1, bounds.right - bounds.left - 24, 29};
+          SendMessageW(window, WM_DRAWITEM, selection.CtlID, (LPARAM)&selection);
+        }
         RestoreDC(dc, state);
         return TRUE;
       },
@@ -648,9 +661,15 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         std::wstring title(std::max(0, length) + 1, 0);
         if (length >= 0)
           SendMessageW(i->hwndItem, CB_GETLBTEXT, i->itemID, (LPARAM)title.data());
-        skin::label(i->hDC, title, i->rcItem.left + 8, i->rcItem.top + 3,
-                    i->rcItem.right - i->rcItem.left - 12, i->rcItem.bottom - i->rcItem.top - 3, 13,
-                    (i->itemState & ODS_SELECTED) != 0);
+        // GDI text respects the control DC viewport for native paint and WM_PRINT.
+        auto previousFont = SelectObject(i->hDC, uiFont);
+        SetTextColor(i->hDC, skin::text());
+        SetBkMode(i->hDC, TRANSPARENT);
+        RECT textBounds = i->rcItem;
+        textBounds.left += 8;
+        textBounds.right -= 4;
+        DrawTextW(i->hDC, title.c_str(), -1, &textBounds, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        SelectObject(i->hDC, previousFont);
       }
       return TRUE;
     }
