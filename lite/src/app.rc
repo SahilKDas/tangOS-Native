@@ -1,1 +1,7 @@
 1 24 "app.manifest"
+201 RCDATA "../../console/src/renderer/src/assets/tango-idle.png"
+101 ICON "../../console/build/icon.ico"
+202 RCDATA "../docs/licenses/libwinpthread.txt"
+203 RCDATA "../docs/licenses/GCC-Runtime-Exception.txt"
+204 RCDATA "../../LICENSE"
+205 RCDATA "../docs/licenses/GPL-3.0.txt"
