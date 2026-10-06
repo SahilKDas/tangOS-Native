@@ -1,6 +1,6 @@
 # Verified Windows release — 2026-10-06
 
-TangOS Lite 0.1.0, Windows x64, source checkpoint `13ab2b4` plus notice
+TangOS Lite 0.1.0, Windows x64, source checkpoint `adaaea9` plus notice
 line-ending normalization and this report. GCC 14.1.0 (MSYS2 UCRT64 Rev3),
 CMake 3.29.3, Release `-O3`, static GCC runtime, stripped executable, PE timestamp
 disabled. Only Windows system DLL imports, including GDI+, CNG and UCRT.
@@ -8,11 +8,11 @@ disabled. Only Windows system DLL imports, including GDI+, CNG and UCRT.
 | Measurement | Result |
 |---|---|
 | Executable | `TangOSLite.exe` |
-| Exact size | **1,848,832 bytes** |
-| Decimal MB | **1.849 MB** |
+| Exact size | **1,848,320 bytes** |
+| Decimal MB | **1.848 MB** |
 | Budget | Below 10 MB; strictly below 50 MB |
 | Two clean build directories | Byte-identical SHA-256 |
-| SHA-256 | `33461C01B8DAF469CE397403EBACBF3F38FFE9C3D5D309F9001BC86165169913` |
+| SHA-256 | `8B98EE9A88119FE3CBDB2EB56C61CB4948A32F4A0E1C6B213DFB900777E99A86` |
 | Automated core / disposable Git assertions | **60 passed** |
 | Packaged executable launch and GUI workflow | **Passed** |
 | Packaged SHA-256 match / mismatch behavior | **Passed** |
@@ -43,3 +43,4 @@ is unfinished. See LIMITATIONS.md, UI-PARITY.md and SECURITY.md.
 the final packaged executable. Use the same toolchain and checkout line-ending
 policy to reproduce these bytes. Third-party notices are embedded so the app
 itself remains one portable executable.
+
