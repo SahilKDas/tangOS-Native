@@ -38,7 +38,7 @@ std::string Repository::status() {
   std::string t = "Repository: " + utf8(root.wstring()) + "\r\n\r\n";
   t += "BRANCH / CHANGES\r\n" + git({"status", "--short", "--branch"});
   t += "\r\nBRANCHES\r\n" + git({"branch", "-avv"});
-  t += "\r\nREMOTES (Tango, SCOPIC64 and forks use their configured names)\r\n" +
+  t += "\r\nREMOTES (configured repository remotes)\r\n" +
        git({"remote", "-v"});
   t += "\r\nWORKTREES\r\n" + git({"worktree", "list", "--porcelain"});
   auto changes = parseStatus(git({"status", "--porcelain=v1", "-z"}));

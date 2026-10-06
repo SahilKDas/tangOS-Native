@@ -12,6 +12,10 @@ included in `docs/licenses/libwinpthread.txt`.
 These notices are also embedded in the executable. Click Tango or use the window
 system menu (Alt+Space) → About to read them without any sidecar files.
 
-Windows system libraries (Win32, GDI+, CNG, COM, common controls and UCRT) are
+Windows system libraries (Win32, GDI, CNG, COM, common controls and UCRT) are
 provided by Windows and are not redistributed. Git, GitHub CLI, Python, CMake,
 Ninja, MSVC, and decomp toolchains are external and not part of the package.
+
+Nunito is embedded under the SIL Open Font License; see assets/Nunito-OFL.txt.
+TinySkia 0.12.0 and locked Rust dependencies are statically linked. Their notices
+are in docs/licenses/Raster-dependencies.txt and embedded in About.

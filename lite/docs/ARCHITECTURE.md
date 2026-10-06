@@ -2,7 +2,7 @@
 
 Windows 10/11 x64; C++17 and Win32 common controls. One statically linked
 portable executable, no browser, installer, embedded ROM, or bundled toolchain.
-The native GDI+ skin reproduces Console's Aero tokens and shell layout; see
+The native TinySkia skin reproduces Console's Aero tokens and shell layout; see
 UI-PARITY.md for the exact reference and remaining screen differences.
 
 ## Repository inspection

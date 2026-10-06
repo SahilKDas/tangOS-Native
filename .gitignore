@@ -17,3 +17,5 @@ console/calls-*.json
 # tree on purpose - restore from history if you need them again.
 /Launch tangOS (dev).cmd
 /Launch tangOS Console.cmd
+
+/lite/renderer/target/

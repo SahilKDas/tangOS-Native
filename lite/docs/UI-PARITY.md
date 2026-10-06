@@ -8,9 +8,9 @@ directly from `packages/ui/aero.css`, `console/src/renderer/src/app.css`,
 Implemented: frameless draggable header with native minimize/maximize/close,
 tangOS brand with primary-colored OS, centered segmented navigation, 14 px
 workspace gutters, wide controller and 340 px right rail, rounded 14 px glass
-panels, Segoe UI typography, primary/ghost/danger buttons, the centered repo
+panels, Nunito typography, primary/ghost/danger buttons, the centered repo
 landing card, five original named palettes, and embedded original Tango mascot
-and icon. Themes are remembered. All rendering is native Win32/GDI+.
+and icon. Themes are remembered. All rendering is native Win32/TinySkia.
 The controller retains Console's empty-agent state and footer Encyclopedia entry;
 manual check/Git/log controls open from that entry. Repository navigation provides
 the full status view. Smoke testing exercises both views and all five palettes.

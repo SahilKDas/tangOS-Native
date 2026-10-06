@@ -1,4 +1,4 @@
-# TangOS Lite 0.1.0
+# TangOS Lite 0.2.0
 
 Click Tango or use **Alt+Space → About** for embedded third-party notices.
 
@@ -131,9 +131,18 @@ commits, missing executables, logs, and descendant cancellation. GUI smoke tests
 assert rendered status/log contents and timer responsiveness while a check runs.
 No copyrighted data or real remote writes are used by tests.
 
-An MSVC alternative is `cmake -S lite -B lite/out-msvc -G "Visual Studio 17 2022"
--A x64`, then `cmake --build lite/out-msvc --config Release`; the MSVC static
-runtime configuration exists but has not been validated in this environment.
+The TinySkia release currently supports the MinGW GNU toolchain.
 
 See [architecture](docs/ARCHITECTURE.md), [security review](docs/SECURITY.md),
 [limitations](docs/LIMITATIONS.md), and the generated release size report.
+
+## TinySkia and Nunito build requirements
+
+Install Rust and `rustup target add x86_64-pc-windows-gnu` alongside the existing
+MinGW toolchain. Run `cargo fetch --locked --manifest-path lite/renderer/Cargo.toml`
+once before building; subsequent CMake builds are locked and offline. The executable
+statically embeds TinySkia and Nunito. Neither needs installing on the user's PC.
+TinySkia renders the window surfaces, cards, buttons and mascot; Windows handles
+native text input, accessibility and Nunito text rasterization.
+Repository selection and Git remote discovery work for other users' checkouts.
+SM64DS-specific check adapters appear only when their scripts are found.

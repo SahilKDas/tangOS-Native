@@ -5,3 +5,7 @@
 203 RCDATA "../docs/licenses/GCC-Runtime-Exception.txt"
 204 RCDATA "../docs/licenses/TangOS-MIT.txt"
 205 RCDATA "../docs/licenses/GPL-3.0.txt"
+
+206 RCDATA "../assets/Nunito.ttf"
+207 RCDATA "../assets/Nunito-OFL.txt"
+208 RCDATA "../docs/licenses/Raster-dependencies.txt"

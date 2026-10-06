@@ -58,3 +58,9 @@ Tests verify safe/blocked index paths and credentials, ignored assets, historica
 asset removal, ref validation, actual disposable commits/remotes/worktrees, and
 process-tree cancellation. Tests do not establish behavior of arbitrary external
 scripts or all credential encodings.
+
+The TinySkia raster bridge receives app-owned pixel buffers and bundled PNG data;
+no repository-provided image or font is decoded. The Nunito font is registered only
+for the app process. Rust dependencies are exact/lockfile pinned and release builds
+run offline after fetching dependencies. Rendering changes do not bypass Git previews,
+port-only path guards, or destructive-operation confirmations.

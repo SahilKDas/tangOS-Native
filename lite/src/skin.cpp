@@ -1,58 +1,71 @@
 #include "skin.h"
-#include <objidl.h>
-#include <propidl.h>
 #include <algorithm>
-#include <gdiplus.h>
-#include <memory>
+#include <cstdint>
+extern "C" void tangos_shape(unsigned char *, unsigned, unsigned, float, uint32_t, uint32_t);
+extern "C" void tangos_image(unsigned char *, unsigned, unsigned, const unsigned char *, size_t);
 namespace skin {
-using namespace Gdiplus;
 namespace {
-ULONG_PTR token = 0;
-Image *tango = nullptr;
-IStream *imageStream = nullptr;
+struct Color {
+  uint32_t value;
+  Color(int r, int g, int b) : Color(255, r, g, b) {}
+  Color(int a, int r, int g, int b) : value((uint32_t(a) << 24) | (r << 16) | (g << 8) | b) {}
+  int GetR() const { return (value >> 16) & 255; }
+  int GetG() const { return (value >> 8) & 255; }
+  int GetB() const { return value & 255; }
+};
 struct Palette {
   Color top, middle, bottom, primary, ink, muted, panel, field;
 };
 Palette colors{Color(143, 208, 248),      Color(126, 200, 240), Color(142, 200, 65),
                Color(0, 153, 224),        Color(13, 58, 92),    Color(72, 116, 156),
                Color(200, 234, 244, 253), Color(234, 244, 253)};
-std::unique_ptr<GraphicsPath> rounded(RectF r, float radius) {
-  auto p = std::make_unique<GraphicsPath>();
-  float d = radius * 2;
-  p->AddArc(r.X, r.Y, d, d, 180, 90);
-  p->AddArc(r.GetRight() - d, r.Y, d, d, 270, 90);
-  p->AddArc(r.GetRight() - d, r.GetBottom() - d, d, d, 0, 90);
-  p->AddArc(r.X, r.GetBottom() - d, d, d, 90, 90);
-  p->CloseFigure();
-  return p;
-}
+HANDLE fontResource = nullptr;
 COLORREF rgb(Color c) { return RGB(c.GetR(), c.GetG(), c.GetB()); }
+struct Surface {
+  HDC target, dc;
+  HBITMAP bitmap;
+  HGDIOBJ previous;
+  unsigned char *data = nullptr;
+  int x, y, w, h;
+  Surface(HDC dest, int xx, int yy, int ww, int hh) : target(dest), x(xx), y(yy), w(ww), h(hh) {
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = w;
+    info.bmiHeader.biHeight = -h;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    dc = CreateCompatibleDC(dest);
+    bitmap = CreateDIBSection(dest, &info, DIB_RGB_COLORS, (void **)&data, nullptr, 0);
+    previous = SelectObject(dc, bitmap);
+    BitBlt(dc, 0, 0, w, h, dest, x, y, SRCCOPY);
+    GdiFlush();
+  }
+  ~Surface() {
+    BitBlt(target, x, y, w, h, dc, 0, 0, SRCCOPY);
+    SelectObject(dc, previous);
+    DeleteObject(bitmap);
+    DeleteDC(dc);
+  }
+};
+void shape(HDC dc, int x, int y, int w, int h, float radius, Color top, Color bottom) {
+  if (w <= 0 || h <= 0)
+    return;
+  Surface s(dc, x, y, w, h);
+  if (s.data)
+    tangos_shape(s.data, w, h, radius, top.value, bottom.value);
+}
 } // namespace
 void initialize() {
-  GdiplusStartupInput startup;
-  GdiplusStartup(&token, &startup, nullptr);
-  auto resource = FindResourceW(nullptr, MAKEINTRESOURCEW(201), RT_RCDATA);
-  if (resource) {
-    auto loaded = LoadResource(nullptr, resource);
-    auto size = SizeofResource(nullptr, resource);
-    auto data = LockResource(loaded);
-    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, size);
-    if (memory) {
-      auto ptr = GlobalLock(memory);
-      CopyMemory(ptr, data, size);
-      GlobalUnlock(memory);
-      if (SUCCEEDED(CreateStreamOnHGlobal(memory, TRUE, &imageStream)))
-        tango = Image::FromStream(imageStream);
-      else
-        GlobalFree(memory);
-    }
+  auto r = FindResourceW(nullptr, MAKEINTRESOURCEW(206), RT_RCDATA);
+  if (r) {
+    DWORD count = 0;
+    fontResource = AddFontMemResourceEx(LockResource(LoadResource(nullptr, r)),
+                                        SizeofResource(nullptr, r), nullptr, &count);
   }
 }
 void shutdown() {
-  delete tango;
-  if (imageStream)
-    imageStream->Release();
-  GdiplusShutdown(token);
+  if (fontResource)
+    RemoveFontMemResourceEx(fontResource);
 }
 void theme(int i) {
   switch (i) {
@@ -86,104 +99,64 @@ COLORREF text() { return rgb(colors.ink); }
 COLORREF muted() { return rgb(colors.muted); }
 COLORREF field() { return rgb(colors.field); }
 void background(HDC dc, int w, int h) {
-  Graphics g(dc);
-  g.SetSmoothingMode(SmoothingModeAntiAlias);
-  LinearGradientBrush gradient(Point(0, 0), Point(0, h), colors.top, colors.bottom);
-  Color stops[] = {colors.top, colors.middle,
-                   Color(colors.bottom.GetR(), colors.bottom.GetG(), colors.bottom.GetB()),
-                   colors.bottom};
-  REAL positions[] = {0.0f, 0.58f, 0.84f, 1.0f};
-  gradient.SetInterpolationColors(stops, positions, 4);
-  g.FillRectangle(&gradient, 0, 0, w, h);
-  GraphicsPath blob;
-  blob.AddEllipse((REAL)(w * 0.1), (REAL)(-h * 0.55), (REAL)(w * 1.1), (REAL)(h * 1.1));
-  PathGradientBrush glow(&blob);
-  glow.SetCenterColor(Color(105, 255, 255, 255));
-  Color edge(0, 255, 255, 255);
-  int count = 1;
-  glow.SetSurroundColors(&edge, &count);
-  g.FillPath(&glow, &blob);
-  SolidBrush top(Color(42, 234, 244, 253));
-  g.FillRectangle(&top, 0, 0, w, 52);
-  Pen rim(Color(120, 255, 255, 255));
-  g.DrawLine(&rim, 0, 52, w, 52);
+  int split = h * 58 / 100;
+  shape(dc, 0, 0, w, split, 0, colors.top, colors.middle);
+  shape(dc, 0, split, w, h - split, 0, colors.middle, colors.bottom);
+  shape(dc, 0, 0, w, 52, 0, Color(42, 234, 244, 253), Color(42, 234, 244, 253));
 }
 void panel(HDC dc, int x, int y, int w, int h, bool solid) {
-  if (w < 1 || h < 1)
-    return;
-  Graphics g(dc);
-  g.SetSmoothingMode(SmoothingModeAntiAlias);
-  auto shadow = rounded(RectF((REAL)x, (REAL)(y + 4), (REAL)w, (REAL)h), 14);
-  SolidBrush shade(Color(20, 0, 0, 0));
-  g.FillPath(&shade, shadow.get());
-  auto path = rounded(RectF((REAL)x, (REAL)y, (REAL)w, (REAL)h), 14);
-  Color bottom = colors.panel;
-  if (solid)
-    bottom.SetValue(
-        Color(244, colors.field.GetR(), colors.field.GetG(), colors.field.GetB()).GetValue());
-  LinearGradientBrush fill(
-      Point(x, y), Point(x, y + h),
-      Color(solid ? 244 : 110, colors.field.GetR(), colors.field.GetG(), colors.field.GetB()),
-      bottom);
-  g.FillPath(&fill, path.get());
-  Pen border(Color(solid ? 120 : 65, colors.field.GetR(), colors.field.GetG(), colors.field.GetB()),
-             1);
-  g.DrawPath(&border, path.get());
+  shape(dc, x, y + 4, w, h, 14, Color(20, 0, 0, 0), Color(20, 0, 0, 0));
+  shape(dc, x, y, w, h, 14,
+        Color(solid ? 244 : 110, colors.field.GetR(), colors.field.GetG(), colors.field.GetB()),
+        solid ? Color(244, colors.field.GetR(), colors.field.GetG(), colors.field.GetB())
+              : colors.panel);
 }
 void label(HDC dc, const std::wstring &s, int x, int y, int w, int h, int size, bool bold,
            bool secondary, bool accent) {
-  Graphics g(dc);
-  g.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
-  FontFamily family(L"Segoe UI");
-  Font font(&family, (REAL)size, bold ? FontStyleBold : FontStyleRegular, UnitPixel);
-  SolidBrush brush(accent ? colors.primary : secondary ? colors.muted : colors.ink);
-  StringFormat format;
-  format.SetTrimming(StringTrimmingEllipsisCharacter);
-  g.DrawString(s.c_str(), (int)s.size(), &font, RectF((REAL)x, (REAL)y, (REAL)w, (REAL)h), &format,
-               &brush);
+  auto font = CreateFontW(-size, 0, 0, 0, bold ? FW_BOLD : FW_NORMAL, FALSE, FALSE, FALSE,
+                          DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Nunito");
+  auto prev = SelectObject(dc, font);
+  SetTextColor(dc, rgb(accent ? colors.primary : secondary ? colors.muted : colors.ink));
+  SetBkMode(dc, TRANSPARENT);
+  RECT r{x, y, x + w, y + h};
+  DrawTextW(dc, s.c_str(), (int)s.size(), &r, DT_NOPREFIX | DT_END_ELLIPSIS);
+  SelectObject(dc, prev);
+  DeleteObject(font);
 }
 void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
-  Graphics g(i.hDC);
-  g.SetSmoothingMode(SmoothingModeAntiAlias);
-  RectF r((REAL)i.rcItem.left + 1, (REAL)i.rcItem.top + 1,
-          (REAL)(i.rcItem.right - i.rcItem.left) - 2, (REAL)(i.rcItem.bottom - i.rcItem.top) - 2);
-  auto path = rounded(r, std::min(10.0f, r.Height / 2));
-  bool disabled = (i.itemState & ODS_DISABLED) != 0;
-  bool down = (i.itemState & ODS_SELECTED) != 0;
+  int x = i.rcItem.left + 1, y = i.rcItem.top + 1, w = i.rcItem.right - i.rcItem.left - 2,
+      h = i.rcItem.bottom - i.rcItem.top - 2;
   Color base = danger ? Color(220, 76, 70) : primary ? colors.primary : colors.field;
-  Color a = primary || danger
-                ? Color(disabled ? 135 : 255, (BYTE)std::min(255, (int)base.GetR() + 35),
-                        (BYTE)std::min(255, (int)base.GetG() + 25),
-                        (BYTE)std::min(255, (int)base.GetB() + 15))
-                : Color(down ? 245 : 210, base.GetR(), base.GetG(), base.GetB());
-  Color b = primary || danger ? base : Color(135, base.GetR(), base.GetG(), base.GetB());
-  LinearGradientBrush fill(PointF(r.X, r.Y), PointF(r.X, r.GetBottom()), a, b);
-  g.FillPath(&fill, path.get());
-  Pen border(Color(140, base.GetR(), base.GetG(), base.GetB()));
-  g.DrawPath(&border, path.get());
-  wchar_t text[256];
-  GetWindowTextW(i.hwndItem, text, 256);
-  FontFamily family(L"Segoe UI");
-  Font font(&family, 13, FontStyleBold, UnitPixel);
-  SolidBrush ink(disabled ? colors.muted : (primary || danger ? Color(255, 255, 255) : colors.ink));
-  StringFormat format;
-  format.SetAlignment(StringAlignmentCenter);
-  format.SetLineAlignment(StringAlignmentCenter);
-  format.SetTrimming(StringTrimmingEllipsisCharacter);
-  g.DrawString(text, -1, &font, r, &format, &ink);
+  shape(i.hDC, x, y, w, h, 10,
+        Color(245, std::min(255, base.GetR() + 25), std::min(255, base.GetG() + 20),
+              std::min(255, base.GetB() + 15)),
+        base);
+  wchar_t title[256];
+  GetWindowTextW(i.hwndItem, title, 256);
+  auto font = CreateFontW(-13, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, 0, 0,
+                          CLEARTYPE_QUALITY, 0, L"Nunito");
+  auto prev = SelectObject(i.hDC, font);
+  SetTextColor(i.hDC, (i.itemState & ODS_DISABLED) ? rgb(colors.muted)
+                      : (primary || danger)        ? RGB(255, 255, 255)
+                                                   : rgb(colors.ink));
+  SetBkMode(i.hDC, TRANSPARENT);
+  RECT r{x + 4, y, w + x - 4, y + h};
+  DrawTextW(i.hDC, title, -1, &r,
+            DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
   if (i.itemState & ODS_FOCUS) {
-    Pen focus(colors.primary);
-    auto rect = r;
-    rect.Inflate(-3, -3);
-    auto ring = rounded(rect, 7);
-    g.DrawPath(&focus, ring.get());
+    InflateRect(&r, -3, -3);
+    DrawFocusRect(i.hDC, &r);
   }
+  SelectObject(i.hDC, prev);
+  DeleteObject(font);
 }
 void mascot(HDC dc, int x, int y, int size) {
-  if (tango && tango->GetLastStatus() == Ok) {
-    Graphics g(dc);
-    g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
-    g.DrawImage(tango, x, y, size, size);
-  }
+  auto r = FindResourceW(nullptr, MAKEINTRESOURCEW(201), RT_RCDATA);
+  if (!r)
+    return;
+  Surface s(dc, x, y, size, size);
+  if (s.data)
+    tangos_image(s.data, size, size, (const unsigned char *)LockResource(LoadResource(nullptr, r)),
+                 SizeofResource(nullptr, r));
 }
 } // namespace skin

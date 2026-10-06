@@ -6,7 +6,7 @@
   cards, tours, full settings/key vault and full descriptor encyclopedia/run-dock
   screens remain. A compact manual Encyclopedia is implemented.
 - Uses external Git, gh, Python and build tools. This is a single app executable,
-  not a self-contained decomp/Git toolchain. MSVC build path is unverified.
+  not a self-contained decomp/Git toolchain. The supported application build uses MinGW and Rust GNU.
 - Known SM64DS check adapters plus local argv overrides; full `tangos.json`
   schema parsing, argument editors and automatic descriptor migration remain.
 - Settings and command overrides are global for the selected repo, not a profile
@@ -38,3 +38,7 @@
 - External programs/hooks and concurrent agents are outside the safety boundary;
   see SECURITY.md. The app cannot promise to identify every proprietary asset or
   credential encoding, or police edits made outside it.
+
+The renderer is TinySkia CPU rasterization with Win32 Nunito text/input controls.
+The supported release toolchain is MinGW plus Rust GNU; MSVC is not currently supported.
+Full Console screen parity and arbitrary DPI/layout configurations still require further testing.

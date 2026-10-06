@@ -180,7 +180,8 @@ void about() {
                "changes before publication.\n\n" +
                    resourceText(204) + "\n\nMinGW-w64 libwinpthread\n" + resourceText(202) +
                    "\n\nGCC Runtime Library Exception\n" + resourceText(203) + "\n\nGPLv3\n" +
-                   resourceText(205),
+                   resourceText(205) + "\n\nNunito\n" + resourceText(207) +
+                   "\n\nRaster dependencies\n" + resourceText(208),
                true);
 }
 void fillChecks() {
@@ -351,7 +352,7 @@ void layout(int w, int h) {
     MoveWindow(logEdit, 44, 572, cw - 60, std::max(42, h - 670), TRUE);
     MoveWindow(agentsButton, 44, h - 74, 130, 32, TRUE);
     MoveWindow(configButton, cw - 122, h - 74, 106, 32, TRUE);
-    MoveWindow(activityLabel, 190, h - 70, std::max(90, cw - 322), 24, TRUE);
+
     MoveWindow(refreshButton, rail + 218, 85, 96, 30, TRUE);
     MoveWindow(statusEdit, rail + 16, 376, 308, std::max(70, h - 540), TRUE);
     MoveWindow(toolboxButton, 30, h - 74, 138, 32, TRUE);
@@ -388,8 +389,8 @@ void paintChrome(HDC dc, int w, int h) {
                 L"review changes,\nand watch checks and builds live.",
                 x + 110, y + 124, 570, 44, 14, false, true);
     skin::label(dc, L"or", x + 365, y + 221, 40, 24, 12, false, true);
-    skin::label(dc, L"SM64DS  ·  Tango / SCOPIC64 / your fork", x + 168, y + 317, 470, 24, 13,
-                true);
+    skin::label(dc, L"Your repository · your remotes · your workflow", x + 168, y + 317, 470, 24,
+                13, true);
     skin::label(dc, L"Your own ROM and compiler stay on your machine.", x + 190, y + 342, 460, 24,
                 12, false, true);
     return;
@@ -441,7 +442,7 @@ void paintChrome(HDC dc, int w, int h) {
     skin::label(dc, L"Repository status", rail + 16, 345, 308, 24, 14, true);
   skin::label(dc, L"Port-only  ·  Review before push", rail + 16, h - 139, 300, 23, 12, true, true);
   skin::mascot(dc, w - 137, h - 127, 96);
-  skin::label(dc, L"v0.1.0", w - 74, h - 27, 60, 18, 10, false, true);
+  skin::label(dc, L"v0.2.0", w - 74, h - 27, 60, 18, 10, false, true);
 }
 void snapshot(const fs::path &path) {
   RECT rect;
@@ -531,9 +532,9 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   case WM_CREATE: {
     window = h;
     uiFont = CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, 0, 0,
-                         CLEARTYPE_QUALITY, 0, L"Segoe UI");
+                         CLEARTYPE_QUALITY, 0, L"Nunito");
     monoFont = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, 0, 0,
-                           CLEARTYPE_QUALITY, FIXED_PITCH, L"Consolas");
+                           CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Nunito");
     titleLabel = control(L"STATIC", L"TangOS Lite   |   native repository workbench", 0);
     repoLabel = control(L"STATIC", L"Repository", 0);
     repoEdit = control(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP);
@@ -569,7 +570,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     logLabel = control(L"STATIC", L"Live output - complete logs preserved on disk", 0);
     auto style = ES_MULTILINE | ES_READONLY | ES_AUTOHSCROLL | ES_AUTOVSCROLL | WS_HSCROLL |
                  WS_VSCROLL | WS_TABSTOP;
-    statusEdit = control(L"EDIT", L"Select an SM64DS Git repository to begin.", style);
+    statusEdit = control(L"EDIT", L"Select a Git repository to begin.", style);
     logEdit = control(L"EDIT",
                       L"Git, Python, GitHub CLI and build tools are external "
                       L"dependencies.\r\nNo ROM data is bundled.\r\n",
@@ -637,7 +638,14 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     HDC dc = BeginPaint(h, &ps);
     RECT r;
     GetClientRect(h, &r);
-    paintChrome(dc, r.right, r.bottom);
+    HDC buffer = CreateCompatibleDC(dc);
+    HBITMAP bitmap = CreateCompatibleBitmap(dc, r.right, r.bottom);
+    auto previous = SelectObject(buffer, bitmap);
+    paintChrome(buffer, r.right, r.bottom);
+    BitBlt(dc, 0, 0, r.right, r.bottom, buffer, 0, 0, SRCCOPY);
+    SelectObject(buffer, previous);
+    DeleteObject(bitmap);
+    DeleteDC(buffer);
     EndPaint(h, &ps);
     return 0;
   }
@@ -688,8 +696,9 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       return (LRESULT)fieldBrush;
     }
     SetTextColor((HDC)w, skin::muted());
-    SetBkMode((HDC)w, TRANSPARENT);
-    return (LRESULT)GetStockObject(NULL_BRUSH);
+    SetBkColor((HDC)w, skin::field());
+    SetBkMode((HDC)w, OPAQUE);
+    return (LRESULT)fieldBrush;
   case WM_CTLCOLOREDIT:
   case WM_CTLCOLORLISTBOX:
     SetTextColor((HDC)w, skin::text());
@@ -877,6 +886,14 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (resourceText(202).find("mingw-w64") == std::string::npos ||
             resourceText(203).find("GCC RUNTIME") == std::string::npos)
           smokeExit = 1;
+        HDC fontDC = GetDC(h);
+        auto oldFont = SelectObject(fontDC, uiFont);
+        wchar_t actualFont[128]{};
+        GetTextFaceW(fontDC, 128, actualFont);
+        if (std::wstring(actualFont) != L"Nunito")
+          smokeExit = 1;
+        SelectObject(fontDC, oldFont);
+        ReleaseDC(h, fontDC);
         auto screen = value(statusEdit);
         auto full = read(logPath);
         if (screen.find("main") == screen.npos || full.find("fixture.cpp:42") == full.npos ||
@@ -884,7 +901,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           smokeExit = 1;
         write(config.parent_path() / "gui-smoke-report.txt",
               std::string(smokeExit ? "FAIL" : "PASS") +
-                  " native window: repository selection, status, check "
+                  " native window: embedded Nunito, TinySkia, repository selection, status, check "
                   "execution, UI log, durable log, responsive timer ticks=" +
                   std::to_string(smokeTicks) + "\n" + screen + "\n" + full);
         snapshot(config.parent_path() / "workspace.bmp");
@@ -904,6 +921,16 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (smoke && smokePhase == 2)
       ++smokeTicks;
     if (smoke && smokePhase == 0) {
+      set(activityLabel, "Previous status to replace completely.");
+      UpdateWindow(activityLabel);
+      set(activityLabel, "Ready - port-only safety is enabled by default.");
+      UpdateWindow(activityLabel);
+      HDC statusDC = GetDC(activityLabel);
+      if ((HBRUSH)SendMessageW(h, WM_CTLCOLORSTATIC, (WPARAM)statusDC, (LPARAM)activityLabel) ==
+              GetStockObject(NULL_BRUSH) ||
+          GetBkMode(statusDC) != OPAQUE)
+        smokeExit = 1;
+      ReleaseDC(activityLabel, statusDC);
       snapshot(config.parent_path() / "landing.bmp");
       smokePhase = 1;
       PostMessageW(h, WM_COMMAND, SELECT, 0);
