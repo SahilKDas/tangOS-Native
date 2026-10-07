@@ -1,46 +1,21 @@
-# Verified Windows release — 2026-10-06
+# Windows release verification — 2026-10-07
 
-TangOS Lite 0.2.0, Windows x64, TinySkia and embedded Nunito release. GCC 14.1.0 (MSYS2 UCRT64 Rev3),
-CMake 3.29.3, Rust 1.98.1 with the Windows GNU target, Release `-O3`, static GCC runtime, stripped executable, PE timestamp
-disabled. Only Windows system DLL imports, including GDI, CNG and UCRT.
+TangOS Lite 0.3.0, Windows x64; C++17/Win32, statically embedded TinySkia and Nunito. GCC 14.1.0 UCRT64, CMake 3.29.3, Rust 1.98.1 GNU target. Release optimization, stripped executable and disabled PE timestamp. No bundled browser or compiler/toolchain.
 
-| Measurement | Result |
-|---|---|
-| Executable | `TangOSLite.exe` |
-| Exact size | **2,954,752 bytes** |
-| Decimal MB | **2.955 MB** |
-| Budget | Below 10 MB; strictly below 50 MB |
-| Two clean build directories | Byte-identical SHA-256 |
-| SHA-256 | `494A845CD31767D9D0DD9D6C0266095D85CACFC136F2FA9833D8EBCD3680635E` |
-| Automated core / disposable Git assertions | **60 passed** |
-| Packaged executable launch and GUI workflow | **Passed** |
-| Packaged SHA-256 match / mismatch behavior | **Passed** |
-| Real SM64DS `port_refcheck` script | **337 references, all resolve** |
+The generated release SIZE.txt records exact bytes, SHA-256 and DLL imports. Two independent build directories must produce the same executable hash; the release script normally creates both from scratch. This run also rebuilt both after the final capture/ownership cleanup fixes and compared them again.
 
-The packaged native window selected and remembered a disposable repository with
-spaces in its path, displayed branch/status/worktrees, switched both navigation
-views, opened the Encyclopedia, ran the discovered check, displayed a file:line
-diagnostic, and preserved the complete log. Its timer continued responding
-while the check ran. Embedded Nunito selection, repeated status updates and a
-TinySkia BGRA raster replacement regression test passed. Renders were generated for landing, controller, repository,
-manual tools, and all five themes. Core tests independently verified descendant
-cancellation and log preservation. Native ROM hashing used an innocuous `abc`
-fixture with its known SHA-256, not game data. Embedded notices were verified.
+Verification:
 
-Git integration used only disposable local repositories, peers, remotes and
-worktrees: fetch, divergent merge, rebase, fast-forward pull, conflicts, commits,
-outgoing review, protected/ignored paths, secrets, and intermediate forbidden
-history. GitHub/fork/PR adapters were tested for command construction; no real
-PR, push or authentication was performed against GitHub.
+- 60 core/disposable-Git assertions: configuration, commands, repository/worktree detection, fetch/pull/merge/rebase, conflicts, staged/outgoing previews, forbidden assets/credentials/history, complete logs and process-tree cancellation.
+- 38 fleet/descriptor/vault assertions: typed commands and safe paths, encrypted DPAPI keys, simultaneous API agents against a local harmless HTTP fixture, isolated worktrees and scoped instructions, duplicate-queue prevention, source-change rejection, independent checks, reviewed commit, explicit landing and port-only refusal, persistence, CLI cancellation and authenticated MCP execution including more than 128 requests.
+- Native TinySkia pixel regression test and Python instruction-adapter test, including refusal to execute a driver without an instruction hook.
+- Packaged executable SHA-256 match/mismatch tests use an innocuous abc file, not a ROM.
+- Packaged native window selection → status → check → complete log workflow. Timers continue during execution. Packaged CLI agent → isolated worktree → instructions → independent check → complete diff review also passes with UI messages continuing.
+- Native window captures cover Controller, Viewer, Encyclopedia, Settings, agent detail/profile, Tour, landing/manual Git screens and five palettes. Capture review corrected card text overlap and native dropdown selection rendering.
 
-Port/compiler/ROM-dependent builds, real-game byte matching, and real GitHub
-checks were not validated end-to-end. Agent support exports scoped repository
-instructions and coordination handoffs; provider/fleet execution is unfinished.
-Console's shell/design language is reproduced, but full screen/interaction parity
-is unfinished. See LIMITATIONS.md, UI-PARITY.md and SECURITY.md.
+Tests use disposable local repositories and fake API keys/providers. No paid provider, real GitHub push/PR creation, private compiler, Nintendo assets or game ROM was used. Port/compiler/real-game matching remains dependent on user-owned inputs. Agent process success alone is not matching proof. Full pixel/interaction parity across every auxiliary Console screen is not established; see UI-PARITY.md and LIMITATIONS.md.
 
-`scripts/release.ps1` repeats the release recipe, checks hashes/size, and launches
-the final packaged executable. Use the same toolchain and checkout line-ending
-policy to reproduce these bytes. Third-party notices are embedded so the app
-itself remains one portable executable.
+Build/test/release scripts and the short fleet guide are included in source. Third-party notices are embedded, so the application itself requires just one portable executable.
+
+Final executable: 3599872 bytes (3.6 decimal MB). SHA-256: 22CBC9C0CA77DA090AF539A83EB9B8353F46AD4B0A8D24DB4C0D2A459042997D.
 

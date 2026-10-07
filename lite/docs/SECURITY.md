@@ -8,7 +8,8 @@
 - Every process runs inside a kill-on-close Job Object, assigned while suspended.
   Failure to contain the process refuses execution. Cancellation terminates
   descendants. Durable logs are flushed continuously; UI output is bounded.
-- No automatic mass staging, reset, clean, force push, or PR merge is exposed.
+- No background publication, reset, clean, force push, or PR merge is exposed.
+  Agent Review explicitly stages all audited changes in its isolated worktree.
   Explicit stage paths reject traversal and protected paths. Merge/rebase/pull
   require a clean tree; operations that alter history/tree require confirmation.
 - Commit scans the entire index, including pre-staged files. Renames are examined

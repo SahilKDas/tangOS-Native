@@ -24,7 +24,7 @@ with a guessed compiler command.
   pipes, Job Object process-tree cancellation, durable logs.
 - `repository`: Git root discovery, status, refs, worktrees, explicit staging,
   staged and outgoing-history review, GitHub CLI adapters, upstream comparison.
-- `ui`: native controls, one background worker, streamed log events and explicit
+- `ui`: native controls, background workers, streamed log events and explicit
   approval dialogs. No Git or shell strings assembled by controls.
 
 Git and gh resolve from PATH. Credentials stay in their existing credential

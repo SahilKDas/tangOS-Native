@@ -340,8 +340,9 @@ void Fleet::land(const std::string &id) {
         {{"out", utf8((dir / "results.output").wstring())},
          {"wl", utf8(job->state.worklist.wstring())}, {"no_claims", true}},
         job->state.worktree, true, true);
-      job->state.log = dir / "land.log";
-      auto result = job->runner.run(command, events, job->state.log);
+      auto landLog = dir / "land.log";
+      { std::lock_guard<std::mutex> lock(mutex); job->state.log = landLog; }
+      auto result = job->runner.run(command, events, landLog);
       if (result.code) throw std::runtime_error("Land tool failed; inspect land.log");
       audit(job);
       update("verifying", "Checking landed changes independently");
@@ -450,6 +451,7 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
     update("blocked", "Another Console instance owns this agent");
     return;
   }
+  struct OwnershipGuard { HANDLE h; ~OwnershipGuard() { CloseHandle(h); } } ownershipGuard{ownership};
   try {
     auto secrets = vault.values();
     if (job->state.worktree.empty()) {
@@ -656,7 +658,6 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
     if (events)
       events("[" + job->state.spec.name + "] " + e.what() + "\n");
   }
-  CloseHandle(ownership);
   {
     std::lock_guard<std::mutex> lock(mutex);
     if (job->state.spec.kind != "mcp" || job->state.phase != "running")

@@ -470,8 +470,10 @@ void snapshot(const fs::path &path) {
   EnumChildWindows(
       window,
       [](HWND child, LPARAM param) -> BOOL {
-        if (GetParent(child) != window || !(GetWindowLongW(child, GWL_STYLE) & WS_VISIBLE))
-          return TRUE;
+        // Render nested Console controls too; hidden top-level smoke windows
+        // cannot use IsWindowVisible, so inspect visibility up to this window.
+        for (HWND ancestor = child; ancestor && ancestor != window; ancestor = GetParent(ancestor))
+          if (!(GetWindowLongW(ancestor, GWL_STYLE) & WS_VISIBLE)) return TRUE;
         auto dc = (HDC)param;
         RECT bounds;
         GetWindowRect(child, &bounds);
@@ -492,7 +494,7 @@ void snapshot(const fs::path &path) {
           selection.hwndItem = child;
           selection.hDC = dc;
           selection.rcItem = {1, 1, bounds.right - bounds.left - 24, 29};
-          SendMessageW(window, WM_DRAWITEM, selection.CtlID, (LPARAM)&selection);
+          SendMessageW(GetParent(child), WM_DRAWITEM, selection.CtlID, (LPARAM)&selection);
         }
         RestoreDC(dc, state);
         return TRUE;
