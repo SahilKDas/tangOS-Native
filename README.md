@@ -11,6 +11,7 @@ it knows the repo's tools, compiler, data source, and rules.
 | App | What it is | Status |
 |---|---|---|
 | **tangOS Console** | Downloadable desktop app. Exposes a repo's tools as an **MCP server** an AI connects to, with a **live viewer** to watch the AI drive them in real time. | in progress (`console/`) |
+| **TangOS Lite** | Portable Windows C++ workbench: repository status, cancellable checks/logs, reviewed Git operations and GitHub CLI integration. No browser runtime. | usable first release (`lite/`) |
 | **tangOS Docs** | Browsable catalog of a repo's tools, generated from `tangos.json`. | planned (`docs/`) |
 | **tangOS Atlas** | Progress atlas / treemap (formerly Chaos Viewer). | planned rebrand |
 
