@@ -7,7 +7,7 @@ TangOS Lite 0.4 provides a native backend callable from the executable and a rea
 Place requests and responses outside the selected Git checkout. Use:
 
 ```powershell
-TangOSLite.exe --backend C:\work\decomp C:\Users\you\AppData\Local\TangOSLite request.json response.json
+.\TangOSLite.exe --backend C:\work\decomp C:\Users\you\AppData\Local\TangOSLite request.json response.json
 ```
 
 Use `-` instead of the repository path for project registration, preferences, reports and external-connection services that do not require a checkout. Each request is `{ "method": "catalog", "arguments": {} }`. The catalog lists supported methods. Exit 0 means the request was handled; inspect the returned HTTP status or tool exit code too. Errors return JSON and exit 1.

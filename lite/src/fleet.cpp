@@ -307,6 +307,7 @@ void Fleet::start(const std::string &id, bool execute) {
   if (job->worker.joinable())
     job->worker.join();
   job->runner.reset();
+  job->executionRole.clear();
   job->active = true;
   job->worker = std::thread([this, job, execute] {
     try {
@@ -408,6 +409,7 @@ Json Fleet::schedule(const std::shared_ptr<Job> &job, const fs::path &cwd) {
     job->runtimeRole = rung == "Refiner" ? rung : role;
   } else
     job->runtimeRole = role;
+  job->executionRole = role;
   const Tool *tool = descriptor.role(role == "Refiner"  ? "refineScheduler"
                                      : role == "Random" ? "randomScheduler"
                                                         : "scheduler");
@@ -564,8 +566,12 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       auto prompt = dir / "instructions.txt", wl = dir / "worklist.jsonl",
            out = dir / "results.output";
       Repository r(job->runner, job->state.worktree, settings);
-      std::string instructions = "TangOS Lite coordinated agent\nRole: " + job->state.spec.role +
-                                 "\n" + r.agentHandoff() + "\n";
+      auto executionRole =
+          job->state.spec.role == "Unassigned"
+              ? (job->executionRole.empty() ? std::string("Hard matcher") : job->executionRole)
+              : job->state.spec.role;
+      std::string instructions =
+          "TangOS Lite coordinated agent\nRole: " + executionRole + "\n" + r.agentHandoff() + "\n";
       auto project = descriptor.document.at("project");
       for (auto field : {"readFirst", "rules", "submitting", "knownWalls", "nearMissNote"})
         instructions += project.value(field, std::string()) + "\n";
@@ -574,7 +580,7 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
         auto rules =
             Json::parse(std::string((char *)LockResource(LoadResource(nullptr, roleResource)),
                                     SizeofResource(nullptr, roleResource)));
-        instructions += rules.value(job->state.spec.role, std::string()) + "\n";
+        instructions += rules.value(executionRole, std::string()) + "\n";
       }
       instructions += "Keep changes in this isolated worktree. Do not commit or push. Never "
                       "include ROM data, extracted assets, credentials or excluded local files. ";

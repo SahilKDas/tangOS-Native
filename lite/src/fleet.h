@@ -35,7 +35,7 @@ AgentState parseAgent(const Json &json);
 class Fleet {
   struct Job {
     AgentState state;
-    std::string runtimeRole;
+    std::string runtimeRole, executionRole;
     Runner runner;
     std::thread worker;
     std::atomic<bool> active{false};

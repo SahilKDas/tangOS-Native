@@ -108,7 +108,8 @@ if __name__=='__main__':main()
                {"command", "{python} -c {value}"},
                {"args",
                 Json::array({{{"name", "value"}, {"type", "string"}, {"required", true}}})}}})}};
-    write(repo / "tools/land.py", "from pathlib import Path\nPath('port/landed.txt').write_text('landed fixture')\n");
+    write(repo / "tools/land.py",
+          "from pathlib import Path\nPath('port/landed.txt').write_text('landed fixture')\n");
     write(repo / "tangos.json", descriptor.dump(2));
     git({"add", "."});
     git({"commit", "-m", "Disposable fleet fixture"});
@@ -199,16 +200,23 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
                "isolated output exists");
         expect(read(state.log).find("fixture-secret-123456") == std::string::npos,
                "provider key not logged");
+        expect(read(state.prompt).find("Role: Hard matcher") != std::string::npos,
+               "resolved automatic role reaches driver instructions");
         expect(read(state.prompt).find("NESTED_RULE") != std::string::npos,
                "scoped instructions delivered");
       }
       expect(!fs::exists(repo / "port/one.txt") && !fs::exists(repo / "port/two.txt"),
              "main checkout untouched by fleet");
       reject([&] { fleet.land(first); }, "port-only landing refused");
-      auto decompSettings = settings; decompSettings.portOnly = false;
-      fleet.setPolicy(decompSettings); fleet.land(first); wait(fleet);
-      for (auto &state : fleet.snapshot()) if (state.id == first)
-        expect(state.phase == "review" && fs::exists(state.worktree / "port/landed.txt"), "explicit isolated landing and verification");
+      auto decompSettings = settings;
+      decompSettings.portOnly = false;
+      fleet.setPolicy(decompSettings);
+      fleet.land(first);
+      wait(fleet);
+      for (auto &state : fleet.snapshot())
+        if (state.id == first)
+          expect(state.phase == "review" && fs::exists(state.worktree / "port/landed.txt"),
+                 "explicit isolated landing and verification");
       fleet.setPolicy(settings);
       auto diff = fleet.review(first);
       expect(diff.find("one.txt") != diff.npos, "complete agent diff review");
