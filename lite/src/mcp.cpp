@@ -41,7 +41,7 @@ struct McpServer::Impl {
         }
         result = {{"protocolVersion", "2025-03-26"},
                   {"capabilities", {{"tools", Json::object()}}},
-                  {"serverInfo", {{"name", "TangOS Lite"}, {"version", "0.3.0"}}},
+                  {"serverInfo", {{"name", "TangOS Lite"}, {"version", "0.4.0"}}},
                   {"instructions", "Pull next_batch and follow its scoped AGENTS.md instructions. "
                                    "Work only in the assigned worktree."}};
       } else if (method == "ping")
@@ -71,7 +71,16 @@ struct McpServer::Impl {
               {{"type", "object"}, {"properties", Json::object()}});
           add("progress", "Read agent states and queue progress",
               {{"type", "object"}, {"properties", Json::object()}});
+          add("backend_read",
+              "Read local backend services. External connections require the user's enabled "
+              "configuration; mutations are forbidden to agents.",
+              {{"type", "object"},
+               {"properties",
+                {{"method", {{"type", "string"}}}, {"arguments", {{"type", "object"}}}}},
+               {"required", Json::array({"method"})}});
           for (auto &tool : descriptor.tools) {
+            if (!fleet.toolEnabled(tool.id))
+              continue;
             Json properties = Json::object(), required = Json::array();
             for (auto &arg : tool.args) {
               Json p = {{"type", arg.type == "enum" ? "string" : arg.type},
@@ -91,9 +100,20 @@ struct McpServer::Impl {
           auto name = params.at("name").get<std::string>();
           auto args = params.value("arguments", Json::object());
           std::string text;
-          if (name == "next_batch")
-            text = fleet.takeBatch(agent).dump(2);
-          else if (name == "finish_batch") {
+          if (name == "backend_read")
+            text =
+                fleet.backend(args.at("method"), args.value("arguments", Json::object())).dump(2);
+          else if (name == "next_batch") {
+            auto deadline = GetTickCount64() + std::clamp(args.value("timeoutMs", 45000), 0, 45000);
+            Json batch;
+            do {
+              batch = fleet.takeBatch(agent);
+              if (batch["status"] != "empty" || stopping || GetTickCount64() >= deadline)
+                break;
+              Sleep(100);
+            } while (true);
+            text = batch.dump(2);
+          } else if (name == "finish_batch") {
             fleet.finishBatch(agent);
             text = "Batch finished. User verification/review required; do not commit or push.";
           } else if (name == "progress") {

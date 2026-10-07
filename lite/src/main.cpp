@@ -1,6 +1,7 @@
 #include "repository.h"
 #include "skin.h"
 #include "console_ui.h"
+#include "backend.h"
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <fstream>
@@ -457,7 +458,7 @@ void paintChrome(HDC dc, int w, int h) {
     skin::label(dc, L"Repository status", rail + 16, 345, 308, 24, 14, true);
   skin::label(dc, L"Port-only  ·  Review before push", rail + 16, h - 139, 300, 23, 12, true, true);
   skin::mascot(dc, w - 137, h - 127, 96);
-  skin::label(dc, L"v0.3.0", w - 74, h - 27, 60, 18, 10, false, true);
+  skin::label(dc, L"v0.4.0", w - 74, h - 27, 60, 18, 10, false, true);
 }
 void snapshot(const fs::path &path) {
   RECT rect;
@@ -473,7 +474,8 @@ void snapshot(const fs::path &path) {
         // Render nested Console controls too; hidden top-level smoke windows
         // cannot use IsWindowVisible, so inspect visibility up to this window.
         for (HWND ancestor = child; ancestor && ancestor != window; ancestor = GetParent(ancestor))
-          if (!(GetWindowLongW(ancestor, GWL_STYLE) & WS_VISIBLE)) return TRUE;
+          if (!(GetWindowLongW(ancestor, GWL_STYLE) & WS_VISIBLE))
+            return TRUE;
         auto dc = (HDC)param;
         RECT bounds;
         GetWindowRect(child, &bounds);
@@ -1011,6 +1013,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   int argc;
   auto argv = CommandLineToArgvW(GetCommandLineW(), &argc);
   try {
+    if (argc == 6 && std::wstring(argv[1]) == L"--backend") {
+      fs::path repository = std::wstring(argv[2]) == L"-" ? fs::path() : fs::path(argv[2]);
+      fs::path data = argv[3];
+      auto request = Json::parse(read(fs::path(argv[4])));
+      Settings prefs = loadSettings(data / "settings.ini");
+      Vault vault(data / "vault");
+      auto result = Backend(repository, data, prefs, vault.values())
+                        .invoke(request.at("method"), request.value("arguments", Json::object()));
+      write(fs::path(argv[5]), result.dump(2));
+      LocalFree(argv);
+      return 0;
+    }
     if (argc == 4 && std::wstring(argv[1]) == L"--verify-rom") {
       auto expected = trim(utf8(argv[3]));
       if (expected.size() != 64 ||
@@ -1080,6 +1094,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     CoUninitialize();
     return (int)msg.wParam;
   } catch (const std::exception &e) {
+    if (argc == 6 && std::wstring(argv[1]) == L"--backend") {
+      write(fs::path(argv[5]), Json({{"error", e.what()}}).dump(2));
+      return 1;
+    }
     if (argc > 1 && std::wstring(argv[1]) == L"--verify-rom") {
       std::cerr << e.what() << "\n";
       return 1;

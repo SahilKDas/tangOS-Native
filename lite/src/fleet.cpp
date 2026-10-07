@@ -1,4 +1,5 @@
 #include "fleet.h"
+#include "backend.h"
 #include <wincrypt.h>
 #include <algorithm>
 #include <fstream>
@@ -224,6 +225,8 @@ static std::string target(const Json &row) {
 void Fleet::enqueue(const std::string &id, const Json &rows) {
   if (!rows.is_array())
     throw std::runtime_error("Worklist must be an array");
+  auto claims = backend("claims.read", Json::object());
+
   std::lock_guard<std::mutex> lock(mutex);
   auto job = jobs.at(id);
   std::set<std::string> taken;
@@ -232,7 +235,8 @@ void Fleet::enqueue(const std::string &id, const Json &rows) {
       taken.insert(target(row));
   Json fresh = Json::array();
   for (auto &row : rows) {
-    if (row.value("matched", false) || row.contains("noMatch") || row.contains("claim"))
+    if (heldTarget(row, claims) || row.value("matched", false) || row.value("noMatch", false) ||
+        row.contains("claim"))
       throw std::runtime_error("Target is already matched, exempt or externally claimed");
     auto ref = target(row);
     if (ref.empty() || ref == ":")
@@ -321,41 +325,62 @@ void Fleet::land(const std::string &id) {
   {
     std::lock_guard<std::mutex> lock(mutex);
     job = jobs.at(id);
-    if (settings.portOnly) throw std::runtime_error("Landing decomp results may change src/. Disable port-only mode explicitly first.");
-    if (job->active) throw std::runtime_error("Stop agent before landing results");
-    if (!tool) throw std::runtime_error("No console.land tool declared by this repository");
-    if (!fs::exists(directory / id / "results.output")) throw std::runtime_error("No driver results.output exists for this agent");
+    if (settings.portOnly)
+      throw std::runtime_error(
+          "Landing decomp results may change src/. Disable port-only mode explicitly first.");
+    if (job->active)
+      throw std::runtime_error("Stop agent before landing results");
+    if (!tool)
+      throw std::runtime_error("No console.land tool declared by this repository");
+    if (!fs::exists(directory / id / "results.output"))
+      throw std::runtime_error("No driver results.output exists for this agent");
   }
-  if (job->worker.joinable()) job->worker.join();
-  job->runner.reset(); job->active = true;
+  if (job->worker.joinable())
+    job->worker.join();
+  job->runner.reset();
+  job->active = true;
   job->worker = std::thread([this, job, tool] {
     auto update = [&](const std::string &phase, const std::string &detail) {
       std::lock_guard<std::mutex> lock(mutex);
-      job->state.phase = phase; job->state.detail = detail; saveLocked();
+      job->state.phase = phase;
+      job->state.detail = detail;
+      saveLocked();
     };
     try {
       auto dir = directory / job->state.id;
       update("landing", "Applying declared land tool in isolated worktree");
       auto command = toolCommand(descriptor, *tool,
-        {{"out", utf8((dir / "results.output").wstring())},
-         {"wl", utf8(job->state.worklist.wstring())}, {"no_claims", true}},
-        job->state.worktree, true, true);
+                                 {{"out", utf8((dir / "results.output").wstring())},
+                                  {"wl", utf8(job->state.worklist.wstring())},
+                                  {"no_claims", true}},
+                                 job->state.worktree, true, true);
       auto landLog = dir / "land.log";
-      { std::lock_guard<std::mutex> lock(mutex); job->state.log = landLog; }
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        job->state.log = landLog;
+      }
       auto result = job->runner.run(command, events, landLog);
-      if (result.code) throw std::runtime_error("Land tool failed; inspect land.log");
+      if (result.code)
+        throw std::runtime_error("Land tool failed; inspect land.log");
       audit(job);
       update("verifying", "Checking landed changes independently");
       int gates = 0;
       for (auto &check : discoverChecks(job->state.worktree, settings)) {
-        if (!check.available || check.name == "ROM verification") continue;
-        auto result = job->runner.run(check.command, events, dir / ("land-verify-" + std::to_string(gates++) + ".log"));
-        if (result.code) throw std::runtime_error("Landed changes failed: " + check.name);
+        if (!check.available || check.name == "ROM verification")
+          continue;
+        auto result = job->runner.run(check.command, events,
+                                      dir / ("land-verify-" + std::to_string(gates++) + ".log"));
+        if (result.code)
+          throw std::runtime_error("Landed changes failed: " + check.name);
       }
       audit(job);
-      update("review", gates ? "Landed changes passed checks; review complete diff" : "Landed changes unverified; no available gates");
+      update("review", gates ? "Landed changes passed checks; review complete diff"
+                             : "Landed changes unverified; no available gates");
     } catch (const std::exception &e) {
-      try { update(job->runner.isCancelled() ? "cancelled" : "failed", e.what()); } catch (...) {}
+      try {
+        update(job->runner.isCancelled() ? "cancelled" : "failed", e.what());
+      } catch (...) {
+      }
     }
     job->active = false;
   });
@@ -368,6 +393,21 @@ static Result git(Runner &r, const fs::path &cwd, Args args) {
 }
 Json Fleet::schedule(const std::shared_ptr<Job> &job, const fs::path &cwd) {
   auto role = job->state.spec.role;
+  if (role == "Unassigned") {
+    role = "Hard matcher";
+    auto stats = backend("stats.get", Json::object()).value(job->state.id, Json::object());
+    auto recent = stats.value("recent", Json::array());
+    int hits = 0;
+    for (auto &v : recent)
+      if (v == true)
+        ++hits;
+    auto db = confinedPath(repository, descriptor.database);
+    auto rung = stats.value("adaptiveRole", role);
+    if (fs::exists(db))
+      role = adaptiveRole(rung, (int)recent.size(), hits, poolDifficulty(parseAtlas(read(db))));
+    job->runtimeRole = rung == "Refiner" ? rung : role;
+  } else
+    job->runtimeRole = role;
   const Tool *tool = descriptor.role(role == "Refiner"  ? "refineScheduler"
                                      : role == "Random" ? "randomScheduler"
                                                         : "scheduler");
@@ -428,7 +468,10 @@ void Fleet::audit(const std::shared_ptr<Job> &job) {
     if (fs::is_regular_file(p)) {
       if (fs::file_size(p) > 16 * 1024 * 1024)
         throw std::runtime_error("Agent blob too large: " + change.path);
-      auto reason = blockedBlob(read(p));
+      auto content = read(p);
+      if (classifySource(content) == "transcribed")
+        throw std::runtime_error("ASM transcription refused: " + change.path);
+      auto reason = blockedBlob(content);
       if (!reason.empty())
         throw std::runtime_error("Agent blob blocked: " + change.path + " - " + reason);
     }
@@ -451,7 +494,10 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
     update("blocked", "Another Console instance owns this agent");
     return;
   }
-  struct OwnershipGuard { HANDLE h; ~OwnershipGuard() { CloseHandle(h); } } ownershipGuard{ownership};
+  struct OwnershipGuard {
+    HANDLE h;
+    ~OwnershipGuard() { CloseHandle(h); }
+  } ownershipGuard{ownership};
   try {
     auto secrets = vault.values();
     if (job->state.worktree.empty()) {
@@ -602,9 +648,31 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       }
       for (auto &key : secrets)
         c.environment[key.first] = key.second;
+      auto policy = backend("preferences.get", Json::object());
+      if (policy.value("safeMode", false))
+        throw std::runtime_error("User safe mode prohibits agent writes");
+      c.environment["TANGOS_USE_AGENTS"] = policy.value("useAgents", false) ? "1" : "0";
+      c.environment["TANGOS_AGENT_FANOUT"] = std::to_string(policy.value("agentFanout", 1));
+      write(prompt,
+            read(prompt) + "\n\nUser delegation policy: " +
+                (policy.value("useAgents", false)
+                     ? std::string("Delegation enabled; maximum ") +
+                           std::to_string(policy.value("agentFanout", 1)) + " cooperating agents."
+                     : std::string("Do not spawn or delegate to additional agents.")));
       c.environment["TANGOS_EFFORT"] = job->state.spec.effort;
       c.environment["TANGOS_AGENT_INSTRUCTIONS"] = utf8(prompt.wstring());
       c.environment["TANGOS_PORT_ONLY"] = settings.portOnly ? "1" : "0";
+      auto connections = backend("connections.get", Json::object());
+      if (connections.contains("claims") && connections["claims"].value("enabled", false)) {
+        auto holds = backend("claims.read", {{"connection", "claims"}});
+        for (auto &row : rows)
+          if (heldTarget(row, holds))
+            throw std::runtime_error("A remote worker holds this target; choose unclaimed work");
+      }
+      auto leaseBackend =
+          Backend(repository, directory.parent_path().parent_path(), settings, secrets);
+      auto lease =
+          leaseBackend.reserve(rows, job->state.spec.name, [job] { job->runner.cancel(); });
       update("running", "Driving " + std::to_string(rows.size()) + " targets");
       auto result = job->runner.run(
           c,
@@ -619,6 +687,8 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
           },
           job->state.log);
       audit(job);
+      if (lease)
+        lease->check();
       if (job->runner.isCancelled()) {
         update("cancelled", "Stopped; partial worktree and complete logs retained");
         break;
@@ -626,6 +696,23 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       if (result.code)
         throw std::runtime_error("Driver exited " + std::to_string(result.code) +
                                  "; inspect driver.log");
+      if (policy.value("autoLand", false)) {
+        if (settings.portOnly)
+          throw std::runtime_error("Automatic decomp landing is prohibited in port-only mode");
+        auto landTool = descriptor.role("land");
+        if (!landTool)
+          throw std::runtime_error("Auto-land enabled but no console.land tool declared");
+        update("landing", "User-enabled auto-land in isolated worktree");
+        auto command = toolCommand(descriptor, *landTool,
+                                   {{"out", utf8(out.wstring())},
+                                    {"wl", utf8(job->state.worklist.wstring())},
+                                    {"no_claims", true}},
+                                   job->state.worktree, true, true);
+        auto landed = job->runner.run(command, events, dir / "auto-land.log");
+        if (landed.code)
+          throw std::runtime_error("Auto-land failed; inspect auto-land.log");
+        audit(job);
+      }
       update("verifying", "Running independent repository gates");
       int gates = 0;
       for (auto &check : discoverChecks(job->state.worktree, settings))
@@ -637,6 +724,9 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
             throw std::runtime_error("Verification failed: " + check.name);
         }
       audit(job);
+      Backend(repository, directory.parent_path().parent_path(), settings)
+          .recordAgent(job->state.id, out, "review", gates,
+                       job->state.spec.role == "Unassigned" ? job->runtimeRole : std::string());
       {
         std::lock_guard<std::mutex> lock(mutex);
         job->state.completed += (int)rows.size();
@@ -713,7 +803,8 @@ Json Fleet::takeBatch(const std::string &id) {
   return {{"status", "assigned"},
           {"worktree", utf8(job->state.worktree.wstring())},
           {"instructions", read(job->state.prompt)},
-          {"targets", job->state.queue}};
+          {"targets", job->state.queue},
+          {"resultsPath", utf8((directory / fs::u8path(id) / "results.output").wstring())}};
 }
 void Fleet::finishBatch(const std::string &id) {
   std::shared_ptr<Job> job;
@@ -737,6 +828,8 @@ void Fleet::finishBatch(const std::string &id) {
           throw std::runtime_error("External verification failed: " + check.name);
       }
     audit(job);
+    Backend(repository, directory.parent_path().parent_path(), settings)
+        .recordAgent(id, directory / fs::u8path(id) / "results.output", "review", gates);
     std::lock_guard<std::mutex> lock(mutex);
     job->state.completed += (int)job->state.queue.size();
     job->state.queue = Json::array();
@@ -756,6 +849,18 @@ void Fleet::finishBatch(const std::string &id) {
   job->active = false;
   job->externalTask = false;
 }
+Json Fleet::backend(const std::string &method, const Json &args) {
+  if (Backend::mutation(method, args))
+    throw std::runtime_error(
+        "Agents cannot authorize backend mutations; user must preview them locally");
+  return Backend(repository, directory.parent_path().parent_path(), settings, vault.values())
+      .invoke(method, args);
+}
+bool Fleet::toolEnabled(const std::string &id) {
+  auto prefs = backend("preferences.get", Json::object());
+  auto disabled = prefs.value("disabledTools", Json::array());
+  return std::find(disabled.begin(), disabled.end(), id) == disabled.end();
+}
 Result Fleet::runTool(const std::string &id, const std::string &tool, const Json &args) {
   std::shared_ptr<Job> job;
   {
@@ -765,6 +870,11 @@ Result Fleet::runTool(const std::string &id, const std::string &tool, const Json
         job->state.phase != "running")
       throw std::runtime_error("No active external-agent batch");
   }
+  if (!toolEnabled(tool))
+    throw std::runtime_error("Tool disabled by user policy");
+  if (!descriptor.tool(tool).readOnly &&
+      backend("preferences.get", Json::object()).value("safeMode", false))
+    throw std::runtime_error("User safe mode prohibits mutations");
   std::lock_guard<std::mutex> taskLock(job->externalMutex);
   job->externalTask = true;
   try {

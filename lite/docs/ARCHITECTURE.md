@@ -61,3 +61,7 @@ to implement or silently enroll in a remote fleet protocol.
 ## Native Console execution
 
 Descriptor parsing and argv expansion are isolated in descriptor; atlas_layout ports Console squarify without a browser. Fleet owns per-agent workers/Runners, queues, persistence, worktrees, audit and verification. Vault uses Windows DPAPI; mcp uses an authenticated loopback HTTP service; network uses WinHTTP HTTPS with bounded reads/timeouts. ConsoleUI owns only native controls and rendering. Python driver adaptation injects repository instructions into supported instruction hooks. No provider SDK or model is bundled.
+
+## Backend parity services
+
+Backend owns a native JSON request dispatcher, atomic local preferences/project/statistics/report stores, repository-bound single-use mutation previews, source/attempt/history queries and user-configured service adapters. Transport is injected for unit tests and WinHTTP in the packaged executable. RemoteLease owns atomic range requests and a cancellable heartbeat/release lifecycle for opted-in API/CLI work. Fleet feeds statistics/harvest records after independent verification and refuses held targets/transcribed source. MCP exposes read-only backend methods and filtered tool discovery; local users confirm writes through the executable backend interface. Connection profiles are disabled by default and reference local vault/environment credential names; no owner credentials or cloud service are bundled.

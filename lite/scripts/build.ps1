@@ -8,3 +8,5 @@ ctest --test-dir $BuildDir -C Release --output-on-failure
 if ($LASTEXITCODE) { throw 'Tests failed' }
 python "$PSScriptRoot/../tests/test_agent_adapter.py"
 if ($LASTEXITCODE) { throw 'Driver adapter tests failed' }
+python "$PSScriptRoot/../tests/test_backend_cli.py" --exe "$BuildDir/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Packaged backend tests failed' }

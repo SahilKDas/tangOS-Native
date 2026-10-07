@@ -1,4 +1,4 @@
-# TangOS Lite 0.3.0
+# TangOS Lite 0.4.0
 
 Click Tango or use **Alt+Space → About** for embedded third-party notices.
 
@@ -142,3 +142,7 @@ TinySkia renders the window surfaces, cards, buttons and mascot; Windows handles
 native text input, accessibility and Nunito text rasterization.
 Repository selection and Git remote discovery work for other users' checkouts.
 SM64DS-specific check adapters appear only when their scripts are found.
+
+## Native backend services
+
+See [backend guide](docs/BACKEND.md) for project registration, source/history, claims/leases, preferences, reports, recovery, and confirmed Git helpers. All external connections and credentials belong to the user. No owner API key or hosted service is required to build or test.

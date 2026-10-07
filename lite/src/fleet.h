@@ -35,6 +35,7 @@ AgentState parseAgent(const Json &json);
 class Fleet {
   struct Job {
     AgentState state;
+    std::string runtimeRole;
     Runner runner;
     std::thread worker;
     std::atomic<bool> active{false};
@@ -74,6 +75,8 @@ public:
   void commitReviewed(const std::string &id, const std::string &message, const std::string &tree);
   Json takeBatch(const std::string &id);
   void finishBatch(const std::string &id);
+  Json backend(const std::string &method, const Json &args);
+  bool toolEnabled(const std::string &id);
   Result runTool(const std::string &id, const std::string &tool, const Json &args);
 };
 } // namespace lite
