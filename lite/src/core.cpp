@@ -211,11 +211,11 @@ std::string blockedPath(std::string p, const Settings &s) {
   auto ext = fs::path(p).extension().string();
   if (ext == ".nds" || ext == ".srl" || ext == ".rom" || ext == ".bin" || ext == ".narc" ||
       ext == ".sdat" || ext == ".bmd" || ext == ".bca" || ext == ".pem" || ext == ".key" ||
-      ext == ".p12")
+      ext == ".p12" || ext == ".pyc")
     return "ROM, extracted asset, or credential extension";
   for (auto &part : split(p, '/'))
-    if (part == ".git" || part == "extracted" || part == "roms" || part == "baserom" ||
-        part == "nintendo" || part == ".env" || part.rfind(".env.", 0) == 0 ||
+    if (part == ".git" || part == "__pycache__" || part == "extracted" || part == "roms" ||
+        part == "baserom" || part == "nintendo" || part == ".env" || part.rfind(".env.", 0) == 0 ||
         part == "credentials" || part == "id_rsa" || part == "id_ed25519")
       return "protected asset or credential path";
   for (auto x : split(s.exclusions, ';')) {

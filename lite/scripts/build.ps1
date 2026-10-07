@@ -6,3 +6,5 @@ cmake --build $BuildDir --config Release -j 4
 if ($LASTEXITCODE) { throw 'Build failed' }
 ctest --test-dir $BuildDir -C Release --output-on-failure
 if ($LASTEXITCODE) { throw 'Tests failed' }
+python "$PSScriptRoot/../tests/test_agent_adapter.py"
+if ($LASTEXITCODE) { throw 'Driver adapter tests failed' }

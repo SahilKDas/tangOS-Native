@@ -19,3 +19,5 @@ Ninja, MSVC, and decomp toolchains are external and not part of the package.
 Nunito is embedded under the SIL Open Font License; see assets/Nunito-OFL.txt.
 TinySkia 0.12.0 and locked Rust dependencies are statically linked. Their notices
 are in docs/licenses/Raster-dependencies.txt and embedded in About.
+
+nlohmann JSON 3.12.0 is vendored under MIT; its notice is in docs/licenses/nlohmann-json.txt and embedded in the executable.

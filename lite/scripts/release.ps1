@@ -12,6 +12,8 @@ foreach ($name in @('build-a', 'build-b')) {
 }
 ctest --test-dir "$out/build-a" --output-on-failure
 if ($LASTEXITCODE) { throw 'Tests failed' }
+python "$source/tests/test_agent_adapter.py"
+if ($LASTEXITCODE) { throw 'Driver adapter tests failed' }
 $a = "$out/build-a/TangOSLite.exe"
 $b = "$out/build-b/TangOSLite.exe"
 $hash = (Get-FileHash -LiteralPath $a -Algorithm SHA256).Hash
@@ -23,7 +25,7 @@ if ($size -ge 50000000) { throw 'Executable exceeds strict 50 MB limit' }
 $imports = & objdump -p "$out/TangOSLite.exe" | Select-String 'DLL Name:' | ForEach-Object { $_.Line.Trim() }
 $compiler = (& g++ --version | Select-Object -First 1)
 $cmake = (& cmake --version | Select-Object -First 1)
-$report = "TangOS Lite 0.2.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
+$report = "TangOS Lite 0.3.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
 Set-Content -LiteralPath "$out/SIZE.txt" -Value $report -Encoding utf8
 Copy-Item -LiteralPath "$source/README.md" -Destination "$out/README.md"
 Copy-Item -LiteralPath "$source/../LICENSE" -Destination "$out/LICENSE"

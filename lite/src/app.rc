@@ -9,3 +9,6 @@
 206 RCDATA "../assets/Nunito.ttf"
 207 RCDATA "../assets/Nunito-OFL.txt"
 208 RCDATA "../docs/licenses/Raster-dependencies.txt"
+209 RCDATA "../assets/agent_adapter.py"
+210 RCDATA "../docs/licenses/nlohmann-json.txt"
+211 RCDATA "../assets/role-presets.json"

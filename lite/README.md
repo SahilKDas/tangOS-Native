@@ -1,4 +1,4 @@
-# TangOS Lite 0.2.0
+# TangOS Lite 0.3.0
 
 Click Tango or use **Alt+Space → About** for embedded third-party notices.
 
@@ -16,12 +16,12 @@ that use them. The executable does not bundle those tools.
 1. Browse to an SM64DS working tree, or paste its path and click **Select**.
    The root is detected even when selecting a subdirectory or Git worktree.
    The path is remembered in `%LOCALAPPDATA%/TangOSLite/settings.ini`.
-   Use the **Repository** tab for a full-size status view; **Chaos Controller**
-   follows the Console controller layout. **Encyclopedia** opens local checks,
-   Git controls and live logs.
+   **Chaos Controller** runs isolated AI agents; **Chaos Viewer** displays the atlas.
+   **Git & reviews** opens repository status, checks and Git/GitHub controls.
+   See [fleet guide](docs/FLEET-GUIDE.md) for API, CLI and MCP execution.
 2. Status shows the branch, changed files, conflicts, all branches, remotes,
    and worktrees. Use **Refresh** after Git changes.
-3. Open **Encyclopedia**, select a check and click **Run check**. Review and approve the exact command.
+3. Open **Git & reviews**, select a check and click **Run check**, or run a declared tool from **Encyclopedia**. Review and approve the exact command.
    Missing scripts/build outputs are marked unavailable. Repository scripts are
    executable code: only run a repository you trust.
 4. Inspect live output, including the original file names, line numbers, and
@@ -60,7 +60,7 @@ Link checks="python" "tools/prepush_linkcheck.py" "--range" "tango/main..HEAD"
 
 Overrides are explicit argv tokens, without implicit shell expansion. Quoted
 tokens group spaces; backslashes are literal. Check names replace built-ins or
-add new checks. No general `tangos.json` template/argument UI is implemented yet.
+add new checks. The Encyclopedia discovers `tangos.json` tools and provides typed argument editing.
 Settings apply to the selected repository; review overrides when changing repos.
 
 ## Git and upstreams
@@ -100,16 +100,12 @@ It never repairs source files. To work on actual decomp source, changing
 byte/link proof yourself. Resolve merge conflicts and rebase continuation using
 Git outside Lite. Merge/rebase can legitimately update upstream `src/`.
 
-**Agent guide** exports root/nested AGENTS.md and the coordination entry guide
-into a local handoff. Read its linked role/ownership/verification instructions,
-resume the existing queue, and assign agents separate worktrees externally.
-Lite displays those worktrees and enforces its own publication gates. It does
-not substitute a competing queue or start a provider/fleet automatically.
+**Agent guide** exports repository instructions for external coordination. The native Controller additionally launches API/CLI agents and serves authenticated MCP clients with persistent queues and isolated worktrees. See [fleet guide](docs/FLEET-GUIDE.md).
 
 ## Build and test
 
 Recommended verified toolchain: Windows x64, MSYS2 UCRT64 GCC 14.1.0, CMake,
-MinGW Make, Python 3, and Git, on PATH. No npm or Rust packages are required.
+MinGW Make, Python 3, and Git, on PATH. No npm packages are required. Rust GNU dependencies must be fetched once as described below.
 
 ```powershell
 .\lite\scripts\build.ps1

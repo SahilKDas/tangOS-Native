@@ -24,8 +24,13 @@ fs::path localData() {
   return fs::path(p) / L"TangOSLite";
 }
 std::string uniqueId() {
-  return std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + "-" +
-         std::to_string(GetCurrentProcessId());
+  unsigned char bytes[16];
+  if (BCryptGenRandom(nullptr, bytes, sizeof(bytes), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0)
+    throw std::runtime_error("Windows secure random generation failed");
+  std::ostringstream out;
+  for (auto b : bytes)
+    out << std::hex << std::setw(2) << std::setfill('0') << (int)b;
+  return out.str();
 }
 std::string selfExecutable() {
   wchar_t path[32768];
@@ -86,7 +91,7 @@ Result Runner::run(const Command &c, const Sink &sink, const fs::path &log) {
       throw std::runtime_error("Cannot create durable log");
   }
   Result result{0, {}};
-  auto emit = [&](const std::string &t) {
+  auto store = [&](const std::string &t) {
     if (!sink) {
       if (result.output.size() + t.size() > 64 * 1024 * 1024)
         throw std::runtime_error("Safety capture exceeded 64 MiB; external review required");
@@ -101,6 +106,50 @@ Result Runner::run(const Command &c, const Sink &sink, const fs::path &log) {
     if (sink)
       sink(t);
   };
+  // Filter before capture, disk and callbacks, including secrets split across
+  // pipe reads. Credentials never enter the durable log in plaintext.
+  std::vector<std::string> secretValues;
+  for (auto &entry : c.environment)
+    if ((entry.first.find("KEY") != entry.first.npos ||
+         entry.first.find("TOKEN") != entry.first.npos ||
+         entry.first.find("PASSWORD") != entry.first.npos) &&
+        !entry.second.empty())
+      secretValues.push_back(entry.second);
+  std::string secretPending;
+  auto filtered = [&](const std::string &chunk, bool final) {
+    if (secretValues.empty()) {
+      store(chunk);
+      return;
+    }
+    secretPending += chunk;
+    size_t at = 0;
+    std::string clean;
+    while (at < secretPending.size()) {
+      bool full = false, partial = false;
+      for (auto &value : secretValues) {
+        auto available = secretPending.size() - at;
+        auto count = std::min(available, value.size());
+        if (secretPending.compare(at, count, value, 0, count) == 0) {
+          if (available >= value.size()) {
+            clean += "[REDACTED]";
+            at += value.size();
+            full = true;
+            break;
+          }
+          partial = true;
+        }
+      }
+      if (full)
+        continue;
+      if (partial && !final)
+        break;
+      clean += secretPending[at++];
+    }
+    secretPending.erase(0, at);
+    if (!clean.empty())
+      store(clean);
+  };
+  auto emit = [&](const std::string &t) { filtered(t, false); };
   emit("$ " + preview(c) + "\nWorking directory: " + utf8(c.cwd.wstring()) + "\n");
   // Explicit inherited handle list prevents children retaining other run's
   // pipes.
@@ -149,19 +198,57 @@ Result Runner::run(const Command &c, const Sink &sink, const fs::path &log) {
     DeleteProcThreadAttributeList(si.lpAttributeList);
     emit("Executable missing: " + c.argv[0] + ". Install it and add it to PATH.\n");
     result.code = ERROR_FILE_NOT_FOUND;
+    filtered("", true);
     return result;
   }
   auto line = commandLine(c.argv);
+  // Each concurrent agent receives its own environment. Never mutate global
+  // process variables to inject provider credentials into other runs.
+  std::map<std::wstring, std::wstring> environment;
+  auto inherited = GetEnvironmentStringsW();
+  if (!inherited)
+    throw std::runtime_error("Cannot read process environment");
+  for (auto entry = inherited; *entry; entry += wcslen(entry) + 1) {
+    std::wstring row(entry);
+    auto at = row.find(L'=', row[0] == L'=' ? 1 : 0);
+    if (at != row.npos)
+      environment[row.substr(0, at)] = row.substr(at + 1);
+  }
+  FreeEnvironmentStringsW(inherited);
+  environment[L"PYTHONDONTWRITEBYTECODE"] = L"1";
+  for (auto &entry : c.environment) {
+    auto name = wide(entry.first);
+    if (name.empty() || name.find_first_of(L"=\0") != name.npos ||
+        entry.second.find('\0') != std::string::npos)
+      throw std::runtime_error("Invalid child environment variable");
+    // Windows environment names are case insensitive.
+    for (auto it = environment.begin(); it != environment.end();) {
+      if (_wcsicmp(it->first.c_str(), name.c_str()) == 0)
+        it = environment.erase(it);
+      else
+        ++it;
+    }
+    environment[name] = wide(entry.second);
+  }
+  std::vector<wchar_t> environmentBlock;
+  for (auto &entry : environment) {
+    auto row = entry.first + L"=" + entry.second;
+    environmentBlock.insert(environmentBlock.end(), row.begin(), row.end());
+    environmentBlock.push_back(0);
+  }
+  environmentBlock.push_back(0);
   PROCESS_INFORMATION pi{};
   BOOL ok = CreateProcessW(resolved, line.data(), nullptr, nullptr, TRUE,
-                           CREATE_NO_WINDOW | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT,
-                           nullptr, c.cwd.wstring().c_str(), &si.StartupInfo, &pi);
+                           CREATE_NO_WINDOW | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT |
+                               CREATE_UNICODE_ENVIRONMENT,
+                           environmentBlock.data(), c.cwd.wstring().c_str(), &si.StartupInfo, &pi);
   auto err = GetLastError();
   DeleteProcThreadAttributeList(si.lpAttributeList);
   if (!ok) {
     emit("CreateProcess failed (Windows " + std::to_string(err) +
          "). Check executable and working directory.\n");
     result.code = err;
+    filtered("", true);
     return result;
   }
   proc.h = pi.hProcess;
@@ -211,6 +298,7 @@ Result Runner::run(const Command &c, const Sink &sink, const fs::path &log) {
     emit("Action: inspect file:line diagnostics above; rerun the displayed "
          "command in this repository. Missing ROM/assets must be supplied "
          "locally.\n");
+  filtered("", true);
   return result;
 }
 } // namespace lite

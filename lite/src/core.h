@@ -9,6 +9,10 @@ using Args = std::vector<std::string>;
 struct Command {
   Args argv;
   fs::path cwd;
+  std::map<std::string, std::string> environment;
+  Command() = default;
+  Command(Args argv, fs::path cwd, std::map<std::string, std::string> environment = {})
+      : argv(std::move(argv)), cwd(std::move(cwd)), environment(std::move(environment)) {}
 };
 struct Settings {
   std::string repository,

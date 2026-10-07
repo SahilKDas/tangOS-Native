@@ -1,30 +1,9 @@
-# Console visual reference
+# Console UI implementation and remaining differences
 
-Reference: the Console source in this same repository, not an unverified later
-installed build. The native renderer maps the shared Aero tokens and main frame
-directly from `packages/ui/aero.css`, `console/src/renderer/src/app.css`,
-`App.tsx`, `RepoPicker.tsx`, `Controller.tsx` and `AppSwitcher.tsx`.
+The reference is the Console source in this repository: Aero CSS, Controller, AtlasView, Encyclopedia, RunDock, Settings, KeyVault, AiDetail, ReviewPanel, TangoTour and the classic atlas/squarify renderer.
 
-Implemented: frameless draggable header with native minimize/maximize/close,
-tangOS brand with primary-colored OS, centered segmented navigation, 14 px
-workspace gutters, wide controller and 340 px right rail, rounded 14 px glass
-panels, Nunito typography, primary/ghost/danger buttons, the centered repo
-landing card, five original named palettes, and embedded original Tango mascot
-and icon. Themes are remembered. All rendering is native Win32/TinySkia.
-The controller retains Console's empty-agent state and footer Encyclopedia entry;
-manual check/Git/log controls open from that entry. Repository navigation provides
-the full status view. Smoke testing exercises both views and all five palettes.
+Implemented natively with TinySkia and embedded Nunito: frameless Aero header, five palettes and Tango artwork; Controller agent cards, role/effort/count controls, live tails and queues; Chaos Viewer weighted squarified atlas with grouping/filter/search/zoom/cart; searchable descriptor Encyclopedia and typed argument form with run logs; provider/CLI/MCP profile editor; DPAPI vault; agent details, isolated worktrees, cancellation, independent checks and complete diff/commit review; five-step tour. Git and GitHub operations remain available in Git & reviews.
 
-Lite's functional panels contain local checks, Git operations and logs rather
-than pretending to have Console's provider/fleet functionality. The second view
-is Repository, not the unimplemented Chaos Viewer atlas. Native dropdowns,
-scrollbars, folder picker and approval windows retain Windows behavior. Static
-gradients replace animated blobs, bubbles and backdrop blur. Full Console
-settings/key vault, atlas, tours, fleet cards, complete descriptor encyclopedia, floating run
-dock and every auxiliary screen are not ported. These are remaining visual and
-interaction differences; this is a close reproduction of the shell/design
-language, not established pixel parity across all Console screens.
+Packaged smoke tests render these views and run a real local CLI agent through isolated worktree creation, instructions, verification and diff review while checking UI messages continue to process.
 
-GUI smoke testing produces landing/workspace BMP renders from the actual native
-window and tests selection/status/check/log contents plus responsiveness. The
-release verification records rendered screens and remaining differences honestly.
+This is not verified pixel-identical across every Console screen. Windows controls/dialogs, static gradients, the dock layout and confirmation flows differ. The original animated backgrounds, store/cosmetics, OAuth screens, remote no-clone project mode, source-level atlas LOD/minimap/marquee, remote claim service and all auxiliary overlays are not implemented. Atlas published data is manually refreshed. Provider and user-owned toolchain compatibility requires the selected repository's scripts and inputs. These are outstanding features, not completed parity.

@@ -1,44 +1,13 @@
 # Unfinished features and known limits
 
-- Windows x64 only. No macOS/Linux UI, ARM64 package, installer, updater or signing.
-- Console's Aero shell is reproduced natively, but full pixel/interaction parity
-  across all Console screens is unfinished. See UI-PARITY.md; atlas, provider/fleet
-  cards, tours, full settings/key vault and full descriptor encyclopedia/run-dock
-  screens remain. A compact manual Encyclopedia is implemented.
-- Uses external Git, gh, Python and build tools. This is a single app executable,
-  not a self-contained decomp/Git toolchain. The supported application build uses MinGW and Rust GNU.
-- Known SM64DS check adapters plus local argv overrides; full `tangos.json`
-  schema parsing, argument editors and automatic descriptor migration remain.
-- Settings and command overrides are global for the selected repo, not a profile
-  per repository. Settings changes reload on restart. Very long paths depend on
-  external-tool support. Command arguments containing literal quotes cannot be
-  serialized into INI check overrides.
-- Root/nested tracked AGENTS.md and root untracked AGENTS.md are exported with the
-  coordination entry guide. Role/runbook links must be read by the agent. Provider
-  launching, live fleet claims, queue adoption, ownership locks and automated
-  independent verification are not implemented. Existing worktree coordination
-  is inspected, not replaced.
-- GitHub checks/readiness are displayed as gh text/JSON, with manual refresh;
-  no polling, check rerun, PR merge or browser authentication UI. Cross-fork PR
-  creation uses the owner of origin; non-origin push forks need external gh.
-- New remote branch creation, checkout, worktree creation/deletion, conflict
-  resolution, stash, rebase continuation/abort, tags and force operations use
-  external Git. Push requires an existing fetched destination.
-- Diagnostics preserve file/line/commands from tools, with a general rerun hint.
-  No clickable editor navigation, compiler-specific parser or automated repair.
-- One running operation at a time. Complete output is on disk; UI retains a tail.
-  Exception/process-launch failures are shown in UI; a launch failure can leave
-  a header-only log. Retention/rotation is manual.
-- ROM identity requires a separately trusted digest configured locally. Full
-  decomp byte matching, port builds, smoke, declaration and link correctness depend
-  on the repository's inputs/tools; no game or private compiler is distributed.
-- Live network GitHub PR creation/push was not exercised against a real remote.
-  Port/compiler/ROM-dependent gates were not run with copyrighted inputs. See
-  the release verification report for the workflows actually tested.
-- External programs/hooks and concurrent agents are outside the safety boundary;
-  see SECURITY.md. The app cannot promise to identify every proprietary asset or
-  credential encoding, or police edits made outside it.
-
-The renderer is TinySkia CPU rasterization with Win32 Nunito text/input controls.
-The supported release toolchain is MinGW plus Rust GNU; MSVC is not currently supported.
-Full Console screen parity and arbitrary DPI/layout configurations still require further testing.
+- Windows x64 only; no installer, updater or signing. MinGW and Rust GNU build required.
+- Full Console screen/pixel parity remains unverified. Core Controller, Viewer, Encyclopedia, typed arguments, settings/vault, agent detail, provider profiles and tour are implemented. Remaining auxiliary screens/atlas interactions are listed in UI-PARITY.md.
+- External Git, gh, Python, compilers and user-owned inputs are required by relevant operations. Untracked assets are not copied into agent worktrees. No game data is distributed.
+- Local ownership/queue claims coordinate this app's fleet, not arbitrary external agents or a remote claim service. Queues begin from committed HEAD. Existing unrelated queues must be coordinated explicitly.
+- API drivers must expose a supported instruction hook or an explicit prompt argument. CLI commands must consume the instruction file. Provider compatibility depends on the repository driver. Real paid providers were not exercised.
+- Independent checks run only when discoverable/available. No gate means unverified work, never proof of byte matching. Full asset/compiler-dependent SM64DS verification was not run with copyrighted inputs.
+- GitHub readiness uses gh with manual refresh. Real remote push/PR creation was not performed in this test run. Authentication uses existing Git/gh credentials.
+- Conflict resolution, stash, rebase continuation/abort, tags, force operations and arbitrary branch/worktree management use external Git. Agent worktree creation is native fleet functionality.
+- Native controls/dialogs and static gradients differ from Console. Published atlas updates are manual. Arbitrary DPI configurations require more testing.
+- Global INI check settings apply to the selected repository. Logs/worktrees are retained manually. UI output retains a bounded tail; complete logs remain on disk.
+- Executable repository scripts are trusted code, not OS-sandboxed. Instruction delivery and post-run audits cannot prevent arbitrary code from touching other paths or networking. See SECURITY.md.

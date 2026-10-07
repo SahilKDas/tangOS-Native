@@ -64,3 +64,9 @@ no repository-provided image or font is decoded. The Nunito font is registered o
 for the app process. Rust dependencies are exact/lockfile pinned and release builds
 run offline after fetching dependencies. Rendering changes do not bypass Git previews,
 port-only path guards, or destructive-operation confirmations.
+
+## Fleet review
+
+Agents run in isolated Git worktrees with repository and nested AGENTS instructions. Before review/commit, path/content policy rejects src changes in port-only mode, excluded assets, ROM signatures and credentials. Local queue claims prevent duplicate assignments. Cancellation uses Windows Job Objects. Local MCP requires a cryptographically random bearer, rejects browser Origins, bounds requests and uses loopback only. DPAPI protects vault files at rest; Runner redacts environment secrets before disk logging. Landing requires explicit confirmation and decomp mode, then independent checks and staged-tree review. No automatic fleet commit, push or merge.
+
+Repository scripts and CLI agents are trusted executable code, not sandboxed applications. Instructions and worktree audits cannot prevent arbitrary executables from accessing other paths or the network. Secret redaction is exact-value matching, not a guarantee against encoded/transformed secrets. Independent verifier availability and real compiler/assets remain project-specific.

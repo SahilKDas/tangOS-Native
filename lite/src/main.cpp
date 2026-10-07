@@ -1,5 +1,6 @@
 #include "repository.h"
 #include "skin.h"
+#include "console_ui.h"
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <fstream>
@@ -17,8 +18,9 @@ HWND window, repoEdit, statusEdit, logEdit, checkCombo, actionCombo, remoteEdit,
     detailsEdit, runButton, actionButton, cancelButton, activityLabel;
 HFONT uiFont, monoFont;
 Runner runner;
+std::unique_ptr<ConsoleUI> consoleUI;
 Settings settings;
-fs::path config, repo, logPath, dataDir;
+fs::path config, repo, logPath, dataDir, consoleRepository;
 std::thread worker;
 std::atomic<bool> busy{false};
 std::mutex outputMutex;
@@ -181,7 +183,8 @@ void about() {
                    resourceText(204) + "\n\nMinGW-w64 libwinpthread\n" + resourceText(202) +
                    "\n\nGCC Runtime Library Exception\n" + resourceText(203) + "\n\nGPLv3\n" +
                    resourceText(205) + "\n\nNunito\n" + resourceText(207) +
-                   "\n\nRaster dependencies\n" + resourceText(208),
+                   "\n\nRaster dependencies\n" + resourceText(208) + "\n\nnlohmann JSON\n" +
+                   resourceText(210),
                true);
 }
 void fillChecks() {
@@ -217,6 +220,8 @@ void start(const std::function<void()> &job) {
   });
 }
 void selectRepo() {
+  if (consoleUI && consoleUI->running())
+    throw std::runtime_error("Stop agents before switching repositories");
   auto selected = fs::u8path(value(repoEdit));
   start([selected] {
     Repository r(runner, selected, settings);
@@ -372,6 +377,16 @@ void layout(int w, int h) {
       MoveWindow(logsButton, rail + 16, 350, 130, 32, TRUE);
     }
   }
+  if (consoleUI && workspaceReady) {
+    consoleUI->resize(w - 28, h - 86);
+    consoleUI->show(!toolboxOpen, repositoryView);
+    if (!toolboxOpen) {
+      for (HWND item : {checkCombo, runButton, cancelButton, actionCombo, remoteEdit, refEdit,
+                        detailsEdit, actionButton, agentsButton, statusEdit, logEdit, logsButton,
+                        refreshButton, configButton, activityLabel, toolboxButton})
+        ShowWindow(item, SW_HIDE);
+    }
+  }
   InvalidateRect(window, nullptr, TRUE);
 }
 void paintChrome(HDC dc, int w, int h) {
@@ -442,7 +457,7 @@ void paintChrome(HDC dc, int w, int h) {
     skin::label(dc, L"Repository status", rail + 16, 345, 308, 24, 14, true);
   skin::label(dc, L"Port-only  ·  Review before push", rail + 16, h - 139, 300, 23, 12, true, true);
   skin::mascot(dc, w - 137, h - 127, 96);
-  skin::label(dc, L"v0.2.0", w - 74, h - 27, 60, 18, 10, false, true);
+  skin::label(dc, L"v0.3.0", w - 74, h - 27, 60, 18, 10, false, true);
 }
 void snapshot(const fs::path &path) {
   RECT rect;
@@ -590,7 +605,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     maximizeButton = control(L"BUTTON", L"□", WS_TABSTOP, MAXIMIZE);
     closeButton = control(L"BUTTON", L"×", WS_TABSTOP, CLOSE);
     controllerTab = control(L"BUTTON", L"Chaos Controller", WS_TABSTOP, CONTROLLER_TAB);
-    repositoryTab = control(L"BUTTON", L"Repository", WS_TABSTOP, REPOSITORY_TAB);
+    repositoryTab = control(L"BUTTON", L"Chaos Viewer", WS_TABSTOP, REPOSITORY_TAB);
     toolboxButton = control(L"BUTTON", L"Encyclopedia", WS_TABSTOP, TOOLBOX);
     fieldBrush = CreateSolidBrush(skin::field());
     SetTimer(h, 1, 200, nullptr);
@@ -761,6 +776,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       }
       if (id == CONTROLLER_TAB || id == REPOSITORY_TAB) {
         repositoryView = id == REPOSITORY_TAB;
+        toolboxOpen = false;
         RECT r;
         GetClientRect(h, &r);
         layout(r.right, r.bottom);
@@ -788,6 +804,8 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       try {
         switch (id) {
         case BROWSE:
+          if (consoleUI && consoleUI->running())
+            throw std::runtime_error("Stop fleet runs before switching repositories");
           browse();
           break;
         case SELECT:
@@ -851,6 +869,23 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     set(repoEdit, settings.repository);
     fillChecks();
     workspaceReady = true;
+    if (!consoleUI || consoleRepository != repo) {
+      consoleUI.reset();
+      consoleRepository = repo;
+      consoleUI = std::make_unique<ConsoleUI>(
+          h, uiFont, repo, dataDir, settings,
+          [] {
+            toolboxOpen = true;
+            repositoryView = false;
+            RECT r;
+            GetClientRect(window, &r);
+            layout(r.right, r.bottom);
+          },
+          [](const Settings &next) {
+            settings = next;
+            saveSettings(config, settings);
+          });
+    }
     RECT rect;
     GetClientRect(h, &rect);
     layout(rect.right, rect.bottom);
@@ -874,6 +909,8 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                        "after Git changes.");
     if (smoke) {
       if (smokePhase == 1 && !repo.empty() && !smokeExit) {
+        if (consoleUI)
+          consoleUI->smokeScreens(config.parent_path(), snapshot);
         snapshot(config.parent_path() / "controller.bmp");
         SendMessageW(h, WM_COMMAND, REPOSITORY_TAB, 0);
         snapshot(config.parent_path() / "repository.bmp");
@@ -937,11 +974,20 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     return 0;
   case WM_CLOSE:
+    if (consoleUI && consoleUI->running()) {
+      consoleUI->stop();
+      MessageBoxW(h,
+                  L"Cancelling fleet processes. Complete logs and worktrees are preserved; close "
+                  L"again after they stop.",
+                  L"TangOS Lite", MB_OK);
+      return 0;
+    }
     if (busy) {
       runner.cancel();
       set(activityLabel, "Wait for cancellation to finish, then close.");
       return 0;
     }
+    consoleUI.reset();
     DestroyWindow(h);
     return 0;
   case WM_DESTROY:
