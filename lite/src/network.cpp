@@ -88,7 +88,19 @@ HttpResponse requestHttp(const std::string &url, const std::string &method, cons
       mcpSession = utf8(header);
     }
   }
-  return {status, result, mcpSession};
+  std::string location;
+  headerBytes = 0;
+  WinHttpQueryHeaders(request.handle, WINHTTP_QUERY_LOCATION, WINHTTP_HEADER_NAME_BY_INDEX, nullptr,
+                      &headerBytes, WINHTTP_NO_HEADER_INDEX);
+  if (headerBytes && headerBytes <= 16384) {
+    std::wstring header(headerBytes / sizeof(wchar_t), 0);
+    if (WinHttpQueryHeaders(request.handle, WINHTTP_QUERY_LOCATION, WINHTTP_HEADER_NAME_BY_INDEX,
+                            header.data(), &headerBytes, WINHTTP_NO_HEADER_INDEX)) {
+      header.resize(wcslen(header.c_str()));
+      location = utf8(header);
+    }
+  }
+  return {status, result, mcpSession, location};
 }
 std::string fetchHttps(const std::string &url) {
   if (url.rfind("https://", 0) != 0)

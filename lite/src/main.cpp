@@ -2,6 +2,7 @@
 #include "skin.h"
 #include "console_ui.h"
 #include "backend.h"
+#include "updater.h"
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <fstream>
@@ -48,10 +49,13 @@ enum {
   TOOLBOX,
   PROJECT_MENU,
   SELECT_PROJECT,
-  DISCOVER_PROJECTS
+  DISCOVER_PROJECTS,
+  AUTO_UPDATE
 };
 bool workspaceReady = false, workspaceRemote = false;
 bool discoveryPending = false;
+bool updatePending = false, restartAfterUpdate = false;
+fs::path pendingUpdateReceipt;
 bool repositoryView = false;
 bool toolboxOpen = false;
 HWND themeCombo, minimizeButton, maximizeButton, closeButton, projectButton;
@@ -760,6 +764,32 @@ void projectMenu() {
       selectProject(id);
   }
 }
+void automaticUpdate() {
+  if (smoke)
+    return;
+  if (busy) {
+    updatePending = true;
+    return;
+  }
+  auto profiles = Backend(repo, dataDir, settings).invoke("connections.get");
+  if (!profiles.contains("update.check"))
+    return;
+  auto profile = profiles["update.check"];
+  if (!profile.value("enabled", false) || !profile.value("automatic", false) ||
+      !profile.value("allowUpdateDownloads", false))
+    return;
+  start([] {
+    Backend backend(repo, dataDir, settings);
+    auto args = Json::object();
+    auto ticket = backend.invoke("update.stage", args);
+    args["confirmation"] = ticket.at("confirmation");
+    auto result = backend.invoke("update.stage", args);
+    if (result.value("state", std::string()) == "downloaded")
+      PostMessageW(
+          window, CONSOLE_UPDATE_STAGED, 0,
+          reinterpret_cast<LPARAM>(new std::string(result.at("receipt").get<std::string>())));
+  });
+}
 void automaticDiscovery() {
   if (smoke)
     return;
@@ -801,6 +831,26 @@ void automaticDiscovery() {
 }
 LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   switch (m) {
+  case CONSOLE_UPDATE_STAGED:
+  case CONSOLE_UPDATE_INSTALL: {
+    std::unique_ptr<std::string> receipt(reinterpret_cast<std::string *>(l));
+    if (!receipt)
+      return 0;
+    if (m == CONSOLE_UPDATE_INSTALL && (busy || (consoleUI && consoleUI->running()))) {
+      MessageBoxW(h, L"Stop active checks and agents before restarting into the update.", L"Update",
+                  MB_OK | MB_ICONINFORMATION);
+      return 0;
+    }
+    pendingUpdateReceipt = fs::u8path(*receipt);
+    restartAfterUpdate = m == CONSOLE_UPDATE_INSTALL;
+    if (restartAfterUpdate)
+      PostMessageW(h, WM_CLOSE, 0, 0);
+    else {
+      set(activityLabel, "Portable update ready; it will be installed when you close Lite.");
+      output("A checksum-verified portable update is ready and will install on exit.\n");
+    }
+    return 0;
+  }
   case WM_CREATE: {
     window = h;
     uiFont = CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, 0, 0,
@@ -1074,6 +1124,9 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case DISCOVER_PROJECTS:
           automaticDiscovery();
           break;
+        case AUTO_UPDATE:
+          automaticUpdate();
+          break;
         case BROWSE:
           if (consoleUI && consoleUI->running())
             throw std::runtime_error("Stop fleet runs before switching repositories");
@@ -1208,6 +1261,10 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (worker.joinable())
       worker.join();
     busy = false;
+    if (updatePending) {
+      updatePending = false;
+      PostMessageW(h, WM_COMMAND, AUTO_UPDATE, 0);
+    }
     if (discoveryPending) {
       discoveryPending = false;
       PostMessageW(h, WM_COMMAND, DISCOVER_PROJECTS, 0);
@@ -1339,6 +1396,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   int argc;
   auto argv = CommandLineToArgvW(GetCommandLineW(), &argc);
   try {
+    if (argc == 5 && std::wstring(argv[1]) == L"--apply-portable-update") {
+      auto result = runPortableUpdateHelper(fs::path(argv[2]), std::stoul(utf8(argv[3])),
+                                            std::wstring(argv[4]) == L"restart");
+      LocalFree(argv);
+      return result;
+    }
     if (argc == 4 && std::wstring(argv[1]) == L"--mcp-stdio") {
       auto result = runMcpStdio(fs::path(argv[2]), utf8(argv[3]));
       LocalFree(argv);
@@ -1414,6 +1477,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
       PostMessageW(h, WM_COMMAND, SELECT, 0);
     if (!smoke)
       PostMessageW(h, WM_COMMAND, DISCOVER_PROJECTS, 0);
+    if (!smoke)
+      PostMessageW(h, WM_COMMAND, AUTO_UPDATE, 0);
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
       if (!IsDialogMessageW(h, &msg)) {
@@ -1423,6 +1488,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     }
     if (worker.joinable())
       worker.join();
+    if (!pendingUpdateReceipt.empty()) {
+      try {
+        launchPortableUpdate(dataDir, pendingUpdateReceipt, GetCurrentProcessId(),
+                             restartAfterUpdate);
+      } catch (const std::exception &error) {
+        MessageBoxW(nullptr, wide(error.what()).c_str(),
+                    L"Portable update retained; current executable unchanged",
+                    MB_OK | MB_ICONERROR);
+      }
+    }
     DeleteObject(uiFont);
     DeleteObject(monoFont);
     DeleteObject(fieldBrush);

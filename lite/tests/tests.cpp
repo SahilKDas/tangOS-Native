@@ -265,6 +265,17 @@ int main() {
     expect(std::find(draft.argv.begin(), draft.argv.end(), "myfork:main") != draft.argv.end(),
            "cross-fork PR head construction");
     expect(repo.action("PR readiness", "", "", "").argv[0] == "gh", "GitHub readiness adapter");
+    auto readiness = repo.action("PR readiness", "tangosdev/tangOS", "16", "");
+    expect(readiness.argv[3] == "16" && readiness.argv[4] == "--repo" &&
+               readiness.argv[5] == "tangosdev/tangOS",
+           "Explicit cross-repository PR readiness selector");
+    expect(repo.action("PR checks", "tangosdev/tangOS", "16", "").argv ==
+               Args({"gh", "pr", "checks", "16", "--repo", "tangosdev/tangOS"}),
+           "Explicit PR checks selector");
+    rejects([&] { repo.action("PR checks", "tangosdev/tangOS", "--web", ""); },
+            "PR selector option injection refused");
+    rejects([&] { repo.action("PR readiness", "--repo", "16", ""); },
+            "PR repository option injection refused");
     run({"git", "switch", "-c", "conflict-side"});
     write(r / "port/ff.txt", "side change\n");
     run({"git", "add", "port/ff.txt"});

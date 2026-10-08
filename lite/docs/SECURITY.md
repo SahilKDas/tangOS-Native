@@ -103,3 +103,19 @@ Importing fresh source files is distinct from repairing `src/`: subsequent
 port-only edits, commits and pushes retain the existing source protections.
 Git initialization uses an empty hooks path. A failure after extraction retains
 the new folder for inspection; it never recursively deletes user data.
+
+## Portable update boundary (0.16.0)
+
+Updates require a user-enabled `update.check` connection, a trusted HTTPS
+`assetPrefix`, and `allowUpdateDownloads`. Automatic startup staging additionally
+requires `automatic`. The publisher must supply a SHA256 digest. Downloads never
+receive registry or provider credentials; redirects are limited to the configured
+prefix and GitHub release asset hosts. The digest establishes integrity relative
+to the configured publisher, not an independent publisher signature.
+
+Staging validates the digest, size and Windows x64 GUI executable headers without
+replacing the application. Installation waits for the application to exit,
+rechecks both executable hashes and uses a same-volume Windows replacement with
+a retained rollback backup. A changed application invalidates the staged update.
+Receipts and candidates must reside in the local update store. Failed candidates
+are not executed. Updates never disable antivirus or add security exclusions.

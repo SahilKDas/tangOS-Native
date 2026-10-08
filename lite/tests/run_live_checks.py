@@ -12,12 +12,17 @@ p = argparse.ArgumentParser()
 p.add_argument('--exe', required=True)
 p.add_argument('--repo', required=True)
 p.add_argument('--output', required=True)
+p.add_argument('--python', help='Explicit local validation environment; does not change global Python')
 p.add_argument('--check', action='append', required=True,
                choices=['Port references', 'Declaration agreement', 'Dead references', 'Link checks', 'Byte matching'])
 p.add_argument('--timeout', type=int, default=1800)
 args = p.parse_args()
 exe, repo, output = [pathlib.Path(v).resolve() for v in (args.exe, args.repo, args.output)]
 output.mkdir(parents=True, exist_ok=True)
+if args.python:
+    state = output / 'state'
+    state.mkdir(parents=True, exist_ok=True)
+    (state / 'settings.ini').write_text('python=' + str(pathlib.Path(args.python).resolve()) + '\n', encoding='utf-8')
 
 def call(method, arguments, label):
     request, response = output / (label + '-request.json'), output / (label + '-response.json')
@@ -43,7 +48,7 @@ for n, name in enumerate(args.check):
     arguments['confirmation'] = preview['confirmation']
     result = call('checks.run', arguments, label)
     log = pathlib.Path(result['log'])
-    assert log.is_file() and result['output'] in log.read_text(encoding='utf-8')
+    assert log.is_file() and result['output'].replace('\r\n', '\n') in log.read_text(encoding='utf-8')
     summary.append({'name': name, 'state': 'passed' if result['exit'] == 0 else 'failed',
                     'exit': result['exit'], 'log': str(log)})
     print(name + ': ' + summary[-1]['state'] + '; log=' + str(log), flush=True)

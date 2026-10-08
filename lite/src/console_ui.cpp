@@ -134,7 +134,8 @@ constexpr int DESC_SCAN = 4610, DESC_PREVIEW = 4611, DESC_CONFIRM = 4612, DESC_R
               DESC_FOLDER = 4614;
 constexpr int REMOTE_FOLDER = 4800, REMOTE_CLONE = 4801;
 constexpr int SUPPORT = 4850, SUPPORT_CHECK = 4851, SUPPORT_REPORT = 4852, SUPPORT_CONFIRM = 4853,
-              SUPPORT_COPY = 4854, SUPPORT_FOLDER = 4855, SUPPORT_RELEASE = 4856;
+              SUPPORT_COPY = 4854, SUPPORT_FOLDER = 4855, SUPPORT_RELEASE = 4856,
+              SUPPORT_DOWNLOAD = 4857, SUPPORT_RESTART = 4858;
 constexpr int MCP_EXPORT = 4830, DETAIL_LOOP = 4840;
 constexpr int CLONE_DEST = 4810, CLONE_PREVIEW = 4811, CLONE_CONFIRM = 4812, CLONE_CANCEL = 4813;
 constexpr int MCP_TOGGLE = 4620, MCP_CONFIG = 4621, MCP_PROMPT = 4622, MCP_COPY_CONFIG = 4623;
@@ -256,6 +257,7 @@ struct ConsoleUI::Impl {
   std::atomic<bool> serviceBusy{false}, serviceReady{false};
   HWND serviceChoice = nullptr, serviceArguments = nullptr, detailProgress = nullptr;
   std::string supportDescription;
+  Json portableUpdate = Json::object();
 
   std::vector<Tile> tiles;
   std::string atlasQuery, atlasMode = "ov", atlasFilter = "all", cachedLayout;
@@ -784,7 +786,8 @@ struct ConsoleUI::Impl {
                                                             {"URL", ""},
                                                             {"Key variable", ""},
                                                             {"Key header", "Authorization"},
-                                                            {"Key prefix", "Bearer "}}) {
+                                                            {"Key prefix", "Bearer "},
+                                                            {"Update asset prefix", ""}}) {
         label(field.first, 214, y + 4, 110);
         profileFields[field.first] = edit(field.second, 0, 328, y, cw - 348);
         y += 40;
@@ -795,8 +798,8 @@ struct ConsoleUI::Impl {
       y += 40;
       for (auto entry : std::vector<std::pair<std::string, std::string>>{
                {"Enabled", "Enable this connection"},
-               {"Automatic", "Allow automatic leases / project discovery"},
-               {"Descriptors", "Allow public GitHub descriptor downloads"}}) {
+               {"Automatic", "Allow automatic leases / discovery / updates"},
+               {"Descriptors", "Allow public descriptors / portable update downloads"}}) {
         profileFields[entry.first] =
             control(L"BUTTON", entry.second, 0, 214, y, cw - 232, 30, BS_AUTOCHECKBOX);
         y += 38;
@@ -843,15 +846,16 @@ struct ConsoleUI::Impl {
             width - 332, 62, 310, 180);
     } else if (screen == Screen::support) {
       label("Help, updates and reports", 18, 60, cw - 36, 32);
-      label("Updates use your enabled update.check connection. Portable binaries are replaced "
-            "manually after you verify the release. Reports stay local until you choose to share "
+      label("Updates use your enabled update.check connection and require a published checksum. "
+            "Reports stay local until you choose to share "
             "them.",
             18, 100, cw - 36, 80);
       profileFields["Report description"] =
           edit(supportDescription, 0, 18, 188, cw - 36, 100, ES_MULTILINE | WS_VSCROLL);
       button("Check updates", SUPPORT_CHECK, 18, 304, 140);
       button("Preview report", SUPPORT_REPORT, 166, 304, 140);
-      button("Save report", SUPPORT_CONFIRM, 314, 304, 130);
+      button(activeServiceMethod == "update.stage" ? "Confirm download" : "Save report",
+             SUPPORT_CONFIRM, 314, 304, 150);
       body = edit(serviceResult.dump(2), 0, 18, 354, cw - 36, height - 460,
                   ES_MULTILINE | ES_READONLY | WS_VSCROLL);
       button("Copy report", SUPPORT_COPY, width - 332, 108, 170);
@@ -860,6 +864,9 @@ struct ConsoleUI::Impl {
       button("Tips", HELP_TIPS, width - 332, 262, 150);
       button("Connections", CONNECTIONS, width - 332, 308, 150);
       button("Open release page", SUPPORT_RELEASE, width - 332, 354, 190);
+      button("Download update", SUPPORT_DOWNLOAD, width - 332, 402, 190);
+      button("Restart and update", SUPPORT_RESTART, width - 332, 450, 190);
+      EnableWindow(GetDlgItem(window, SUPPORT_RESTART), portableUpdate.contains("receipt"));
       button("Controller", HOME, 18, height - 48, 108);
       EnableWindow(GetDlgItem(window, SUPPORT_CONFIRM),
                    serviceResult.value("requiresConfirmation", false));
@@ -1512,8 +1519,8 @@ struct ConsoleUI::Impl {
     if (remoteOnly && method != "git.clone" && method != "projects.list" &&
         method != "projects.get" && method != "connections.get" && method != "connections.set" &&
         method != "preferences.get" && method != "preferences.set" && method != "network.read" &&
-        method != "update.check" && method != "bug.report" && method.rfind("atlas.", 0) != 0 &&
-        method != "github.credits")
+        method != "update.check" && method != "update.stage" && method != "bug.report" &&
+        method.rfind("atlas.", 0) != 0 && method != "github.credits")
       throw std::runtime_error(
           "Clone or choose a local checkout before running repository operations");
     if (serviceBusy || serviceReady)
@@ -1556,10 +1563,12 @@ struct ConsoleUI::Impl {
     auto name = connectionNames[at];
     auto c = connectionProfiles[name];
     setText(profileFields["Name"], name);
-    for (auto field : std::vector<std::pair<std::string, std::string>>{{"URL", "url"},
-                                                                       {"Key variable", "keyEnv"},
-                                                                       {"Key header", "keyHeader"},
-                                                                       {"Key prefix", "keyPrefix"}})
+    for (auto field :
+         std::vector<std::pair<std::string, std::string>>{{"URL", "url"},
+                                                          {"Key variable", "keyEnv"},
+                                                          {"Key header", "keyHeader"},
+                                                          {"Key prefix", "keyPrefix"},
+                                                          {"Update asset prefix", "assetPrefix"}})
       setText(profileFields[field.first],
               c.value(field.second, field.second == "keyHeader"   ? std::string("Authorization")
                                     : field.second == "keyPrefix" ? std::string("Bearer ")
@@ -1570,8 +1579,11 @@ struct ConsoleUI::Impl {
                  it == methods.end() ? 0 : it - methods.begin(), 0);
     SendMessageW(profileFields["Enabled"], BM_SETCHECK, c.value("enabled", false), 0);
     SendMessageW(profileFields["Automatic"], BM_SETCHECK, c.value("automatic", false), 0);
-    SendMessageW(profileFields["Descriptors"], BM_SETCHECK,
-                 c.value("allowDescriptorDownloads", false), 0);
+    SendMessageW(
+        profileFields["Descriptors"], BM_SETCHECK,
+        c.value(name == "update.check" ? "allowUpdateDownloads" : "allowDescriptorDownloads",
+                false),
+        0);
     setText(profileFields["Template"], c.value("bodyTemplate", Json::object()).dump(2));
   }
   void requestInspection(size_t index) {
@@ -2465,9 +2477,11 @@ struct ConsoleUI::Impl {
       c["keyEnv"] = text(profileFields["Key variable"]);
       c["keyHeader"] = text(profileFields["Key header"]);
       c["keyPrefix"] = text(profileFields["Key prefix"]);
+      if (name == "update.check")
+        c["assetPrefix"] = text(profileFields["Update asset prefix"]);
       c["enabled"] = SendMessageW(profileFields["Enabled"], BM_GETCHECK, 0, 0) == BST_CHECKED;
       c["automatic"] = SendMessageW(profileFields["Automatic"], BM_GETCHECK, 0, 0) == BST_CHECKED;
-      c["allowDescriptorDownloads"] =
+      c[name == "update.check" ? "allowUpdateDownloads" : "allowDescriptorDownloads"] =
           SendMessageW(profileFields["Descriptors"], BM_GETCHECK, 0, 0) == BST_CHECKED;
       c["bodyTemplate"] = Json::parse(text(profileFields["Template"]));
       serviceMethod = "connections.set";
@@ -2564,6 +2578,21 @@ struct ConsoleUI::Impl {
     case SUPPORT_CHECK:
       serviceCall("update.check", Json::object());
       break;
+    case SUPPORT_DOWNLOAD:
+      serviceRequest = Json::object();
+      serviceCall("update.stage", serviceRequest);
+      break;
+    case SUPPORT_RESTART:
+      if (!portableUpdate.contains("receipt"))
+        throw std::runtime_error("Download and verify an update first");
+      if (MessageBoxW(
+              window,
+              L"Close Lite and install the checksum-verified update? A recovery copy is retained.",
+              L"Restart and update", MB_YESNO | MB_ICONQUESTION) == IDYES)
+        PostMessageW(parent, CONSOLE_UPDATE_INSTALL, 0,
+                     reinterpret_cast<LPARAM>(
+                         new std::string(portableUpdate.at("receipt").get<std::string>())));
+      break;
     case SUPPORT_REPORT:
       supportDescription = text(profileFields["Report description"]);
       serviceRequest = {{"description", supportDescription}};
@@ -2571,11 +2600,11 @@ struct ConsoleUI::Impl {
       break;
     case SUPPORT_CONFIRM: {
       if (!serviceResult.value("requiresConfirmation", false) ||
-          activeServiceMethod != "bug.report")
-        throw std::runtime_error("Preview the report first");
+          (activeServiceMethod != "bug.report" && activeServiceMethod != "update.stage"))
+        throw std::runtime_error("Preview the report or update download first");
       auto args = serviceRequest;
       args["confirmation"] = serviceResult.at("confirmation");
-      serviceCall("bug.report", args);
+      serviceCall(activeServiceMethod, args);
       break;
     }
     case SUPPORT_COPY:
@@ -3207,9 +3236,16 @@ struct ConsoleUI::Impl {
           PostMessageW(parent, CONSOLE_RELOAD, 0, 0);
       }
       if (screen == Screen::support) {
+        if (activeServiceMethod == "update.stage" &&
+            serviceResult.value("state", std::string()) == "downloaded")
+          portableUpdate = serviceResult;
         setText(body, serviceResult.dump(2));
+        SetWindowTextW(GetDlgItem(window, SUPPORT_CONFIRM), activeServiceMethod == "update.stage"
+                                                                ? L"Confirm download"
+                                                                : L"Save report");
         EnableWindow(GetDlgItem(window, SUPPORT_CONFIRM),
                      serviceResult.value("requiresConfirmation", false));
+        EnableWindow(GetDlgItem(window, SUPPORT_RESTART), portableUpdate.contains("receipt"));
       }
       if (screen == Screen::clone) {
         setText(body, serviceResult.dump(2));

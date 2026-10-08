@@ -7,6 +7,7 @@ struct HttpResponse {
   unsigned status;
   std::string body;
   std::string session;
+  std::string location;
 };
 HttpResponse requestHttp(const std::string &url, const std::string &method,
                          const std::string &body = {},

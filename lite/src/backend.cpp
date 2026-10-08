@@ -4,6 +4,7 @@
 #include "viewer.h"
 #include "batches.h"
 #include "archive.h"
+#include "updater.h"
 #include <numeric>
 #include "repository.h"
 #include <regex>
@@ -339,12 +340,12 @@ Backend::Backend(fs::path repo, fs::path data, Settings prefs,
   fs::create_directories(directory);
 }
 bool Backend::mutation(const std::string &m, const Json &) {
-  return m == "projects.importZip" || m == "projects.discover" || m == "projects.download" ||
-         m == "projects.open" || m == "projects.register" || m == "descriptor.write" ||
-         m == "preferences.set" || m == "connections.set" || m == "git.action" ||
-         m == "checks.run" || m == "tools.run" || m == "reports.export" || m == "bug.report" ||
-         m == "stats.clear" || m == "network.write" || m == "queue.adopt" || m == "git.clone" ||
-         m == "git.backup" || m == "git.discard" || m == "git.sync";
+  return m == "update.stage" || m == "projects.importZip" || m == "projects.discover" ||
+         m == "projects.download" || m == "projects.open" || m == "projects.register" ||
+         m == "descriptor.write" || m == "preferences.set" || m == "connections.set" ||
+         m == "git.action" || m == "checks.run" || m == "tools.run" || m == "reports.export" ||
+         m == "bug.report" || m == "stats.clear" || m == "network.write" || m == "queue.adopt" ||
+         m == "git.clone" || m == "git.backup" || m == "git.discard" || m == "git.sync";
 }
 bool enabledTool(const Json &prefs, const std::string &id) {
   auto hidden = prefs.value("disabledTools", Json::array());
@@ -366,8 +367,8 @@ Json Backend::catalog() {
        "policy.layout",      "policy.color",      "policy.batches",     "policy.source",
        "policy.usage",       "guide.parse",       "guide.tour",         "guide.tips",
        "projects.get",       "github.credits",    "atlas.cosmetics",    "atlas.counts",
-       "atlas.progress",     "atlas.live",        "update.check",       "bug.report",
-       "harvest.list"});
+       "atlas.progress",     "atlas.live",        "update.check",       "update.stage",
+       "bug.report",         "harvest.list"});
 }
 Json Backend::invoke(const std::string &m, Json a) {
   HANDLE lock = CreateFileW((directory / "backend.lock").c_str(),
@@ -415,6 +416,18 @@ Json Backend::invoke(const std::string &m, Json a) {
     baseline = fingerprint(baseline);
     if (ticket.empty()) {
       Json details = Json::object();
+      if (m == "update.stage") {
+        auto profiles = fileJson(directory / "connections.json");
+        if (!profiles.contains("update.check"))
+          throw std::runtime_error("Configure your update.check connection first");
+        auto profile = profiles.at("update.check");
+        details = {
+            {"target", selfExecutable()},
+            {"endpoint", profile.at("url")},
+            {"trustedAssetPrefix", profile.value("assetPrefix", std::string())},
+            {"notice",
+             "Download only; SHA256 and native executable checks must pass before installation"}};
+      }
       if (m == "checks.run") {
         bool found = false;
         for (auto &check : discoverChecks(repository, settings))
@@ -975,6 +988,29 @@ Json Backend::execute(const std::string &m, const Json &a) {
     prefs.merge_patch(a);
     saveJson(directory / "preferences.json", prefs);
     return prefs;
+  }
+  if (m == "update.stage") {
+    auto profile = fileJson(directory / "connections.json").at("update.check");
+    if (!profile.value("enabled", false) || !profile.value("allowUpdateDownloads", false))
+      throw std::runtime_error(
+          "Enable update.check and allowUpdateDownloads in your local Connections first");
+    auto result = execute("update.check", Json::object());
+    if (!result.value("ok", false))
+      throw std::runtime_error("Update endpoint unavailable");
+    if (result.at("update").at("state") != "available")
+      return result.at("update");
+    auto fetch = [&](const std::string &url, const std::string &method, const std::string &body,
+                     const std::map<std::string, std::string> &headers) {
+      if (processRunner && processRunner->isCancelled())
+        throw std::runtime_error("Update cancelled");
+      auto response = transport(url, method, body, headers);
+      if (processRunner && processRunner->isCancelled())
+        throw std::runtime_error("Update cancelled");
+      return response;
+    };
+    return stagePortableUpdate(directory, result.at("data"),
+                               profile.value("assetPrefix", std::string()),
+                               fs::u8path(selfExecutable()), fetch);
   }
   if (m == "projects.importZip") {
     auto destination = fs::u8path(a.at("destination").get<std::string>());

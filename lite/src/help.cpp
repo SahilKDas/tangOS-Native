@@ -24,13 +24,12 @@ Json updateStatus(const std::string &current, const Json &release) {
   if (!url.empty() && (url.rfind("https://", 0) != 0 || url.substr(8).find('@') != url.npos ||
                        url.find_first_of("\r\n ") != url.npos))
     throw std::runtime_error("Release URL must be credential-free HTTPS");
-  return {
-      {"state", newer ? "available" : "none"},
-      {"currentVersion", current},
-      {"version", version},
-      {"releaseUrl", url},
-      {"installation",
-       "Portable release: review the publisher's checksum and replace the executable manually"}};
+  return {{"state", newer ? "available" : "none"},
+          {"currentVersion", current},
+          {"version", version},
+          {"releaseUrl", url},
+          {"installation", "Portable release: configure trusted update downloads, verify the "
+                           "published SHA256, then restart to install"}};
 }
 Json parseGuide(std::string text, bool tour) {
   text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());

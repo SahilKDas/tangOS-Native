@@ -5,7 +5,8 @@
 #include <functional>
 namespace lite {
 constexpr UINT CONSOLE_RELOAD = WM_APP + 40, CONSOLE_PICK_REPO = WM_APP + 41,
-               CONSOLE_OPEN_REPO = WM_APP + 42;
+               CONSOLE_OPEN_REPO = WM_APP + 42, CONSOLE_UPDATE_INSTALL = WM_APP + 43,
+               CONSOLE_UPDATE_STAGED = WM_APP + 44;
 class ConsoleUI {
   struct Impl;
   std::unique_ptr<Impl> impl;

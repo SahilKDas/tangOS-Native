@@ -302,13 +302,23 @@ Command Repository::action(const std::string &name, const std::string &remote,
         (text.find('@', text.find("://") + 3) != text.npos && text.rfind("https://", 0) == 0))
       throw std::runtime_error("Remote URL must not contain credentials/whitespace");
     append({"remote", "add", remote, text});
-  } else if (name == "PR readiness") {
-    return {{"gh", "pr", "view", "--json",
-             "url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
-             "statusCheckRollup,headRefOid"},
-            root};
-  } else if (name == "PR checks") {
-    return {{"gh", "pr", "checks"}, root};
+  } else if (name == "PR readiness" || name == "PR checks") {
+    Args command{"gh", "pr", name == "PR readiness" ? "view" : "checks"};
+    if (!ref.empty()) {
+      if (!validRef(ref))
+        throw std::runtime_error("PR selector must be a number or safe branch name");
+      command.push_back(ref);
+    }
+    if (!remote.empty()) {
+      auto parts = split(remote, '/');
+      if (parts.size() != 2 || !validRef(parts[0]) || !validRef(parts[1]))
+        throw std::runtime_error("PR repository must be owner/repo");
+      command.insert(command.end(), {"--repo", remote});
+    }
+    if (name == "PR readiness")
+      command.insert(command.end(), {"--json", "url,state,isDraft,mergeable,mergeStateStatus,"
+                                               "reviewDecision,statusCheckRollup,headRefOid"});
+    return {command, root};
   } else if (name == "Create draft PR") {
     reference();
     if (text.empty())
