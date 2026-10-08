@@ -2,6 +2,9 @@
 #include "fleet.h"
 #include <functional>
 namespace lite {
+Json mcpClientConfiguration(const std::string &client, const fs::path &executable,
+                            const fs::path &connection, const std::string &agent);
+int runMcpStdio(const fs::path &connection, const std::string &agent);
 class McpServer {
   struct Impl;
   std::unique_ptr<Impl> impl;

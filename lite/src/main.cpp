@@ -56,11 +56,19 @@ HWND themeCombo, minimizeButton, maximizeButton, closeButton, projectButton;
 HWND controllerTab, repositoryTab;
 HWND toolboxButton;
 HBRUSH fieldBrush = nullptr;
-const std::vector<std::string> actions = {"Fetch",          "Pull (fast-forward)", "Merge",
-                                          "Rebase",         "Stage paths",         "Commit staged",
-                                          "Push reviewed",  "Compare upstreams",   "Upstream diff",
-                                          "Add remote",     "PR readiness",        "PR checks",
-                                          "Create draft PR"};
+const std::vector<std::string> actions = {"Fetch",           "Pull (fast-forward)",
+                                          "Merge",           "Rebase",
+                                          "Stage paths",     "Commit staged",
+                                          "Push reviewed",   "Compare upstreams",
+                                          "Upstream diff",   "Add remote",
+                                          "PR readiness",    "PR checks",
+                                          "Create draft PR", "Create branch",
+                                          "Switch branch",   "Delete merged branch",
+                                          "Rebase continue", "Rebase abort",
+                                          "Merge continue",  "Merge abort",
+                                          "List stashes",    "Stash selected paths",
+                                          "Apply stash",     "Drop stash",
+                                          "Create tag",      "Delete tag"};
 std::string value(HWND h) {
   int n = GetWindowTextLengthW(h);
   std::wstring s(n + 1, 0);
@@ -222,22 +230,24 @@ void start(const std::function<void()> &job) {
     PostMessageW(window, DONE, 0, 0);
   });
 }
-void selectRepo() {
+void selectRepo(std::string projectId = {}) {
   if (consoleUI && consoleUI->running())
     throw std::runtime_error("Stop agents before switching repositories");
   auto selected = fs::u8path(value(repoEdit));
-  start([selected] {
+  start([selected, projectId] {
     Repository r(runner, selected, settings);
     repo = r.root;
     workspaceRemote = false;
     settings.repository = utf8(repo.wstring());
-    settings.activeProject = settings.repository;
+    settings.activeProject = projectId.empty() ? settings.repository : projectId;
     saveSettings(config, settings);
-    Json entry{{"id", settings.repository},
+    Json entry{{"id", settings.activeProject},
                {"repository", settings.repository},
                {"title", utf8(repo.filename().wstring())}};
     try {
-      entry["title"] = loadDescriptor(repo).title;
+      auto descriptor = loadDescriptor(repo);
+      entry["title"] = descriptor.title;
+      entry["descriptor"] = descriptor.document;
     } catch (...) {
       // Repositories without a descriptor can still be remembered and set up.
     }
@@ -370,11 +380,17 @@ void runAction() {
       if (r.pushPreview(remote, ref) != approvedSnapshot)
         throw std::runtime_error("Outgoing commits changed after review. Preview again.");
     } else if (name == "Merge" || name == "Rebase" || name == "Pull (fast-forward)" ||
-               name == "Stage paths" || name == "Add remote" || name == "Create draft PR") {
+               name == "Stage paths" || name == "Add remote" || name == "Create draft PR" ||
+               name == "Create branch" || name == "Switch branch" ||
+               name == "Delete merged branch" || name == "Rebase continue" ||
+               name == "Rebase abort" || name == "Merge continue" || name == "Merge abort" ||
+               name == "Stash selected paths" || name == "Apply stash" || name == "Drop stash" ||
+               name == "Create tag" || name == "Delete tag") {
       if (!approve("Confirm " + name + "\n\n" + preview(c) + "\n\n" + details +
                    "\n\nMerge/rebase can change source files. Git hooks are "
                    "repository-owned code. Resolve conflicts with Git outside "
-                   "Lite. No force/reset/clean operation is offered."))
+                   "Lite. Review the exact operation; abort, stash drop and ref deletion require "
+                   "this confirmation."))
         return;
       c = r.action(name, remote, ref, details);
     }
@@ -1008,6 +1024,13 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     consoleRepository.clear();
     refresh();
     return 0;
+  case CONSOLE_OPEN_REPO: {
+    std::unique_ptr<std::string> path(reinterpret_cast<std::string *>(l));
+    auto opened = Json::parse(*path);
+    set(repoEdit, opened.at("path").get<std::string>());
+    selectRepo(opened.value("projectId", std::string()));
+    return 0;
+  }
   case CONSOLE_PICK_REPO:
     PostMessageW(h, WM_COMMAND, MAKEWPARAM(BROWSE, BN_CLICKED), 0);
     return 0;
@@ -1193,6 +1216,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   int argc;
   auto argv = CommandLineToArgvW(GetCommandLineW(), &argc);
   try {
+    if (argc == 4 && std::wstring(argv[1]) == L"--mcp-stdio") {
+      auto result = runMcpStdio(fs::path(argv[2]), utf8(argv[3]));
+      LocalFree(argv);
+      return result;
+    }
     if (argc == 6 && std::wstring(argv[1]) == L"--backend") {
       fs::path repository = std::wstring(argv[2]) == L"-" ? fs::path() : fs::path(argv[2]);
       fs::path data = argv[3];
@@ -1282,7 +1310,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
       write(fs::path(argv[5]), Json({{"error", e.what()}}).dump(2));
       return 1;
     }
-    if (argc > 1 && std::wstring(argv[1]) == L"--verify-rom") {
+    if (argc > 1 &&
+        (std::wstring(argv[1]) == L"--verify-rom" || std::wstring(argv[1]) == L"--mcp-stdio")) {
       std::cerr << e.what() << "\n";
       return 1;
     }

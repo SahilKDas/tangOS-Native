@@ -118,6 +118,24 @@ int main() {
     expect(!localClone.value("cancelled", true) && localClone.at("exit") == 0 &&
                fs::exists(fs::u8path(localClone.at("repository").get<std::string>()) / ".git"),
            "clone runner reset permits a disposable local clone");
+    auto destination = dir / "custom clone destination";
+    auto cloneCustom = confirmed(
+        "git.clone", {{"url", utf8(repo.wstring())}, {"destination", utf8(destination.wstring())}});
+    expect(cloneCustom.at("exit") == 0 && fs::exists(destination / ".git"),
+           "clone uses an explicit destination with spaces");
+    reject(
+        [&] {
+          confirmed("git.clone",
+                    {{"url", utf8(repo.wstring())}, {"destination", utf8(destination.wstring())}});
+        },
+        "clone refuses to overwrite an existing folder");
+    reject([&] { confirmed("git.clone", {{"url", "ext::powershell arbitrary"}}); },
+           "external clone helpers rejected");
+    auto bugReport = confirmed("bug.report", {{"description", "Fixture report"}});
+    expect(fs::exists(fs::u8path(bugReport.at("folder").get<std::string>()) / "bug-report.md") &&
+               bugReport.at("markdown").get<std::string>().find("local-fixture-secret") ==
+                   std::string::npos,
+           "local report includes reviewable diagnostics without credential values");
     expect(!backend.invoke("descriptor.preview")["tools"].is_null(),
            "descriptor generation preview");
     reject([&] { confirmed("connections.set", {{"API_KEY", "credential"}}); },

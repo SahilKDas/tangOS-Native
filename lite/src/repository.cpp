@@ -207,6 +207,59 @@ Command Repository::action(const std::string &name, const std::string &remote,
     reference();
     clean();
     append({"rebase", ref});
+  } else if (name == "Create branch") {
+    reference();
+    append({"branch", ref});
+  } else if (name == "Switch branch") {
+    reference();
+    clean();
+    append({"switch", ref});
+  } else if (name == "Delete merged branch") {
+    reference();
+    append({"branch", "-d", ref});
+  } else if (name == "Rebase continue" || name == "Rebase abort") {
+    if (name == "Rebase continue")
+      safetyIndex();
+    append(
+        {"-c", "core.editor=true", "rebase", name == "Rebase continue" ? "--continue" : "--abort"});
+  } else if (name == "Merge continue" || name == "Merge abort") {
+    if (name == "Merge continue")
+      safetyIndex();
+    append(
+        {"-c", "core.editor=true", "merge", name == "Merge continue" ? "--continue" : "--abort"});
+  } else if (name == "List stashes") {
+    append({"stash", "list"});
+  } else if (name == "Stash selected paths") {
+    safetyIndex();
+    Args paths;
+    for (auto path : split(text, '\n')) {
+      path = trim(path);
+      if (path.empty())
+        continue;
+      requirePath(path, settings);
+      auto file = confinedPath(root, path);
+      if (fs::is_regular_file(file) &&
+          (fs::file_size(file) > 16 * 1024 * 1024 || !blockedBlob(read(file)).empty()))
+        throw std::runtime_error("Protected stash content: " + path);
+      paths.push_back(path);
+    }
+    if (paths.empty())
+      throw std::runtime_error("Enter exact relative paths to stash in Details");
+    append({"--literal-pathspecs", "stash", "push", "-m", "TangOS Lite reviewed paths", "--"});
+    a.insert(a.end(), paths.begin(), paths.end());
+  } else if (name == "Apply stash" || name == "Drop stash") {
+    if (ref.rfind("stash@{", 0) != 0 || ref.back() != '}' || ref.size() < 9 ||
+        ref.substr(7, ref.size() - 8).find_first_not_of("0123456789") != ref.npos)
+      throw std::runtime_error("Choose an exact stash reference such as stash@{0}");
+    if (name == "Apply stash")
+      clean();
+    append({"stash", name == "Apply stash" ? "apply" : "drop", ref});
+  } else if (name == "Create tag" || name == "Delete tag") {
+    reference();
+    if (name == "Create tag")
+      append({"tag", ref});
+    else
+      append({"tag", "-d", ref});
   } else if (name == "Stage paths") {
     Args paths;
     for (auto p : split(text, '\n')) {

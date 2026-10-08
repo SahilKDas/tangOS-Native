@@ -29,6 +29,9 @@ std::string atlasColor(const Json &row, bool authors, bool nearMiss,
                        const std::map<std::string, std::string> &colors = {});
 Json sourceEnvelope(const std::string &source, const std::string &kind,
                     const std::string &path = {});
+Json readAtlasCache(const fs::path &path, const std::string &key, int64_t now, int64_t maxAge);
+void writeAtlasCache(const fs::path &path, const std::string &key, const Json &database,
+                     const Json &extras, int64_t now);
 bool claimedTarget(const Json &row);
 std::string numberedSource(const std::string &source);
 } // namespace lite

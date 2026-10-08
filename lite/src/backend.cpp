@@ -330,17 +330,19 @@ std::string adaptiveRole(const std::string &role, int attempts, int matches, con
   return chosen == "Refiner" && pool.value("refinerSupply", 0) == 0 ? "Drafter" : chosen;
 }
 Backend::Backend(fs::path repo, fs::path data, Settings prefs,
-                 std::map<std::string, std::string> keys, Transport http, Runner *process)
+                 std::map<std::string, std::string> keys, Transport http, Runner *process,
+                 std::function<void(const std::string &)> progress)
     : repository(std::move(repo)), directory(std::move(data)), settings(std::move(prefs)),
-      transport(std::move(http)), processRunner(process), secrets(std::move(keys)) {
+      transport(std::move(http)), processRunner(process), progressSink(std::move(progress)),
+      secrets(std::move(keys)) {
   fs::create_directories(directory);
 }
 bool Backend::mutation(const std::string &m, const Json &) {
   return m == "projects.open" || m == "projects.register" || m == "descriptor.write" ||
          m == "preferences.set" || m == "connections.set" || m == "git.action" ||
-         m == "tools.run" || m == "reports.export" || m == "stats.clear" || m == "network.write" ||
-         m == "queue.adopt" || m == "git.clone" || m == "git.backup" || m == "git.discard" ||
-         m == "git.sync";
+         m == "tools.run" || m == "reports.export" || m == "bug.report" || m == "stats.clear" ||
+         m == "network.write" || m == "queue.adopt" || m == "git.clone" || m == "git.backup" ||
+         m == "git.discard" || m == "git.sync";
 }
 bool enabledTool(const Json &prefs, const std::string &id) {
   auto hidden = prefs.value("disabledTools", Json::array());
@@ -361,7 +363,7 @@ Json Backend::catalog() {
        "policy.batches",   "policy.source",     "policy.usage",    "guide.parse",
        "guide.tour",       "guide.tips",        "projects.get",    "github.credits",
        "atlas.cosmetics",  "atlas.counts",      "atlas.progress",  "atlas.live",
-       "update.check",     "harvest.list"});
+       "update.check",     "bug.report",        "harvest.list"});
 }
 Json Backend::invoke(const std::string &m, Json a) {
   HANDLE lock = CreateFileW((directory / "backend.lock").c_str(),
@@ -1035,7 +1037,10 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto args = a;
     if (!args.contains("connection"))
       args["connection"] = m;
-    return execute("network.read", args);
+    auto result = execute("network.read", args);
+    if (m == "update.check" && result.value("ok", false))
+      result["update"] = updateStatus("0.16.0", result.at("data"));
+    return result;
   }
   if (m == "git.clone") {
     auto url = a.at("url").get<std::string>();
@@ -1043,13 +1048,23 @@ Json Backend::execute(const std::string &m, const Json &a) {
         (url.find("https://") == 0 && url.substr(8).find('@') != url.npos))
       throw std::runtime_error("Use a credential-free Git URL or a local repository path; "
                                "authentication belongs in your Git credential helper");
-    auto dest = directory / "clones" / uniqueId();
+    auto dest = a.contains("destination") ? fs::u8path(a.at("destination").get<std::string>())
+                                          : directory / "clones" / uniqueId();
+    if (!dest.is_absolute())
+      throw std::runtime_error("Clone destination must be an absolute new folder");
+    if (fs::exists(dest))
+      throw std::runtime_error("Clone destination already exists; choose a new folder");
+    if (url.find("://") != url.npos && url.rfind("https://", 0) != 0 && url.rfind("ssh://", 0) != 0)
+      throw std::runtime_error("Clone supports HTTPS, SSH or a local repository");
+    if (url.find("::") != url.npos)
+      throw std::runtime_error("External Git helpers are not allowed");
     fs::create_directories(dest.parent_path());
     Runner r;
     auto log = directory / (uniqueId() + "-clone.log");
     auto &cloneRunner = processRunner ? *processRunner : r;
     auto result = cloneRunner.run(
-        {{"git", "clone", "--progress", "--", url, utf8(dest.wstring())}, directory}, {}, log);
+        {{"git", "clone", "--progress", "--", url, utf8(dest.wstring())}, directory}, progressSink,
+        log);
     return {{"exit", result.code},
             {"cancelled", cloneRunner.isCancelled()},
             {"repository", utf8(dest.wstring())},
@@ -1113,6 +1128,31 @@ Json Backend::execute(const std::string &m, const Json &a) {
     saveJson(directory / "stats.json", Json::object());
     saveJson(directory / "stats-best.json", Json::object());
     return {{"cleared", true}};
+  }
+  if (m == "bug.report") {
+    auto description = a.value("description", std::string());
+    if (description.size() > 65536 || !blockedBlob(description).empty())
+      throw std::runtime_error("Report description contains protected content or exceeds 64 KiB");
+    auto folder = directory / "exports" / ("bug-report-" + uniqueId());
+    fs::create_directories(folder);
+    Json debug = {{"app", "TangOS Lite"},
+                  {"version", "0.16.0"},
+                  {"portOnly", settings.portOnly},
+                  {"project", settings.activeProject},
+                  {"connections", Json::array()}};
+    for (auto &name : {"connections.json"}) {
+      auto profiles = fileJson(directory / name);
+      for (auto it = profiles.begin(); it != profiles.end(); ++it)
+        debug["connections"].push_back(
+            {{"name", it.key()}, {"enabled", it.value().value("enabled", false)}});
+    }
+    auto markdown =
+        "# TangOS Lite bug report\n\n" + description + "\n\n```json\n" + debug.dump(2) + "\n```\n";
+    write(folder / "bug-report.md", markdown);
+    saveJson(folder / "debug.json", debug);
+    return {{"folder", utf8(folder.wstring())},
+            {"markdown", markdown},
+            {"notice", "Review the report before sharing; no message was sent"}};
   }
   if (m == "reports.list") {
     Json files = Json::array();

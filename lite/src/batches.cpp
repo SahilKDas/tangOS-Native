@@ -156,6 +156,18 @@ void BatchBook::clearAgent(const std::string &agent) {
     else
       ++it;
 }
+void BatchBook::assign(const std::string &id, const std::string &agent, const std::string &name) {
+  for (auto &b : entries)
+    if (b.at("id") == id) {
+      if (b.at("status") != "queued")
+        throw std::runtime_error("Only queued batches can be handed off");
+      b["agentId"] = agent;
+      b["targetAgent"] = name;
+      b["parked"] = false;
+      return;
+    }
+  throw std::runtime_error("Unknown batch");
+}
 void BatchBook::remove(const std::string &id) {
   for (auto it = entries.begin(); it != entries.end();)
     if ((*it)["id"] == id)

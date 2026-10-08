@@ -4,6 +4,30 @@
 #include <map>
 #include <sstream>
 namespace lite {
+Json readAtlasCache(const fs::path &path, const std::string &key, int64_t now, int64_t maxAge) {
+  try {
+    if (!fs::exists(path) || fs::file_size(path) > 128 * 1024 * 1024)
+      return nullptr;
+    auto cache = Json::parse(read(path));
+    auto at = cache.at("savedAt").get<int64_t>();
+    if (cache.at("key") != key || at > now || (maxAge >= 0 && now - at > maxAge))
+      return nullptr;
+    parseAtlas(cache.at("database").dump());
+    return cache;
+  } catch (...) {
+    return nullptr;
+  }
+}
+void writeAtlasCache(const fs::path &path, const std::string &key, const Json &database,
+                     const Json &extras, int64_t now) {
+  parseAtlas(database.dump());
+  Json cache = {{"key", key}, {"savedAt", now}, {"database", database}, {"extras", extras}};
+  auto content = cache.dump();
+  if (!blockedBlob(content).empty() || content.size() > 128 * 1024 * 1024)
+    throw std::runtime_error("Published cache contains protected content or exceeds 128 MiB");
+  fs::create_directories(path.parent_path());
+  write(path, content);
+}
 Json sourceEnvelope(const std::string &source, const std::string &kind, const std::string &path) {
   Json lines = Json::array();
   bool truncated = false;

@@ -71,6 +71,8 @@ public:
   Json draft() const;
   void saveDraft(const Json &draft);
   void enqueueDraft(const std::string &id);
+  void handoff(const std::string &batch, const std::string &destination);
+  Json generateDraft(const std::string &role, int count, Runner &runner, Sink progress = {});
   void editBatch(const std::string &id, int direction, bool remove = false);
   void clearDoneBatches();
   void clear(const std::string &id);

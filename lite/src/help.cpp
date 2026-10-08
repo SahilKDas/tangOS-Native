@@ -4,6 +4,34 @@
 #include <stdexcept>
 #include <windows.h>
 namespace lite {
+Json updateStatus(const std::string &current, const Json &release) {
+  if (!release.is_object())
+    throw std::runtime_error("Update endpoint must return a JSON release object");
+  auto version = release.value("version", release.value("tag_name", std::string()));
+  auto numbers = [](std::string value) {
+    if (!value.empty() && value[0] == 'v')
+      value.erase(0, 1);
+    if (!std::regex_match(value, std::regex("[0-9]+(\\.[0-9]+){1,3}")))
+      throw std::runtime_error("Update version must be numeric x.y.z");
+    std::vector<uint64_t> out;
+    for (auto &part : split(value, '.'))
+      out.push_back(std::stoull(part));
+    out.resize(4);
+    return out;
+  };
+  auto newer = numbers(version) > numbers(current);
+  auto url = release.value("html_url", release.value("url", std::string()));
+  if (!url.empty() && (url.rfind("https://", 0) != 0 || url.substr(8).find('@') != url.npos ||
+                       url.find_first_of("\r\n ") != url.npos))
+    throw std::runtime_error("Release URL must be credential-free HTTPS");
+  return {
+      {"state", newer ? "available" : "none"},
+      {"currentVersion", current},
+      {"version", version},
+      {"releaseUrl", url},
+      {"installation",
+       "Portable release: review the publisher's checksum and replace the executable manually"}};
+}
 Json parseGuide(std::string text, bool tour) {
   text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
   std::regex blocks("\\n\\s*\\n"), emotion("\\[(\\w[\\w-]*)\\]"), target("@([\\w-]+)");

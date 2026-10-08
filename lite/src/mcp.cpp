@@ -1,11 +1,95 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include "mcp.h"
+#include "network.h"
+#include <iostream>
 #include <algorithm>
 #include <chrono>
 #include <sstream>
 #include <stdexcept>
 namespace lite {
+Json mcpClientConfiguration(const std::string &client, const fs::path &executable,
+                            const fs::path &connection, const std::string &agent) {
+  if (agent.empty())
+    throw std::runtime_error("Select an MCP agent first");
+  Json entry = {{"command", utf8(executable.wstring())},
+                {"args", Json::array({"--mcp-stdio", utf8(connection.wstring()), agent})}};
+  if (client == "VS Code") {
+    entry["type"] = "stdio";
+    return {{"servers", {{"tangos-lite", entry}}}};
+  }
+  if (client != "Claude Code" && client != "Claude Desktop" && client != "Cursor" &&
+      client != "Generic")
+    throw std::runtime_error("Unknown MCP client template");
+  return {{"mcpServers", {{"tangos-lite", entry}}}};
+}
+int runMcpStdio(const fs::path &connection, const std::string &agent) {
+  std::string session;
+  auto input = GetStdHandle(STD_INPUT_HANDLE), output = GetStdHandle(STD_OUTPUT_HANDLE);
+  auto config = Json::parse(read(connection)).at("mcpServers").at("tangos-lite");
+  auto url = config.at("url").get<std::string>();
+  if (url.rfind("http://127.0.0.1:", 0) != 0 || url.substr(url.size() - 4) != "/mcp")
+    throw std::runtime_error("MCP bridge only connects to the local Lite server");
+  auto headers = config.at("headers").get<std::map<std::string, std::string>>();
+  headers["Accept"] = "application/json, text/event-stream";
+  headers["MCP-Protocol-Version"] = "2025-03-26";
+  std::string line;
+  char c;
+  DWORD got;
+  while (ReadFile(input, &c, 1, &got, nullptr) && got) {
+    if (c != '\n') {
+      if (line.size() >= 1024 * 1024)
+        throw std::runtime_error("MCP request exceeds 1 MiB");
+      line += c;
+      continue;
+    }
+    if (trim(line).empty()) {
+      line.clear();
+      continue;
+    }
+    Json request;
+    try {
+      request = Json::parse(line);
+      if (request.value("method", std::string()) == "initialize")
+        request["params"]["clientInfo"]["name"] = agent;
+      if (!session.empty())
+        headers["Mcp-Session-Id"] = session;
+      auto response = requestHttp(url, "POST", request.dump(), headers);
+      if (response.status != 200 && response.status != 202)
+        throw std::runtime_error("Local MCP HTTP " + std::to_string(response.status));
+      if (!response.session.empty())
+        session = response.session;
+      if (!response.body.empty()) {
+        auto message = Json::parse(response.body).dump() + "\n";
+        DWORD wrote;
+        if (!WriteFile(output, message.data(), DWORD(message.size()), &wrote, nullptr))
+          break;
+      }
+    } catch (const std::exception &e) {
+      if (request.is_object() && request.contains("id")) {
+        auto message = Json({{"jsonrpc", "2.0"},
+                             {"id", request["id"]},
+                             {"error",
+                              {{"code", -32603},
+                               {"message", "Local MCP connection failed; keep Lite running and "
+                                           "refresh the client config"}}}})
+                           .dump() +
+                       "\n";
+        DWORD wrote;
+        WriteFile(output, message.data(), DWORD(message.size()), &wrote, nullptr);
+      }
+    }
+    line.clear();
+  }
+  if (!session.empty()) {
+    try {
+      headers["Mcp-Session-Id"] = session;
+      requestHttp(url, "DELETE", "", headers);
+    } catch (...) {
+    }
+  }
+  return 0;
+}
 struct McpServer::Impl {
   Fleet &fleet;
   Descriptor descriptor;

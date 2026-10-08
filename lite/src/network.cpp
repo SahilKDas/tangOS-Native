@@ -15,8 +15,8 @@ struct Internet {
 } // namespace
 HttpResponse requestHttp(const std::string &url, const std::string &method, const std::string &body,
                          const std::map<std::string, std::string> &headers) {
-  if (method != "GET" && method != "POST" && method != "PUT" && method != "PATCH" &&
-      method != "DELETE")
+  if (method != "GET" && method != "POST" && method != "DELETE" && method != "PUT" &&
+      method != "PATCH" && method != "DELETE")
     throw std::runtime_error("Unsupported HTTP method");
   if (body.size() > 1024 * 1024)
     throw std::runtime_error("Request body exceeds 1 MiB");
@@ -76,7 +76,19 @@ HttpResponse requestHttp(const std::string &url, const std::string &method, cons
       throw std::runtime_error("Atlas download exceeds 128 MiB");
     result.append(bytes, got);
   }
-  return {status, result};
+  DWORD headerBytes = 0;
+  WinHttpQueryHeaders(request.handle, WINHTTP_QUERY_CUSTOM, L"Mcp-Session-Id", nullptr,
+                      &headerBytes, WINHTTP_NO_HEADER_INDEX);
+  std::string mcpSession;
+  if (headerBytes && headerBytes <= 4096) {
+    std::wstring header(headerBytes / sizeof(wchar_t), 0);
+    if (WinHttpQueryHeaders(request.handle, WINHTTP_QUERY_CUSTOM, L"Mcp-Session-Id", header.data(),
+                            &headerBytes, WINHTTP_NO_HEADER_INDEX)) {
+      header.resize(wcslen(header.c_str()));
+      mcpSession = utf8(header);
+    }
+  }
+  return {status, result, mcpSession};
 }
 std::string fetchHttps(const std::string &url) {
   if (url.rfind("https://", 0) != 0)

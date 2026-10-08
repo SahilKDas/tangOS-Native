@@ -261,11 +261,16 @@ void Fleet::enqueue(const std::string &id, const Json &rows, const std::string &
   auto claims = backend("claims.read", Json::object());
 
   std::lock_guard<std::mutex> lock(mutex);
-  auto job = jobs.at(id);
+  auto job = id.empty() ? std::shared_ptr<Job>() : jobs.at(id);
   std::set<std::string> taken;
   for (auto &item : jobs)
     for (auto &row : item.second->state.queue)
       taken.insert(batchTarget(row));
+  for (auto &batch : batchBook.snapshot())
+    if (batch.at("agentId") == "" && batch.at("status") != "done")
+      for (auto &row : batch.at("items"))
+        if (!row.value("worked", false) && !row.value("removed", false))
+          taken.insert(batchTarget(row));
   Json fresh = Json::array();
   for (auto &row : rows) {
     if (heldTarget(row, claims) || row.value("matched", false) || exemptTarget(row) ||
@@ -278,11 +283,13 @@ void Fleet::enqueue(const std::string &id, const Json &rows, const std::string &
       throw std::runtime_error("Target already claimed: " + ref);
     fresh.push_back(row);
   }
-  batchBook.add(uniqueId(), id, job->state.spec.name, fresh, std::time(nullptr) * int64_t(1000),
-                title, prompt);
-  for (auto &row : fresh)
-    job->state.queue.push_back(row);
-  job->state.total = job->state.completed + (int)job->state.queue.size();
+  batchBook.add(uniqueId(), id, job ? job->state.spec.name : "Unassigned", fresh,
+                std::time(nullptr) * int64_t(1000), title, prompt);
+  if (job) {
+    for (auto &row : fresh)
+      job->state.queue.push_back(row);
+    job->state.total = job->state.completed + (int)job->state.queue.size();
+  }
   saveLocked();
 }
 Json Fleet::batches() const {
@@ -309,6 +316,124 @@ void Fleet::enqueueDraft(const std::string &id) {
   if (batchBook.draft() == staged)
     batchBook.setDraft({{"title", "Batch draft"}, {"prompt", ""}, {"items", Json::array()}});
   saveLocked();
+}
+void Fleet::handoff(const std::string &batchId, const std::string &destination) {
+  auto claims = backend("claims.read", Json::object());
+  std::lock_guard<std::mutex> lock(mutex);
+  auto batches = batchBook.snapshot();
+  auto found = std::find_if(batches.begin(), batches.end(),
+                            [&](const Json &b) { return b.at("id") == batchId; });
+  if (found == batches.end() || found->at("status") != "queued")
+    throw std::runtime_error("Select a queued batch");
+  auto source = found->at("agentId").get<std::string>();
+  if (source == destination)
+    return;
+  auto from = source.empty() ? std::shared_ptr<Job>() : jobs.at(source);
+  auto to = destination.empty() ? std::shared_ptr<Job>() : jobs.at(destination);
+  if ((from && from->active) || (to && to->active))
+    throw std::runtime_error("Stop both agents before handing off work");
+  Json rows = Json::array();
+  std::set<std::string> moving;
+  for (auto &row : found->at("items"))
+    if (!row.value("worked", false) && !row.value("removed", false)) {
+      if (heldTarget(row, claims) || row.value("matched", false) || exemptTarget(row))
+        throw std::runtime_error("A handoff target is now claimed, matched or exempt");
+      rows.push_back(row);
+      moving.insert(batchTarget(row));
+    }
+  for (auto &job : jobs)
+    if (job.first != source)
+      for (auto &row : job.second->state.queue)
+        if (moving.count(batchTarget(row)))
+          throw std::runtime_error("Handoff would duplicate a reserved target");
+  if (from) {
+    Json remaining = Json::array();
+    for (auto &row : from->state.queue)
+      if (!moving.count(batchTarget(row)))
+        remaining.push_back(row);
+    from->state.queue = remaining;
+    from->state.assigned = Json::array();
+    from->state.total = from->state.completed + int(remaining.size());
+  }
+  if (to) {
+    for (auto &row : rows)
+      to->state.queue.push_back(row);
+    to->state.total = to->state.completed + int(to->state.queue.size());
+  }
+  batchBook.assign(batchId, destination, to ? to->state.spec.name : "Unassigned");
+  saveLocked();
+}
+Json Fleet::generateDraft(const std::string &role, int count, Runner &runner, Sink progress) {
+  if (count < 1 || count > 500)
+    throw std::runtime_error("Draft count must be 1 to 500");
+  if (role != "Hard matcher" && role != "Drafter" && role != "Refiner" && role != "Random")
+    throw std::runtime_error("Choose a supported generation role");
+  auto tool = descriptor.role(role == "Refiner"  ? "refineScheduler"
+                              : role == "Random" ? "randomScheduler"
+                                                 : "scheduler");
+  if (!tool)
+    tool = descriptor.role("scheduler");
+  if (!tool)
+    throw std::runtime_error("No scheduler declared; use Viewer cart or import draft JSON");
+  std::set<std::string> taken;
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    for (auto &b : batchBook.snapshot())
+      if (b.at("status") != "done")
+        for (auto &row : b.at("items"))
+          if (!row.value("worked", false) && !row.value("removed", false))
+            taken.insert(batchTarget(row));
+    for (auto &job : jobs)
+      for (auto &row : job.second->state.queue)
+        taken.insert(batchTarget(row));
+  }
+  auto out = directory / (uniqueId() + "-draft.jsonl");
+  auto worktree = directory / "generation-worktrees" / uniqueId();
+  fs::create_directories(worktree.parent_path());
+  auto created = runner.run(
+      {{"git", "worktree", "add", "--detach", utf8(worktree.wstring()), "HEAD"}, repository},
+      progress, directory / (uniqueId() + "-generation-setup.log"));
+  if (created.code)
+    throw std::runtime_error("Cannot create isolated generation worktree; inspect setup log");
+  auto result = runner.run(toolCommand(descriptor, *tool,
+                                       {{"role", role},
+                                        {"limit", count + int(taken.size()) + 16},
+                                        {"count", count + int(taken.size()) + 16},
+                                        {"out", utf8(out.wstring())}},
+                                       worktree, true),
+                           progress, directory / (uniqueId() + "-draft.log"));
+  if (result.code || runner.isCancelled())
+    throw std::runtime_error("Draft generation failed or cancelled; inspect the generation log");
+  Repository audit(runner, worktree, settings);
+  for (auto &change :
+       parseStatus(audit.git({"status", "--porcelain=v1", "-z", "--untracked-files=all"}))) {
+    if (!blockedPath(change.path, settings).empty())
+      throw std::runtime_error("Generation changed a protected path in its isolated worktree: " +
+                               change.path);
+  }
+  auto claims = backend("claims.read", Json::object());
+  Json items = Json::array();
+  for (auto &line : split(fs::exists(out) ? read(out) : result.output, '\n')) {
+    auto text = trim(line);
+    if (text.empty() || text.front() != '{')
+      continue;
+    auto row = Json::parse(text);
+    auto key = batchTarget(row);
+    if (key.empty() || key == ":" || row.value("matched", false) || exemptTarget(row) ||
+        heldTarget(row, claims))
+      continue;
+    if (taken.insert(key).second)
+      items.push_back(row);
+    if (items.size() >= size_t(count))
+      break;
+  }
+  if (items.empty())
+    throw std::runtime_error("No available targets; refresh the repository or choose another role");
+  Json draft = {{"title", role + " draft"},
+                {"prompt", "Follow repository AGENTS.md; verify every result independently."},
+                {"items", items}};
+  saveDraft(draft);
+  return draft;
 }
 void Fleet::clearDoneBatches() {
   std::lock_guard<std::mutex> lock(mutex);

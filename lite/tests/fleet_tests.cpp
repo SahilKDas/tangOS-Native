@@ -194,6 +194,40 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       auto first = fleet.add(a);
       a.name = "API B";
       auto second = fleet.add(a);
+      fleet.saveDraft({{"title", "Global fixture"},
+                       {"prompt", "Preserve handoff prompt"},
+                       {"items", Json::array({{{"id", "global-only"}, {"name", "global_only"}}})}});
+      fleet.enqueueDraft("");
+      auto global = fleet.batches().back().at("id").get<std::string>();
+      expect(fleet.batches().back().at("agentId") == "", "unassigned global batch persists");
+      reject([&] { fleet.enqueue(first, Json::array({{{"id", "global-only"}}})); },
+             "global reservation prevents duplicate assignment");
+      fleet.handoff(global, first);
+      expect(fleet.batches().back().at("prompt") == "Preserve handoff prompt",
+             "handoff preserves instructions/history");
+      fleet.handoff(global, second);
+      fleet.handoff(global, "");
+      expect(fleet.batches().back().at("agentId") == "", "batch can return to the global queue");
+      fleet.editBatch(global, 0, true);
+      Runner generation;
+      auto generated = fleet.generateDraft("Hard matcher", 3, generation);
+      expect(generated.at("items").size() == 3 && generated.at("title") == "Hard matcher draft",
+             "declared scheduler generates an isolated reviewable draft");
+      generation.cancel();
+      reject([&] { fleet.generateDraft("Hard matcher", 3, generation); },
+             "generation can be cancelled before execution");
+      expect(fleet.draft() == generated, "cancelled generation preserves saved draft");
+      generation.reset();
+      fleet.saveDraft({{"items", Json::array()}});
+      for (auto client : {"Claude Code", "Claude Desktop", "Cursor", "VS Code", "Generic"}) {
+        auto config = mcpClientConfiguration(client, dir / "TangOSLite.exe", data / "mcp.json",
+                                             "External fixture");
+        auto servers = config.at(std::string(client) == "VS Code" ? "servers" : "mcpServers");
+        expect(servers.at("tangos-lite").at("args")[0] == "--mcp-stdio" &&
+                   config.dump().find("local-key") == std::string::npos,
+               "native MCP client template references a local connection file without embedded "
+               "secrets");
+      }
       auto duplicate = a;
       duplicate.name = "  api a  ";
       reject([&] { fleet.add(duplicate); },
@@ -396,6 +430,23 @@ print('authenticated MCP protocol, tools, batch lifecycle and long polling passe
           {{"python", utf8((dir / "mcp_client.py").wstring()), utf8((data / "mcp.json").wstring())},
            dir});
       expect(rpc.code == 0, "MCP HTTP integration: " + rpc.output);
+      write(dir / "stdio_client.py", R"PY(import subprocess,json,sys
+requests=[{'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-03-26','clientInfo':{'name':'Actual client name','version':'1'},'capabilities':{}}},
+ {'jsonrpc':'2.0','method':'notifications/initialized'}, {'jsonrpc':'2.0','id':2,'method':'tools/list'}, {'jsonrpc':'2.0','id':3,'method':'ping'}]
+p=subprocess.run([sys.argv[1],'--mcp-stdio',sys.argv[2],'External fixture'],input=''.join(json.dumps(r)+'\n' for r in requests),text=True,capture_output=True,timeout=20)
+assert p.returncode==0,(p.returncode,p.stderr)
+responses=[json.loads(line) for line in p.stdout.splitlines()]
+assert len(responses)==3,responses
+assert all('error' not in r for r in responses),responses
+assert any(t['name']=='next_batch' for t in responses[1]['result']['tools'])
+print('native stdio MCP initialize, notification, session, tools, ping and EOF passed')
+)PY");
+      auto bridge = setup.run(
+          {{"python", utf8((dir / "stdio_client.py").wstring()),
+            utf8((fs::u8path(selfExecutable()).parent_path() / "TangOSLite.exe").wstring()),
+            utf8((data / "mcp.json").wstring())},
+           dir});
+      expect(bridge.code == 0, "MCP stdio integration: " + bridge.output);
       auto serverState = mcp.state();
       expect(serverState["connectedClients"] == 0, "MCP DELETE disconnects client");
       expect(serverState["requestsSeen"].get<int>() >= 155 &&

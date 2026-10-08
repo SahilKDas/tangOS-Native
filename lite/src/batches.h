@@ -19,6 +19,7 @@ public:
   void reconcile(const std::string &agent, const Json &queue);
   void park(const std::string &agent, const std::string &reason);
   void clearAgent(const std::string &agent);
+  void assign(const std::string &id, const std::string &agent, const std::string &name);
   void remove(const std::string &id);
   void reorder(const std::string &id, int direction);
   void clearDone();

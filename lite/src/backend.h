@@ -25,13 +25,14 @@ class Backend {
   Settings settings;
   Transport transport;
   Runner *processRunner;
+  std::function<void(const std::string &)> progressSink;
   std::map<std::string, std::string> secrets;
   Json execute(const std::string &method, const Json &args);
 
 public:
   Backend(fs::path repo, fs::path data, Settings prefs,
           std::map<std::string, std::string> keys = {}, Transport http = requestHttp,
-          Runner *process = nullptr);
+          Runner *process = nullptr, std::function<void(const std::string &)> progress = {});
   static bool mutation(const std::string &method, const Json &args);
   static Json catalog();
   Json invoke(const std::string &method, Json args = Json::object());

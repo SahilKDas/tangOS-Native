@@ -100,6 +100,33 @@ int main() {
     expect(lod.update(2.7) == 3 && lod.update(2.4) == 2, "LOD hysteresis prevents thrashing");
     expect(numberedSource("int a;\nint b;\n") == "1  int a;\n2  int b;\n",
            "source inspection line numbers");
+    expect(updateStatus("0.16.0",
+                        {{"tag_name", "v0.17.0"}, {"html_url", "https://example.invalid/release"}})
+                   .at("state") == "available",
+           "newer update detected");
+    expect(updateStatus("0.16.0", {{"version", "0.15.9"}}).at("state") == "none",
+           "older published build not offered as update");
+    expect(updateStatus("0.16.0", {{"version", "0.16.0"}}).at("state") == "none",
+           "equal update ignored");
+    rejects([&] { updateStatus("0.16.0", {{"version", "nightly"}}); }, "invalid version rejected");
+    rejects(
+        [&] {
+          updateStatus("0.16.0", {{"version", "0.17.0"}, {"url", "https://token@example.invalid"}});
+        },
+        "credential-bearing release URL rejected");
+    Json db = {{"functions", Json::array({{{"id", "cache"}, {"name", "Cache"}, {"size", 32}}})}};
+    auto cache = temp / "published-cache.json";
+    writeAtlasCache(cache, "endpoint-a", db, Json::object(), 100);
+    expect(!readAtlasCache(cache, "endpoint-a", 120, 30).is_null(), "fresh published cache reused");
+    expect(readAtlasCache(cache, "endpoint-a", 131, 30).is_null(), "published cache expires");
+    expect(!readAtlasCache(cache, "endpoint-a", 1000, -1).is_null(),
+           "offline cache explicitly permitted");
+    expect(readAtlasCache(cache, "endpoint-b", 120, 30).is_null(),
+           "endpoint change invalidates cache");
+    expect(readAtlasCache(cache, "endpoint-a", 90, 30).is_null(),
+           "future cache timestamp rejected");
+    write(cache, "broken");
+    expect(readAtlasCache(cache, "endpoint-a", 120, 30).is_null(), "corrupt cache ignored");
     Settings s;
     s.repository = "C:/unicode/日本語";
     s.activeProject = "remote:日本語";
