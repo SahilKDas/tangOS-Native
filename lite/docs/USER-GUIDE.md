@@ -97,6 +97,25 @@ In Viewer, **Full map** expands the map and hides the statistics and rosters.
 Choose **Restore layout**, or press F11 while the map has focus, to return.
 Selection, contributor filtering and cart contents remain available on restore.
 
+The statistics header shows function and byte progress. Contributor chips show
+lifetime matches and positive daily counts; clicking the selected contributor
+clears the filter. Search, filtering and sorting sit above the function roster.
+The minimap appears at detail zoom in the map's upper-right corner.
+
+## Agent details and client connection
+
+Open an agent card to see its centered detail overlay. Choose **This session**
+or **All-time**, select a model stream, copy output, and expand a recent run.
+The **···** menu contains configuration, queue, complete-log and reviewed Git
+actions. Click outside the overlay or its close button to return to Controller.
+
+On MCP connection, select your client and agent, then choose **Connect selected
+client**. Review the target path before confirming. Existing unrelated client
+entries are retained and a backup is made; a changed file requires a new preview.
+Keep your provider credentials in your environment or encrypted local vault.
+VS Code JSONC comments and trailing commas are accepted. Installation writes
+normalized JSON; the backup retains the original text, including comments.
+
 ## Portable updates
 
 Configure your own `update.check` connection and trusted **Update asset prefix**

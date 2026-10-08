@@ -8,7 +8,7 @@ struct ClientSetup {
 };
 fs::path clientConfigPath(const std::string &client);
 ClientSetup previewClientSetup(const std::string &client, const fs::path &executable,
-                              const fs::path &connection, const std::string &agent,
-                              const fs::path &path = {});
+                               const fs::path &connection, const std::string &agent,
+                               const fs::path &path = {});
 Json installClientSetup(const ClientSetup &plan);
 } // namespace lite

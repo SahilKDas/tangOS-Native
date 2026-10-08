@@ -83,3 +83,13 @@ tests pass; no personal client configuration or API keys were changed in testing
 MCP supports 2026-07-28 per-request discovery alongside four legacy handshake
 versions. HTTP routing mirrors, encoded names, metadata, cache hints and result
 types have integration coverage; modern stdio and the official Inspector pass.
+
+0.17.0 follows captured original geometry for the Viewer statistics header,
+map and right-hand search/filter/sort/roster stack. Agent detail is a centered
+560-pixel overlay with a 3-pixel blurred, 32-percent darkened scrim, role banner,
+four statistics cards and retained live/history controls. Reviewed operations
+remain available in its menu. Overview function labels and the zoom-only,
+upper-right minimap follow the original rendering rules. The offline capture
+tool now records the original detail overlay as well as Controller and Viewer.
+The main toolbar, native control styling and other screen composition still
+require exact comparison; these changes do not establish full pixel parity.

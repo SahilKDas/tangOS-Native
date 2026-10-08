@@ -1,4 +1,4 @@
-# TangOS Lite 0.16.1
+# TangOS Lite 0.17.0
 
 Click Tango or use **Alt+Space → About** for embedded third-party notices.
 

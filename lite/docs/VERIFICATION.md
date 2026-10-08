@@ -1,5 +1,22 @@
 # Windows release verification — 2026-10-07
 
+## 0.17.0 source validation — 2026-10-08
+
+The actual native window workflow in `lite/out/gui-viewport-modal-017` passes
+repository selection, status, checks, complete logs, Controller model streams,
+recent-run expansion and statistics scope, remote clone/viewer, report export
+and source inspection. Controller, Viewer and detail controls stay within
+1100×650, 1180×754 and 1600×900 logical viewports. This is resize coverage,
+not proof of physical multi-monitor DPI behavior. The 25,000-function fixture
+rendered in 1,265 ms with a 500-row roster.
+
+There are 111 direct original activity/detail/role comparisons and 32 original
+statistics comparisons. Modern HTTP and stdio MCP discovery/metadata and the
+official Inspector pass. Disposable client configuration tests include atomic
+backups, stale preview rejection, malformed input refusal and VS Code JSONC.
+Split credentials are redacted from disk, returned output and nested activity
+arguments. Fresh packaged-build evidence is recorded below when it completes.
+
 TangOS Lite 0.4.0, Windows x64; C++17/Win32, statically embedded TinySkia and Nunito. GCC 14.1.0 UCRT64, CMake 3.29.3, Rust 1.98.1 GNU target. Release optimization, stripped executable and disabled PE timestamp. No bundled browser or compiler/toolchain.
 
 The generated release SIZE.txt records exact bytes, SHA-256 and DLL imports. Two independent build directories must produce the same executable hash; the release script normally creates both from scratch. The 0.4.0 final package was produced by two clean builds with identical SHA-256.

@@ -162,8 +162,8 @@ constexpr int SUPPORT = 4850, SUPPORT_CHECK = 4851, SUPPORT_REPORT = 4852, SUPPO
               SUPPORT_DOWNLOAD = 4857, SUPPORT_RESTART = 4858;
 constexpr int MCP_EXPORT = 4830, DETAIL_LOOP = 4840;
 constexpr int MCP_INSTALL = 4831;
-constexpr int DETAIL_SCOPE = 4841, DETAIL_MODEL = 4842, DETAIL_COPY = 4843,
-              DETAIL_RECENT = 4844, DETAIL_REVEAL = 4845, DETAIL_LIVE = 4846;
+constexpr int DETAIL_SCOPE = 4841, DETAIL_MODEL = 4842, DETAIL_COPY = 4843, DETAIL_RECENT = 4844,
+              DETAIL_REVEAL = 4845, DETAIL_LIVE = 4846;
 constexpr int CLONE_DEST = 4810, CLONE_PREVIEW = 4811, CLONE_CONFIRM = 4812, CLONE_CANCEL = 4813;
 constexpr int MCP_TOGGLE = 4620, MCP_CONFIG = 4621, MCP_PROMPT = 4622, MCP_COPY_CONFIG = 4623;
 constexpr int BATCHES = 4630, BATCH_LIST = 4631, BATCH_UP = 4632, BATCH_DOWN = 4633,
@@ -175,6 +175,7 @@ struct Hit {
   RECT rect;
   int index;
 };
+constexpr int DETAIL_OPERATIONS = 4850;
 } // namespace
 struct ConsoleUI::Impl {
   HWND parent, window;
@@ -246,8 +247,8 @@ struct ConsoleUI::Impl {
   std::string atlasColorBy = "status", authorFilter;
   bool atlasDrafts = true;
   bool fullAtlas = false;
-  int mapWidth() const { return std::max(1, width - (fullAtlas ? 36 : 390)); }
-  int mapTop() const { return fullAtlas ? 96 : 148; }
+  int mapWidth() const { return std::max(1, width - (fullAtlas ? 36 : 330)); }
+  int mapTop() const { return fullAtlas ? 52 : 166; }
   int mapHeight() const { return std::max(1, height - mapTop() - 70); }
   RECT mapBounds() const { return {18, mapTop(), 18 + mapWidth(), mapTop() + mapHeight()}; }
   std::vector<std::pair<std::string, int>> contributorRank;
@@ -283,13 +284,17 @@ struct ConsoleUI::Impl {
   Json cloneArguments;
   Json agentStats = Json::object(), pendingStats;
   Json sessionAgentStats = Json::object(), pendingSessionStats;
-  HWND detailScope = nullptr, detailModel = nullptr, detailRuns = nullptr, detailRunOutput = nullptr;
+  HWND detailScope = nullptr, detailModel = nullptr, detailRuns = nullptr,
+       detailRunOutput = nullptr;
   bool detailLifetime = false;
   std::string detailTab = "all", detailRunId, detailRunsEncoded;
-  Json detailActivity = Json::array(), detailStreams = Json::object(), detailLatest = Json::object();
+  Json detailActivity = Json::array(), detailStreams = Json::object(),
+       detailLatest = Json::object();
   std::vector<std::string> detailModels;
   ULONGLONG detailPoll = 0;
   ULONGLONG detailCopiedUntil = 0;
+  RECT detailPanel{};
+  bool detailHasActivity = false;
   std::thread statsWorker;
   std::atomic<bool> statsBusy{false}, statsReady{false};
   ULONGLONG statsPoll = 0;
@@ -651,30 +656,26 @@ struct ConsoleUI::Impl {
         button("Run logs", OPEN_LOG, width - 180, height - 116, 116);
       }
     } else if (screen == Screen::atlas) {
-      search = edit(atlasQuery, SEARCH, 18, 52, cw - 250);
-      layoutChoice = combo({"ov", "size", "match", "author"}, ATLAS_LAYOUT, cw - 222, 52, 100,
+      search = edit(atlasQuery, SEARCH, fullAtlas ? 18 : width - 285, fullAtlas ? 8 : 170,
+                    fullAtlas ? 240 : 260);
+      layoutChoice = combo({"ov", "size", "match", "author"}, ATLAS_LAYOUT, 166, height - 44, 130,
                            atlasMode == "size"     ? 1
                            : atlasMode == "match"  ? 2
                            : atlasMode == "author" ? 3
                                                    : 0);
-      filterChoice =
-          combo({"all", "matched", "unmatched", "near_miss"}, ATLAS_FILTER, cw - 114, 52, 96,
-                atlasFilter == "matched"     ? 1
-                : atlasFilter == "unmatched" ? 2
-                : atlasFilter == "near_miss" ? 3
-                                             : 0);
+      filterChoice = combo({"all", "matched", "unmatched", "near_miss"}, ATLAS_FILTER,
+                           fullAtlas ? 270 : width - 285, fullAtlas ? 8 : 212, 130,
+                           atlasFilter == "matched"     ? 1
+                           : atlasFilter == "unmatched" ? 2
+                           : atlasFilter == "near_miss" ? 3
+                                                        : 0);
       if (!fullAtlas) {
-        button("Add to cart", ATLAS_CART, width - 328, 285, 130);
-        button("Assign cart", ADD_CART, width - 188, 285, 130);
-        button("Inspect source", ATLAS_INSPECT, width - 328, 330, 140);
-        button("Pop out module", ATLAS_MODULE, width - 180, 330, 120);
-        label("Wheel: zoom; left drag: pan\nRight drag: select; WASD/arrows: travel\nSpace: cart; "
-              "Esc: zoom out",
-              width - 332, 378, 310, 80);
-        label("Color", width - 332, 477, 62);
-        colorChoice = combo({"status", "author"}, ATLAS_COLOR, width - 268, 474, 246,
+        button("Add to cart", ATLAS_CART, width - 285, height - 130, 124);
+        button("Assign cart", ADD_CART, width - 153, height - 130, 128);
+        button("Inspect source", ATLAS_INSPECT, width - 285, height - 90, 124);
+        button("Module", ATLAS_MODULE, width - 153, height - 90, 128);
+        colorChoice = combo({"status", "author"}, ATLAS_COLOR, 18, height - 44, 136,
                             atlasColorBy == "author" ? 1 : 0);
-        label("Contributor", width - 332, 513, 88);
         std::vector<std::string> contributors{"Everyone"};
         int authorIndex = 0;
         for (auto &entry : contributorRank) {
@@ -683,33 +684,34 @@ struct ConsoleUI::Impl {
             authorIndex = (int)contributors.size() - 1;
         }
         authorChoice = combo(contributors, ATLAS_AUTHOR, width - 238, 510, 216, authorIndex);
-        draftsChoice = control(L"BUTTON", "Show drafts and near misses", ATLAS_DRAFTS, width - 332,
-                               550, 310, 28, BS_AUTOCHECKBOX);
+        ShowWindow(authorChoice, SW_HIDE);
+        draftsChoice = control(L"BUTTON", "near-misses", ATLAS_DRAFTS, width - 285, 294, 260, 28,
+                               BS_AUTOCHECKBOX);
         SendMessageW(draftsChoice, BM_SETCHECK, atlasDrafts ? BST_CHECKED : BST_UNCHECKED, 0);
       }
-      button("Controller", HOME, 18, height - 48, 108);
-      button("Reload", ATLAS_LOAD, 134, height - 48, 90);
+      button("Reload", ATLAS_LOAD, width - 130, 18, 108);
       button(remoteOnly ? "Connections" : "Encyclopedia", remoteOnly ? CONNECTIONS : ENCYCLOPEDIA,
-             232, height - 48, 126);
-      button("Reset view", ATLAS_RESET, 366, height - 48, 104);
+             310, height - 44, 110);
+      button("Reset", ATLAS_RESET, 428, height - 44, 76);
       button(remoteOnly  ? "Reload published"
              : liveAtlas ? "Local data"
                          : "Live data",
-             ATLAS_LIVE, 478, height - 48, 102);
-      button(fullAtlas ? "Restore layout" : "Full map", ATLAS_FULLSCREEN, cw - 156, height - 48,
-             138);
+             ATLAS_LIVE, 512, height - 44, 102);
+      button(fullAtlas ? "Restore" : "Full map", ATLAS_FULLSCREEN, 18 + mapWidth() - 100,
+             height - 44, 100);
       if (!fullAtlas) {
         auto sortIndex =
             std::find(functionSortKeys.begin(), functionSortKeys.end(), functionSortKey) -
             functionSortKeys.begin();
         functionSort = combo({"unmatched first", "size (largest)", "size (smallest)", "name (A-Z)",
                               "address", "module"},
-                             ATLAS_FUNCTION_SORT, width - 332, 90, 310, (int)sortIndex);
-        functionList = control(L"LISTBOX", "", ATLAS_FUNCTION_LIST, width - 332, 130, 310, 140,
+                             ATLAS_FUNCTION_SORT, width - 285, 254, 260, (int)sortIndex);
+        functionList = control(L"LISTBOX", "", ATLAS_FUNCTION_LIST, width - 285, 340, 260,
+                               std::max(100, height - 482),
                                LBS_NOTIFY | WS_VSCROLL | WS_HSCROLL | LBS_NOINTEGRALHEIGHT);
-        contributorList = control(L"LISTBOX", "", ATLAS_CONTRIBUTORS, 18, 104, cw - 36, 32,
+        contributorList = control(L"LISTBOX", "", ATLAS_CONTRIBUTORS, 18, 102, width - 36, 32,
                                   LBS_NOTIFY | LBS_MULTICOLUMN | WS_HSCROLL | LBS_NOINTEGRALHEIGHT |
-                                  LBS_OWNERDRAWFIXED | LBS_HASSTRINGS);
+                                      LBS_OWNERDRAWFIXED | LBS_HASSTRINGS);
         SendMessageW(contributorList, LB_SETITEMHEIGHT, 0, 28);
         SendMessageW(contributorList, LB_SETCOLUMNWIDTH, 200, 0);
       }
@@ -1012,10 +1014,11 @@ struct ConsoleUI::Impl {
       button("Copy AI prompt", MCP_PROMPT, 454, height - 108, 136);
       button("Controller", HOME, 18, height - 48, 108);
       label("Your clients and credentials", width - 332, 62, 310, 28);
-      label("Add an MCP agent in Controller with its exact client name. Copy this local connection "
-            "configuration into your chosen client, or use Connect to preview and install it. "
-            "API accounts and keys remain your own. Unrelated settings are preserved and backed up.",
-            width - 332, 104, 310, 170);
+      label(
+          "Add an MCP agent in Controller with its exact client name. Copy this local connection "
+          "configuration into your chosen client, or use Connect to preview and install it. "
+          "API accounts and keys remain your own. Unrelated settings are preserved and backed up.",
+          width - 332, 104, 310, 170);
     } else if (screen == Screen::parameters) {
       auto &tool = descriptor.tool(toolId);
       int end = std::min((int)tool.args.size(), (argumentPage + 1) * 10), yy = 64;
@@ -1053,34 +1056,35 @@ struct ConsoleUI::Impl {
     } else if (screen == Screen::profile) {
       buildProfile(cw);
     } else if (screen == Screen::detail) {
-      button("Back", HOME, 18, height - 48, 90);
-      button("Configure", EDIT_AGENT, 118, height - 48, 110);
-      button("Remove AI", REMOVE_AGENT, 238, height - 48, 110);
-      button("Go", GO, 18, 52, 76);
-      button("Stop", STOP, 102, 52, 80);
-      button("Review changes", REVIEW_AGENT, 190, 52, 148);
-      button("Open logs", OPEN_LOG, 346, 52, 144);
-      detailProgress = control(PROGRESS_CLASSW, "", 0, 18, 87, cw - 36, 10);
-      button("Toggle loop", DETAIL_LOOP, width - 332, 374, 170);
-      detailScope = combo({"This session", "All-time"}, DETAIL_SCOPE, 18, 103, 150, detailLifetime ? 1 : 0);
-      body = edit("", 0, 18, 141, cw - 36, 180, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
-      detailModel = combo({"All"}, DETAIL_MODEL, 18, 329, 190);
-      button("Copy output", DETAIL_COPY, 218, 329, 120);
-      label("Live / latest output", 348, 333, 190);
-      logBox = edit("", 0, 18, 367, cw - 36, std::max(50, height - 600),
-                    ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL);
-      detailRuns = control(L"LISTBOX", "", DETAIL_RECENT, 18, height - 225, cw - 36, 62,
-                           LBS_NOTIFY | WS_VSCROLL | WS_HSCROLL);
-      detailRunOutput = edit("", 0, 18, height - 157, cw - 36, 64,
-                            ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL);
-      button("Live", DETAIL_LIVE, 18, height - 87, 90);
-      button("Open run folder", DETAIL_REVEAL, 118, height - 87, 150);
-      label("Independent verification & publication", width - 332, 57, 310, 40);
       auto a = activeAgent();
-      label(a ? a->detail : "Select an agent", width - 332, 108, 310, 120);
-      button("Commit reviewed", COMMIT_AGENT, width - 332, 250, 170);
-      button("Land driver results", LAND_AGENT, width - 332, 290, 170);
-      button("Manage queue", QUEUE, width - 332, 330, 170);
+      detailHasActivity = false;
+      for (auto &run : activityBus().snapshot(utf8(repository.wstring())))
+        if (a && run.value("client", Json::object()).value("name", std::string()) == a->spec.name)
+          detailHasActivity = true;
+      int modalWidth = std::min(560, width - 36);
+      int modalHeight = detailHasActivity ? std::min(640, height - 24) : 360;
+      int x = (width - modalWidth) / 2, y = std::max(12, (height - modalHeight) / 2 - 33);
+      detailPanel = {x, y, x + modalWidth, y + modalHeight};
+      button("×", HOME, x + modalWidth - 44, y + 14, 28);
+      button("···", DETAIL_OPERATIONS, x + modalWidth - 86, y + 14, 34);
+      detailScope = combo({"This session", "All-time"}, DETAIL_SCOPE, x + modalWidth - 190, y + 105,
+                          172, detailLifetime ? 1 : 0);
+      body = edit("", 0, x + 18, y + 140, modalWidth - 36, 180,
+                  ES_MULTILINE | ES_READONLY | WS_VSCROLL);
+      ShowWindow(body, SW_HIDE);
+      detailModel = combo({"All"}, DETAIL_MODEL, x + 18, y + 352, 182);
+      auto copy = button("Copy", DETAIL_COPY, x + modalWidth - 98, y + 352, 80);
+      logBox = edit("", 0, x + 18, y + 390, modalWidth - 36, 84,
+                    ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL);
+      detailRuns = control(L"LISTBOX", "", DETAIL_RECENT, x + 18, y + 486, modalWidth - 36, 46,
+                           LBS_NOTIFY | WS_VSCROLL | WS_HSCROLL);
+      detailRunOutput = edit("", 0, x + 18, y + 540, modalWidth - 36, 42,
+                             ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL);
+      auto live = button("Live", DETAIL_LIVE, x + 18, y + modalHeight - 42, 76);
+      auto folder = button("Open run folder", DETAIL_REVEAL, x + 104, y + modalHeight - 42, 144);
+      if (!detailHasActivity)
+        for (auto control : {detailModel, copy, logBox, detailRuns, detailRunOutput, live, folder})
+          ShowWindow(control, SW_HIDE);
     } else if (screen == Screen::tour) {
       button("Previous", TOUR_PREVIOUS, 50, height - 108, 110);
       button("Next", TOUR_NEXT, 168, height - 108, 100);
@@ -1513,13 +1517,14 @@ struct ConsoleUI::Impl {
     CloseClipboard();
   }
   std::string statisticsSummary(const std::string &id) const {
-    auto stat = (screen == Screen::detail && !detailLifetime ? sessionAgentStats : agentStats).value(id, Json::object());
+    auto stat = (screen == Screen::detail && !detailLifetime ? sessionAgentStats : agentStats)
+                    .value(id, Json::object());
     auto role = measuredRole(agentStats.value(id, Json::object()));
-    std::string out = (screen == Screen::detail && !detailLifetime ? "This session" : "Lifetime statistics") +
-                      std::string("\n\nDeclared matches: ") +
-                      std::to_string(stat.value("declaredMatches", 0)) +
-                      "\nUnique attempted functions: " + std::to_string(stat.value("attempts", 0)) +
-                      "\nNear misses: " + std::to_string(stat.value("nearMisses", 0));
+    std::string out =
+        (screen == Screen::detail && !detailLifetime ? "This session" : "Lifetime statistics") +
+        std::string("\n\nDeclared matches: ") + std::to_string(stat.value("declaredMatches", 0)) +
+        "\nUnique attempted functions: " + std::to_string(stat.value("attempts", 0)) +
+        "\nNear misses: " + std::to_string(stat.value("nearMisses", 0));
     out += "\nHit rate: " + std::to_string((int)std::round(stat.value("hitRate", 0.0) * 100)) + "%";
     if (stat.contains("tokensIn"))
       out += "\nTokens in: " + std::to_string(stat.value("tokensIn", 0LL));
@@ -1533,8 +1538,10 @@ struct ConsoleUI::Impl {
         out += "\n" + i.key() + " · " + std::to_string(i.value().value("attempts", 0)) + " / " +
                std::to_string(i.value().value("matches", 0));
     }
-    out += "\n\nBest as: " + (role["role"].is_null() ? std::string("not sure yet") : role["role"].get<std::string>()) +
-           " — " + role["why"].get<std::string>();
+    out +=
+        "\n\nBest as: " +
+        (role["role"].is_null() ? std::string("not sure yet") : role["role"].get<std::string>()) +
+        " — " + role["why"].get<std::string>();
     out += "\nRecommendation: " + sizeRecommendation(stat.value("bySize", Json::object()));
     for (auto &client : presence)
       if (client.value("agentId", std::string()) == id)
@@ -1547,23 +1554,29 @@ struct ConsoleUI::Impl {
   }
   void refreshDetailActivity() {
     auto agent = activeAgent();
-    if (!agent || !detailRuns || !detailModel) return;
+    if (!agent || !detailRuns || !detailModel)
+      return;
     detailActivity = Json::array();
     for (auto &run : activityBus().snapshot(utf8(repository.wstring())))
       if (run.value("source", std::string()) == "ai" &&
           run.value("client", Json::object()).value("name", std::string()) == agent->spec.name)
         detailActivity.push_back(run);
-    std::stable_sort(detailActivity.begin(), detailActivity.end(), [](const Json &a, const Json &b) {
-      return a.value("startedAt", int64_t(0)) > b.value("startedAt", int64_t(0));
-    });
+    std::stable_sort(detailActivity.begin(), detailActivity.end(),
+                     [](const Json &a, const Json &b) {
+                       return a.value("startedAt", int64_t(0)) > b.value("startedAt", int64_t(0));
+                     });
     detailLatest = detailActivity.empty() ? Json::object() : detailActivity.front();
     for (auto &run : detailActivity)
-      if (run.value("status", std::string()) == "running") { detailLatest = run; break; }
+      if (run.value("status", std::string()) == "running") {
+        detailLatest = run;
+        break;
+      }
     auto output = detailLatest.empty() ? (agent->log.empty() ? "" : tailFile(agent->log))
-                                      : detailLatest.value("output", std::string());
+                                       : detailLatest.value("output", std::string());
     detailStreams = activityStreams(output);
     std::vector<std::string> models{"all"};
-    for (auto &model : detailStreams.at("models")) models.push_back(model.get<std::string>());
+    for (auto &model : detailStreams.at("models"))
+      models.push_back(model.get<std::string>());
     if (models != detailModels) {
       detailModels = models;
       SendMessageW(detailModel, CB_RESETCONTENT, 0, 0);
@@ -1571,12 +1584,14 @@ struct ConsoleUI::Impl {
       for (size_t i = 0; i < models.size(); ++i) {
         auto label = wide(i == 0 ? "All" : models[i]);
         SendMessageW(detailModel, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
-        if (models[i] == detailTab) active = static_cast<int>(i);
+        if (models[i] == detailTab)
+          active = static_cast<int>(i);
       }
       detailTab = models[active];
       SendMessageW(detailModel, CB_SETCURSEL, active, 0);
     }
-    if (!detailStreams.at("byTab").contains(detailTab)) detailTab = "all";
+    if (!detailStreams.at("byTab").contains(detailTab))
+      detailTab = "all";
     updateLiveText(logBox, detailStreams.at("byTab").at(detailTab).get<std::string>());
     auto metadata = Json::array();
     for (size_t i = 0; i < std::min<size_t>(10, detailActivity.size()); ++i) {
@@ -1589,17 +1604,22 @@ struct ConsoleUI::Impl {
       SendMessageW(detailRuns, LB_RESETCONTENT, 0, 0);
       for (size_t i = 0; i < metadata.size(); ++i) {
         auto &run = detailActivity[i];
-        auto label = wide(run.value("status", std::string()) + " · " + run.value("label", std::string()) +
-                          " · " + run.value("commandPreview", std::string()));
+        auto label =
+            wide(run.value("status", std::string()) + " · " + run.value("label", std::string()) +
+                 " · " + run.value("commandPreview", std::string()));
         SendMessageW(detailRuns, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
-        if (run.at("runId") == detailRunId) SendMessageW(detailRuns, LB_SETCURSEL, i, 0);
+        if (run.at("runId") == detailRunId)
+          SendMessageW(detailRuns, LB_SETCURSEL, i, 0);
       }
     }
     for (auto &run : detailActivity)
       if (run.at("runId") == detailRunId) {
-        auto duration = std::max<int64_t>(0, run.value("finishedAt", activityNow()) - run.value("startedAt", int64_t(0)));
-        updateLiveText(detailRunOutput, run.value("label", std::string()) + " · " + std::to_string(duration) +
-                        "ms\n" + run.value("commandPreview", std::string()) + "\n" + run.value("output", std::string()));
+        auto duration = std::max<int64_t>(0, run.value("finishedAt", activityNow()) -
+                                                 run.value("startedAt", int64_t(0)));
+        updateLiveText(detailRunOutput, run.value("label", std::string()) + " · " +
+                                            std::to_string(duration) + "ms\n" +
+                                            run.value("commandPreview", std::string()) + "\n" +
+                                            run.value("output", std::string()));
         break;
       }
   }
@@ -1849,15 +1869,89 @@ struct ConsoleUI::Impl {
                   (p.y - miniBounds.top) * mapHeight() / mh, mapWidth(), mapHeight());
   }
   void paint(HDC dc) {
+    if (screen == Screen::detail) {
+      screen = Screen::controller;
+      paint(dc);
+      screen = Screen::detail;
+      hits.clear();
+      skin::scrim(dc, width, height);
+      auto a = activeAgent();
+      int x = detailPanel.left, y = detailPanel.top, w = detailPanel.right - x,
+          h = detailPanel.bottom - y;
+      skin::panel(dc, x, y, w, h, true);
+      if (!a)
+        return;
+      skin::presenceDot(dc, x + 20, y + 24, "online");
+      skin::label(dc, wide(a->spec.name), x + 38, y + 18, w - 146, 26, 18, true, false, true);
+      auto lifetime = agentStats.value(a->id, Json::object());
+      auto role = measuredRole(lifetime);
+      skin::panel(dc, x + 18, y + 54, w - 36, 40);
+      skin::label(dc,
+                  wide("Role  " +
+                       (role["role"].is_null() ? std::string("not sure yet")
+                                               : role["role"].get<std::string>()) +
+                       " — " + role["why"].get<std::string>()),
+                  x + 30, y + 64, w - 60, 24, 12);
+      auto stats = (detailLifetime ? agentStats : sessionAgentStats).value(a->id, Json::object());
+      auto attempts = stats.value("attempts", 0);
+      std::vector<std::pair<std::string, std::string>> values = {
+          {std::to_string(stats.value("declaredMatches", 0)), "matches"},
+          {attempts ? std::to_string(int(std::round(stats.value("hitRate", 0.0) * 100))) + "%"
+                    : "-%",
+           "hit rate"},
+          {std::to_string(attempts), "attempts"},
+          {std::to_string(stats.value("nearMisses", 0)), "near misses"}};
+      int cell = (w - 66) / 4;
+      for (int i = 0; i < 4; ++i) {
+        int cx = x + 18 + i * (cell + 10);
+        skin::panel(dc, cx, y + 147, cell, 66);
+        skin::label(dc, wide(values[i].first), cx + 8, y + 158, cell - 16, 26, 20, true);
+        skin::label(dc, wide(values[i].second), cx + 8, y + 189, cell - 16, 18, 11, false, true);
+      }
+      int line = y + 230;
+      if (detailHasActivity) {
+        auto sizes = stats.value("bySize", Json::object());
+        skin::label(dc, L"HIT RATE BY SIZE", x + 20, line, w - 40, 20, 11, true, true);
+        line += 22;
+        for (auto it = sizes.begin(); it != sizes.end() && line < y + 302; ++it, line += 18) {
+          skin::label(dc, wide(it.key()), x + 20, line, 96, 18, 11);
+          int total = it.value().value("attempts", 0), matched = it.value().value("matches", 0);
+          RECT bar{x + 130, line + 5,
+                   x + 130 + (total ? int((w - 238) * double(matched) / total) : 0), line + 13};
+          auto brush = CreateSolidBrush(RGB(0, 153, 224));
+          FillRect(dc, &bar, brush);
+          DeleteObject(brush);
+          skin::label(dc, wide(std::to_string(matched) + "/" + std::to_string(total)), x + w - 86,
+                      line, 66, 18, 11, false, true);
+        }
+      }
+      skin::label(dc, L"RECOMMENDATION", x + 20, line, w - 40, 20, 11, true, true);
+      skin::label(dc, wide(sizeRecommendation(stats.value("bySize", Json::object()))), x + 18,
+                  line + 25, w - 36, 24, 12);
+      if (detailHasActivity)
+        skin::label(
+            dc, wide(detailLatest.value("status", std::string()) == "running" ? "Live" : "Latest"),
+            x + 210, y + 357, 140, 22, 12, true);
+      else
+        skin::label(dc, L"›  RECENT RUNS", x + 22, y + h - 40, w - 44, 22, 11, true, true);
+      return;
+    }
     bool fullController = screen == Screen::remoteGate ||
                           (screen == Screen::controller && !controllerNeedsRail()) ||
                           (screen == Screen::atlas && fullAtlas);
-    skin::panel(dc, 0, 0, fullController ? width : width - 356, height);
-    if (!fullController)
+    if (screen == Screen::atlas) {
+      if (!fullAtlas) {
+        skin::panel(dc, 0, 0, width, 140);
+        skin::panel(dc, width - 300, 158, 300, height - 166);
+      }
+      skin::panel(dc, 8, mapTop() - 8, mapWidth() + 20, mapHeight() + 16);
+    } else
+      skin::panel(dc, 0, 0, fullController ? width : width - 356, height);
+    if (!fullController && screen != Screen::atlas)
       skin::panel(dc, width - 340, 0, 340, height, true);
     std::string title = screen == Screen::remoteGate       ? "Viewer-only project"
                         : screen == Screen::controller     ? "Chaos Controller"
-                        : screen == Screen::atlas          ? "Chaos Viewer"
+                        : screen == Screen::atlas          ? (fullAtlas ? "" : "Atlas")
                         : screen == Screen::encyclopedia   ? "Encyclopedia"
                         : screen == Screen::settings       ? "Settings"
                         : screen == Screen::profile        ? "Connect AI"
@@ -1956,13 +2050,29 @@ struct ConsoleUI::Impl {
           matchedBytes += f.size;
         }
       }
-      if (!fullAtlas)
-        skin::label(dc,
-                    wide("Functions " + std::to_string(matched) + "/" +
-                         std::to_string(atlas.size()) + " · Code " + std::to_string(matchedBytes) +
-                         "/" + std::to_string(bytes) + " bytes · " +
-                         (liveAtlas ? cacheNotice : "Local data")),
-                    18, 84, width - 390, 24, 12);
+      if (!fullAtlas) {
+        int half = (width - 54) / 2;
+        auto progress = [&](int x, const std::string &name, uint64_t done, uint64_t total) {
+          auto percent = total ? double(done) * 100 / total : 0;
+          char rate[32];
+          snprintf(rate, sizeof(rate), "%.1f%%", percent);
+          skin::label(dc,
+                      wide(name + " " + rate + " · " + std::to_string(done) + " / " +
+                           std::to_string(total)),
+                      x, 56, half, 22, 12);
+          RECT track{x, 84, x + half, 94};
+          auto brush = CreateSolidBrush(RGB(194, 222, 232));
+          FillRect(dc, &track, brush);
+          DeleteObject(brush);
+          track.right = x + int(half * percent / 100);
+          brush = CreateSolidBrush(RGB(118, 204, 20));
+          FillRect(dc, &track, brush);
+          DeleteObject(brush);
+        };
+        progress(18, "Functions", matched, atlas.size());
+        progress(36 + half, "Code", matchedBytes, bytes);
+        skin::label(dc, wide(liveAtlas ? cacheNotice : "local"), 90, 20, 300, 24, 13, false, true);
+      }
       int left = 18, top = mapTop(), w = mapWidth(), h = mapHeight();
       std::string key = needle + "|" + atlasMode + "|" + functionSortKey + "|" + atlasFilter + "|" +
                         moduleFilter + "|" + std::to_string(w) + "x" + std::to_string(h);
@@ -2056,7 +2166,8 @@ struct ConsoleUI::Impl {
           SendMessageW(contributorList, LB_ADDSTRING, 0, (LPARAM)L"Everyone");
           int at = 1;
           for (auto &entry : ranked) {
-            auto daily = atlasExtras.value("atlas.counts", Json::object()).value("daily", Json::object());
+            auto daily =
+                atlasExtras.value("atlas.counts", Json::object()).value("daily", Json::object());
             int recent = daily.value(entry.first, 0);
             auto name = wide(entry.first + " " + std::to_string(entry.second) +
                              (recent > 0 ? "  ▲" + std::to_string(recent) : ""));
@@ -2137,9 +2248,8 @@ struct ConsoleUI::Impl {
           SetDCBrushColor(dc, RGB(255, 214, 40));
           FrameRect(dc, &bounds, (HBRUSH)GetStockObject(DC_BRUSH));
         }
-        if (tw > 90 && th > 24) {
-          if (band != 1 || tile.group.empty())
-            skin::label(dc, wide(f.name), x + 4, y + 3, tw - 8, 22, 11, true);
+        if (tw >= 50 && th >= 40) {
+          skin::label(dc, wide(f.name), x + 4, y + 3, tw - 8, 22, 11, true);
           if (atlasExtras.contains("atlas.cosmetics"))
             for (auto &star : atlasExtras["atlas.cosmetics"].value("stars", Json::array()))
               if ((star.value("function", std::string()) == f.name ||
@@ -2182,8 +2292,14 @@ struct ConsoleUI::Impl {
         for (auto &section : sections) {
           auto &r = section.second;
           if (r.right > left && r.bottom > top && r.left < left + w && r.top < top + h)
-            skin::label(dc, wide(section.first), r.left + 4, r.top + 3,
-                        std::max(0, (int)(r.right - r.left - 8)), 24, 11, true);
+            skin::label(dc,
+                        wide(section.first + " (" +
+                             std::to_string(std::count_if(
+                                 tiles.begin(), tiles.end(),
+                                 [&](const auto &tile) { return tile.group == section.first; })) +
+                             ")"),
+                        r.left + 4, r.top + 3, std::max(0, (int)(r.right - r.left - 8)), 24, 11,
+                        true);
         }
       }
       if (marquee) {
@@ -2194,44 +2310,53 @@ struct ConsoleUI::Impl {
         DeleteObject(b);
       }
       RestoreDC(dc, saved);
-      miniBounds = {left + w - 154, top + h - 106, left + w - 8, top + h - 8};
-      auto mb = CreateSolidBrush(skin::field());
-      FillRect(dc, &miniBounds, mb);
-      DeleteObject(mb);
-      double mw = miniBounds.right - miniBounds.left, mh = miniBounds.bottom - miniBounds.top;
-      for (const auto &t : tiles) {
-        RECT r{miniBounds.left + (int)(t.x * mw / w), miniBounds.top + (int)(t.y * mh / h),
-               miniBounds.left + (int)((t.x + t.width) * mw / w),
-               miniBounds.top + (int)((t.y + t.height) * mh / h)};
-        auto color = atlasColor(atlas[t.index].row, atlasColorBy == "author", atlasDrafts,
-                                atlasAliases, atlasAuthorColors);
-        COLORREF miniColor = RGB(185, 202, 219);
-        if (color.size() == 7 && color[0] == '#' &&
-            color.find_first_not_of("0123456789abcdefABCDEF", 1) == std::string::npos) {
-          auto v = std::stoul(color.substr(1), nullptr, 16);
-          miniColor = RGB((v >> 16) & 255, (v >> 8) & 255, v & 255);
+      miniBounds = {};
+      if (band >= 2) {
+        int miniW = std::clamp(int(w * .22), 120, 220);
+        int miniH = int(std::round(double(miniW) * h / w));
+        if (miniH > int(h * .32)) {
+          miniH = int(h * .32);
+          miniW = int(std::round(double(miniH) * w / h));
         }
-        SetDCBrushColor(dc, miniColor);
-        FillRect(dc, &r, (HBRUSH)GetStockObject(DC_BRUSH));
+        miniBounds = {left + w - miniW - 14, top + 14, left + w - 14, top + miniH + 14};
+        auto mb = CreateSolidBrush(skin::field());
+        FillRect(dc, &miniBounds, mb);
+        DeleteObject(mb);
+        double mw = miniBounds.right - miniBounds.left, mh = miniBounds.bottom - miniBounds.top;
+        for (const auto &t : tiles) {
+          RECT r{miniBounds.left + (int)(t.x * mw / w), miniBounds.top + (int)(t.y * mh / h),
+                 miniBounds.left + (int)((t.x + t.width) * mw / w),
+                 miniBounds.top + (int)((t.y + t.height) * mh / h)};
+          auto color = atlasColor(atlas[t.index].row, atlasColorBy == "author", atlasDrafts,
+                                  atlasAliases, atlasAuthorColors);
+          COLORREF miniColor = RGB(185, 202, 219);
+          if (color.size() == 7 && color[0] == '#' &&
+              color.find_first_not_of("0123456789abcdefABCDEF", 1) == std::string::npos) {
+            auto v = std::stoul(color.substr(1), nullptr, 16);
+            miniColor = RGB((v >> 16) & 255, (v >> 8) & 255, v & 255);
+          }
+          SetDCBrushColor(dc, miniColor);
+          FillRect(dc, &r, (HBRUSH)GetStockObject(DC_BRUSH));
+        }
+        if (hoveredFunction < atlas.size() && !panning && !marquee) {
+          auto &f = atlas[hoveredFunction];
+          skin::panel(dc, left + 14, top + 14, std::min(w - 28, 430), 100);
+          skin::label(dc,
+                      wide(f.name + "\n" + f.module + " · " + f.state + " · " +
+                           std::to_string(f.size) + " bytes\n" +
+                           (f.row.contains("author") && f.row["author"].is_string()
+                                ? f.row["author"].get<std::string>()
+                                : std::string())),
+                      left + 24, top + 22, std::min(w - 48, 410), 84, 12);
+        }
+        auto v = camera.visible(w, h);
+        RECT vr{miniBounds.left + (int)(v.x * mw / w), miniBounds.top + (int)(v.y * mh / h),
+                miniBounds.left + (int)((v.x + v.width) * mw / w),
+                miniBounds.top + (int)((v.y + v.height) * mh / h)};
+        mb = CreateSolidBrush(RGB(255, 214, 40));
+        FrameRect(dc, &vr, mb);
+        DeleteObject(mb);
       }
-      if (hoveredFunction < atlas.size() && !panning && !marquee) {
-        auto &f = atlas[hoveredFunction];
-        skin::panel(dc, left + 14, top + 14, std::min(w - 28, 430), 100);
-        skin::label(dc,
-                    wide(f.name + "\n" + f.module + " · " + f.state + " · " +
-                         std::to_string(f.size) + " bytes\n" +
-                         (f.row.contains("author") && f.row["author"].is_string()
-                              ? f.row["author"].get<std::string>()
-                              : std::string())),
-                    left + 24, top + 22, std::min(w - 48, 410), 84, 12);
-      }
-      auto v = camera.visible(w, h);
-      RECT vr{miniBounds.left + (int)(v.x * mw / w), miniBounds.top + (int)(v.y * mh / h),
-              miniBounds.left + (int)((v.x + v.width) * mw / w),
-              miniBounds.top + (int)((v.y + v.height) * mh / h)};
-      mb = CreateSolidBrush(RGB(255, 214, 40));
-      FrameRect(dc, &vr, mb);
-      DeleteObject(mb);
       if (!fullAtlas && !authorFilter.empty()) {
         int lifetime = 0, daily = 0;
         for (auto &entry : contributorRank)
@@ -2244,13 +2369,13 @@ struct ConsoleUI::Impl {
         skin::label(dc,
                     wide(authorFilter + " · " + std::to_string(lifetime) + " matches · +" +
                          std::to_string(daily) + " today"),
-                    width - 322, 584, 302, 48, 12);
+                    width - 285, height - 52, 260, 36, 11);
       }
       if (!fullAtlas)
         skin::label(dc,
                     wide(std::to_string(filtered.size()) + " functions · " +
                          std::to_string(cart.size()) + " in cart"),
-                    width - 322, 53, 302, 26, 13, true);
+                    width - 150, 297, 125, 22, 11, false, true);
     } else if (screen == Screen::tour && !guideSteps.empty()) {
       skin::mascot(dc, width - 220, 120, 180,
                    guideSteps.at(tourStep).value("emotion", std::string("smile")));
@@ -2377,6 +2502,29 @@ struct ConsoleUI::Impl {
     fleet->commitReviewed(selectedId, "Reviewed agent work: " + agentName, tree);
   }
   void action(int id, int notification) {
+    if (id == DETAIL_OPERATIONS) {
+      auto menu = CreatePopupMenu();
+      for (auto entry :
+           std::vector<std::pair<int, const wchar_t *>>{{GO, L"Go"},
+                                                        {STOP, L"Stop"},
+                                                        {EDIT_AGENT, L"Configure"},
+                                                        {DETAIL_LOOP, L"Toggle loop"},
+                                                        {QUEUE, L"Manage queue"},
+                                                        {REVIEW_AGENT, L"Review changes"},
+                                                        {COMMIT_AGENT, L"Commit reviewed"},
+                                                        {LAND_AGENT, L"Land verified results"},
+                                                        {OPEN_LOG, L"Open complete logs"},
+                                                        {REMOVE_AGENT, L"Remove agent"}})
+        AppendMenuW(menu, MF_STRING, entry.first, entry.second);
+      RECT bounds{};
+      GetWindowRect(GetDlgItem(window, DETAIL_OPERATIONS), &bounds);
+      auto selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, bounds.left,
+                                     bounds.bottom, 0, window, nullptr);
+      DestroyMenu(menu);
+      if (selected)
+        action(selected, BN_CLICKED);
+      return;
+    }
     if (id == DETAIL_SCOPE && notification == CBN_SELCHANGE) {
       detailLifetime = choice(detailScope) == 1;
       detailPoll = 0;
@@ -2395,7 +2543,12 @@ struct ConsoleUI::Impl {
     if (id == DETAIL_RECENT && notification == LBN_SELCHANGE) {
       auto index = SendMessageW(detailRuns, LB_GETCURSEL, 0, 0);
       if (index >= 0 && static_cast<size_t>(index) < detailActivity.size()) {
-        detailRunId = detailActivity[index].at("runId");
+        auto selected = detailActivity[index].at("runId").get<std::string>();
+        detailRunId = detailRunId == selected ? std::string() : selected;
+        if (detailRunId.empty()) {
+          setText(detailRunOutput, "Select a recent run to expand its output.");
+          SendMessageW(detailRuns, LB_SETCURSEL, -1, 0);
+        }
         refreshDetailActivity();
       }
       return;
@@ -2484,7 +2637,8 @@ struct ConsoleUI::Impl {
     if (id == ATLAS_CONTRIBUTORS && notification == LBN_SELCHANGE) {
       auto row = SendMessageW(contributorList, LB_GETCURSEL, 0, 0);
       auto selected = row <= 0 || size_t(row) > contributorRank.size()
-                         ? std::string() : contributorRank[size_t(row) - 1].first;
+                          ? std::string()
+                          : contributorRank[size_t(row) - 1].first;
       authorFilter = authorFilter == selected ? std::string() : selected;
       SendMessageW(contributorList, LB_SETCURSEL, authorFilter.empty() ? 0 : row, 0);
       InvalidateRect(window, nullptr, FALSE);
@@ -2826,15 +2980,18 @@ struct ConsoleUI::Impl {
       break;
     }
     case MCP_INSTALL: {
-      if (!mcp || mcpBusy) throw std::runtime_error("Start MCP first");
+      if (!mcp || mcpBusy)
+        throw std::runtime_error("Start MCP first");
       auto a = activeAgent();
-      if (!a || a->spec.kind != "mcp") throw std::runtime_error("Select an MCP agent in Controller first");
+      if (!a || a->spec.kind != "mcp")
+        throw std::runtime_error("Select an MCP agent in Controller first");
       auto connection = data / "mcp-client.json";
       write(connection, mcp->configuration());
-      auto plan = previewClientSetup(selected(profileFields["MCP client"]), fs::u8path(selfExecutable()),
-                                     connection, a->spec.name);
+      auto plan = previewClientSetup(selected(profileFields["MCP client"]),
+                                     fs::u8path(selfExecutable()), connection, a->spec.name);
       auto prompt = wide(plan.outcome.dump(2));
-      if (MessageBoxW(window, prompt.c_str(), L"Review MCP client setup", MB_OKCANCEL | MB_ICONINFORMATION) == IDOK) {
+      if (MessageBoxW(window, prompt.c_str(), L"Review MCP client setup",
+                      MB_OKCANCEL | MB_ICONINFORMATION) == IDOK) {
         clientInstallResult = installClientSetup(plan);
         setText(body, mcpSummary() + "\n\nClient setup: " + clientInstallResult.dump(2));
       }
@@ -3350,7 +3507,8 @@ struct ConsoleUI::Impl {
     }
     if (screen == Screen::mcpConnection && body) {
       auto summary = mcpSummary();
-      if (!clientInstallResult.empty()) summary += "\n\nClient setup: " + clientInstallResult.dump(2);
+      if (!clientInstallResult.empty())
+        summary += "\n\nClient setup: " + clientInstallResult.dump(2);
       if (text(body) != summary)
         setText(body, summary);
     }
@@ -3583,17 +3741,24 @@ struct ConsoleUI::Impl {
         std::vector<std::pair<std::string, int>> tools;
         for (auto &run : detailActivity) {
           auto id = run.value("toolId", std::string());
-          auto found = std::find_if(tools.begin(), tools.end(), [&](const auto &t) { return t.first == id; });
-          if (found == tools.end()) tools.push_back({id, 1}); else ++found->second;
+          auto found = std::find_if(tools.begin(), tools.end(),
+                                    [&](const auto &t) { return t.first == id; });
+          if (found == tools.end())
+            tools.push_back({id, 1});
+          else
+            ++found->second;
         }
-        std::stable_sort(tools.begin(), tools.end(), [](const auto &a, const auto &b) { return a.second > b.second; });
+        std::stable_sort(tools.begin(), tools.end(),
+                         [](const auto &a, const auto &b) { return a.second > b.second; });
         std::string called;
-        for (auto &tool : tools) called += "  " + tool.first + " ×" + std::to_string(tool.second);
-        updateLiveText(body,
-                a->spec.name + " · " + a->phase + "\n" + a->detail +
-                    "\nWorktree: " + utf8(a->worktree.wstring()) + "\nBranch: " + a->branch + "\n" +
-                    std::to_string(a->completed) + " worked; " + std::to_string(a->queue.size()) +
-                    " queued\nLog: " + utf8(a->log.wstring()) + "\nTools called:" + called + "\n\n" + statisticsSummary(a->id));
+        for (auto &tool : tools)
+          called += "  " + tool.first + " ×" + std::to_string(tool.second);
+        updateLiveText(body, a->spec.name + " · " + a->phase + "\n" + a->detail +
+                                 "\nWorktree: " + utf8(a->worktree.wstring()) +
+                                 "\nBranch: " + a->branch + "\n" + std::to_string(a->completed) +
+                                 " worked; " + std::to_string(a->queue.size()) +
+                                 " queued\nLog: " + utf8(a->log.wstring()) +
+                                 "\nTools called:" + called + "\n\n" + statisticsSummary(a->id));
         if (detailProgress) {
           SendMessageW(detailProgress, PBM_SETRANGE32, 0, std::max(1, a->total));
           SendMessageW(detailProgress, PBM_SETPOS, a->completed, 0);
@@ -3623,7 +3788,9 @@ struct ConsoleUI::Impl {
         HDC buffer = CreateCompatibleDC(dc);
         HBITMAP bitmap = CreateCompatibleBitmap(dc, self->width, self->height);
         auto prev = SelectObject(buffer, bitmap);
-        skin::background(buffer, self->width, self->height);
+        POINT origin{};
+        MapWindowPoints(h, self->parent, &origin, 1);
+        skin::background(buffer, self->width, self->height, origin.y, self->height + origin.y);
         self->paint(buffer);
         BitBlt(dc, 0, 0, self->width, self->height, buffer, 0, 0, SRCCOPY);
         SelectObject(buffer, prev);
@@ -3632,20 +3799,28 @@ struct ConsoleUI::Impl {
         EndPaint(h, &ps);
         return 0;
       }
-      case WM_PRINTCLIENT:
-        skin::background((HDC)w, self->width, self->height);
+      case WM_PRINTCLIENT: {
+        POINT origin{};
+        MapWindowPoints(h, self->parent, &origin, 1);
+        skin::background((HDC)w, self->width, self->height, origin.y, self->height + origin.y);
         self->paint((HDC)w);
         return 0;
+      }
       case WM_DRAWITEM: {
         auto item = (DRAWITEMSTRUCT *)l;
         if (item->CtlType == ODT_LISTBOX && item->CtlID == ATLAS_CONTRIBUTORS) {
           FillRect(item->hDC, &item->rcItem, self->fieldBrush);
-          if (item->itemID == (UINT)-1) return TRUE;
+          if (item->itemID == (UINT)-1)
+            return TRUE;
           auto bounds = item->rcItem;
-          bounds.left += 5; bounds.right -= 5; bounds.top += 2; bounds.bottom -= 2;
+          bounds.left += 5;
+          bounds.right -= 5;
+          bounds.top += 2;
+          bounds.bottom -= 2;
           if (item->itemState & ODS_SELECTED) {
             auto brush = CreateSolidBrush(RGB(202, 228, 247));
-            FillRect(item->hDC, &bounds, brush); DeleteObject(brush);
+            FillRect(item->hDC, &bounds, brush);
+            DeleteObject(brush);
           }
           auto rank = size_t(item->itemID);
           if (rank > 0 && rank <= self->contributorRank.size()) {
@@ -3653,21 +3828,29 @@ struct ConsoleUI::Impl {
             auto color = self->atlasAuthorColors[name];
             unsigned rgb = 0x8896a5;
             if (color.size() == 7 && color[0] == '#') {
-              try { rgb = std::stoul(color.substr(1), nullptr, 16); } catch (...) {}
+              try {
+                rgb = std::stoul(color.substr(1), nullptr, 16);
+              } catch (...) {
+              }
             }
             auto brush = CreateSolidBrush(RGB((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255));
             auto old = SelectObject(item->hDC, brush);
             auto pen = SelectObject(item->hDC, GetStockObject(NULL_PEN));
             Ellipse(item->hDC, bounds.left + 4, bounds.top + 6, bounds.left + 14, bounds.top + 16);
-            SelectObject(item->hDC, pen); SelectObject(item->hDC, old); DeleteObject(brush);
+            SelectObject(item->hDC, pen);
+            SelectObject(item->hDC, old);
+            DeleteObject(brush);
             bounds.left += 20;
-          } else bounds.left += 6;
+          } else
+            bounds.left += 6;
           auto length = SendMessageW(item->hwndItem, LB_GETTEXTLEN, item->itemID, 0);
           std::wstring title(size_t(std::max<LRESULT>(0, length)) + 1, 0);
           SendMessageW(item->hwndItem, LB_GETTEXT, item->itemID, (LPARAM)title.data());
           auto oldFont = SelectObject(item->hDC, self->font);
-          SetBkMode(item->hDC, TRANSPARENT); SetTextColor(item->hDC, skin::text());
-          DrawTextW(item->hDC, title.c_str(), -1, &bounds, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+          SetBkMode(item->hDC, TRANSPARENT);
+          SetTextColor(item->hDC, skin::text());
+          DrawTextW(item->hDC, title.c_str(), -1, &bounds,
+                    DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
           SelectObject(item->hDC, oldFont);
           return TRUE;
         }
@@ -3740,6 +3923,10 @@ struct ConsoleUI::Impl {
         self->build();
         return 0;
       case WM_KEYDOWN:
+        if (self->screen == Screen::detail && w == VK_ESCAPE) {
+          self->navigate(Screen::controller);
+          return 0;
+        }
         if (self->screen == Screen::atlas) {
           self->viewerKey(w);
           return 0;
@@ -3780,6 +3967,12 @@ struct ConsoleUI::Impl {
           return 0;
         break;
       case WM_LBUTTONDOWN: {
+        if (self->screen == Screen::detail) {
+          POINT p{(short)LOWORD(l), (short)HIWORD(l)};
+          if (!PtInRect(&self->detailPanel, p))
+            self->navigate(Screen::controller);
+          return 0;
+        }
         if (self->screen != Screen::atlas)
           break;
         POINT p{(short)LOWORD(l), (short)HIWORD(l)};
@@ -4219,10 +4412,14 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     impl->navigate(Screen::detail);
     impl->detailPoll = 0;
     impl->tick();
-    if (impl->detailActivity.empty() || text(impl->logBox).find("fleet workflow") == std::string::npos) {
-      write(directory / "activity-failure.json", Json{{"repository", utf8(impl->repository.wstring())},
-            {"selected", impl->selectedId}, {"activity", activityBus().snapshot()},
-            {"visible", text(impl->logBox)}}.dump(2));
+    if (impl->detailActivity.empty() ||
+        text(impl->logBox).find("fleet workflow") == std::string::npos) {
+      write(directory / "activity-failure.json",
+            Json{{"repository", utf8(impl->repository.wstring())},
+                 {"selected", impl->selectedId},
+                 {"activity", activityBus().snapshot()},
+                 {"visible", text(impl->logBox)}}
+                .dump(2));
       throw std::runtime_error("Agent detail did not hydrate the latest real run output");
     }
     SendMessageW(impl->detailRuns, LB_SETCURSEL, 0, 0);
@@ -4231,11 +4428,20 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
       throw std::runtime_error("Recent run expansion lost retained output");
     auto runId = "fanout-fixture-" + uniqueId();
     auto selectedAgent = impl->activeAgent();
-    activityBus().publish({{"kind", "run-started"}, {"run", {{"runId", runId}, {"toolId", "drive"},
-        {"label", "Fan-out fixture"}, {"source", "ai"}, {"client", {{"name", selectedAgent->spec.name}}},
-        {"repository", utf8(impl->repository.wstring())}, {"startedAt", activityNow()}, {"status", "running"},
-        {"output", ""}, {"commandPreview", "fixture"}}}});
-    activityBus().publish({{"kind", "run-output"}, {"runId", runId},
+    activityBus().publish({{"kind", "run-started"},
+                           {"run",
+                            {{"runId", runId},
+                             {"toolId", "drive"},
+                             {"label", "Fan-out fixture"},
+                             {"source", "ai"},
+                             {"client", {{"name", selectedAgent->spec.name}}},
+                             {"repository", utf8(impl->repository.wstring())},
+                             {"startedAt", activityNow()},
+                             {"status", "running"},
+                             {"output", ""},
+                             {"commandPreview", "fixture"}}}});
+    activityBus().publish({{"kind", "run-output"},
+                           {"runId", runId},
                            {"chunk", u8"⟦vendor/one⟧ first model\n⟦vendor/two⟧ second model\n"}});
     impl->refreshDetailActivity();
     SendMessageW(impl->detailModel, CB_SETCURSEL, 2, 0);
@@ -4243,13 +4449,17 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     if (text(impl->logBox).find("second model") == std::string::npos ||
         text(impl->logBox).find("first model") != std::string::npos)
       throw std::runtime_error("Agent detail model tabs did not isolate live streams");
-    activityBus().publish({{"kind", "run-finished"}, {"runId", runId}, {"status", "ok"},
-                           {"exitCode", 0}, {"finishedAt", activityNow()}});
+    activityBus().publish({{"kind", "run-finished"},
+                           {"runId", runId},
+                           {"status", "ok"},
+                           {"exitCode", 0},
+                           {"finishedAt", activityNow()}});
     SendMessageW(impl->detailScope, CB_SETCURSEL, 1, 0);
     impl->action(DETAIL_SCOPE, CBN_SELCHANGE);
     if (!impl->detailLifetime || text(impl->body).find("Lifetime statistics") == std::string::npos)
       throw std::runtime_error("Agent detail statistics scope did not switch");
-    write(directory / "detail-gui-report.txt", "PASS: actual latest run, recent expansion, live model tabs, lifetime/session scope");
+    write(directory / "detail-gui-report.txt",
+          "PASS: actual latest run, recent expansion, live model tabs, lifetime/session scope");
     setText(impl->logBox, impl->fleet->review(impl->selectedId));
     write(directory / "fleet-gui-report.txt",
           "PASS: packaged CLI agent, isolated worktree, instructions, independent checks, live UI, "
@@ -4453,6 +4663,29 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
   write(directory / "viewer-gui-report.txt",
         "PASS: native source/history inspection and asynchronous preflight screens; "
         "viewport/LOD/marquee validated by unit tests.");
+  int originalWidth = impl->width, originalHeight = impl->height;
+  Json viewports = Json::array();
+  for (auto size : std::vector<std::pair<int, int>>{{1100, 650}, {1180, 754}, {1600, 900}}) {
+    resize(size.first, size.second);
+    for (auto screen : {Screen::controller, Screen::atlas, Screen::detail}) {
+      impl->navigate(screen);
+      for (auto control : impl->controls) {
+        if (!(GetWindowLongW(control, GWL_STYLE) & WS_VISIBLE))
+          continue;
+        RECT bounds{};
+        GetWindowRect(control, &bounds);
+        MapWindowPoints(nullptr, impl->window, (POINT *)&bounds, 2);
+        if (bounds.left < 0 || bounds.top < 0 || bounds.right > impl->width ||
+            bounds.bottom > impl->height)
+          throw std::runtime_error(
+              "Visible native control escapes viewport: screen=" + std::to_string(int(screen)) +
+              " id=" + std::to_string(GetDlgCtrlID(control)));
+      }
+    }
+    viewports.push_back({{"width", size.first}, {"height", size.second}, {"screens", 3}});
+  }
+  resize(originalWidth, originalHeight);
+  write(directory / "viewport-bounds.json", viewports.dump(2));
   impl->navigate(Screen::controller);
 }
 } // namespace lite

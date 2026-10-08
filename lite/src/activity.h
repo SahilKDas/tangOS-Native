@@ -7,6 +7,7 @@ class ActivityBus {
   mutable std::mutex mutex;
   std::map<std::string, Json> runs;
   std::vector<std::string> order;
+
 public:
   void publish(const Json &event);
   Json snapshot(const std::string &repository = {}) const;

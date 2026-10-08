@@ -133,3 +133,27 @@ Deleting a session cancels its in-flight requests, including stdio EOF teardown.
 Stdio workers and output writes are bounded and synchronized. Provider reads
 retain their normal network timeout; only local MCP calls have the longer
 ten-minute receive budget needed for repository tools.
+
+## Native client setup and activity (0.17.0)
+
+Client installation requires a path/configuration preview and explicit user
+confirmation. It merges only the `tangos-lite` entry, retains unrelated values,
+copies the original file to a local backup, and rechecks its hash before atomic
+replacement. Malformed files, reparse-point files and edits after review are
+rejected. VS Code JSONC is normalized to JSON; original comments remain in the
+backup. No client configuration or credentials are committed to the repository.
+
+Activity capture receives the same redacted stream as durable logs and returned
+process output. Nested sensitive arguments and known environment credentials
+are removed before previews and activity events. The in-memory store is bounded;
+complete logs remain on disk. These filters protect known credentials, not
+arbitrary unknown secret formats printed by a trusted repository script.
+
+Modern MCP is stateless and uses explicit per-request metadata, routing-header
+validation and private, zero-TTL discovery results. Client display names do not
+authorize execution. The authenticated local bridge explicitly selects the
+configured agent; its opaque transport identifier scopes cancellation and
+presence rather than serving as authentication. HTTP disconnect cancels its
+request-owned tool, while stdio cancellation and EOF retain worker lifetimes.
+The bearer token grants access to this user's enabled tools; the endpoint stays
+loopback-only and rejects browser origins.

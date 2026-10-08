@@ -2,6 +2,7 @@
 #include "mcp.h"
 #include "atlas_layout.h"
 #include "client_setup.h"
+#include "activity.h"
 #include <chrono>
 #include <iostream>
 #include <stdexcept>
@@ -207,6 +208,14 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       write(configPath, "{ malformed");
       reject([&] { previewClientSetup("Claude Desktop", fs::u8path(selfExecutable()), data / "mcp.json", "Agent", configPath); },
              "MCP installation never replaces malformed client configuration");
+      write(configPath, "{ // retain in backup\n\"servers\":{\"other\":{\"command\":\"https://example.invalid/a/*literal*/\",},},/* block */\"inputs\":[],}");
+      auto vscode = previewClientSetup("VS Code", fs::u8path(selfExecutable()), data / "mcp.json", "Agent", configPath);
+      auto vscodeInstall = installClientSetup(vscode);
+      auto vscodeMerged = Json::parse(read(configPath));
+      expect(vscodeMerged["servers"]["other"]["command"] == "https://example.invalid/a/*literal*/" &&
+             vscodeMerged["servers"]["tangos-lite"]["type"] == "stdio" &&
+             read(fs::u8path(vscodeInstall["backup"].get<std::string>())).find("retain in backup") != std::string::npos,
+             "VS Code JSONC comments and trailing commas preserve values and exact backup");
       reject([&] { Fleet second(repo, data / "projects/fixture", desc, settings); },
              "cross-instance ownership");
       AgentSpec a;
@@ -811,13 +820,24 @@ print('UI Stop returns a tool error to the client instead of silently dropping i
                             "os,time,sys\ns=os.environ['TEST_API_KEY'];sys.stdout.write(s[:8]);sys."
                             "stdout.flush();time.sleep(.1);print(s[8:])\n");
     auto secretLog = dir / "split.log";
-    setup.run({{"python", utf8((dir / "split.py").wstring())},
-               dir,
-               {{"TEST_API_KEY", "fixture-secret-123456"}}},
-              {}, secretLog);
+    Command secretCommand{{"python", utf8((dir / "split.py").wstring())}, dir,
+                          {{"TEST_API_KEY", "fixture-secret-123456"}}};
+    secretCommand.activityArguments = Json{{"nested", {{"apiKey", "fixture-secret-123456"},
+                                         {"note", "fixture-secret-123456"}}}}.dump();
+    auto secretResult = setup.run(secretCommand, {}, secretLog);
     expect(read(secretLog).find("fixture-secret-123456") == std::string::npos &&
                read(secretLog).find("[REDACTED]") != std::string::npos,
            "stream-spanning secret redaction");
+    expect(secretResult.output.find("fixture-secret-123456") == std::string::npos,
+           "captured process output is redacted before returning");
+    bool observedSecretRun = false;
+    for (auto &run : activityBus().snapshot())
+      if (run.value("log", std::string()) == utf8(secretLog.wstring())) {
+        observedSecretRun = true;
+        expect(run.dump().find("fixture-secret-123456") == std::string::npos,
+               "activity arguments and output never expose nested credentials");
+      }
+    expect(observedSecretRun, "redaction test observes actual retained activity");
     server.cancel();
     serverThread.join();
     std::cout << assertions << " fleet/descriptor/vault assertions passed\n";

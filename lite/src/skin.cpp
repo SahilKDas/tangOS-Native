@@ -172,30 +172,31 @@ struct BackgroundFrame {
 std::vector<std::unique_ptr<BackgroundFrame>> backgroundFrames;
 } // namespace
 void clearBackgroundFrames() { backgroundFrames.clear(); }
-void background(HDC dc, int w, int h) {
+void background(HDC dc, int w, int h, int offsetY, int totalHeight) {
   if (w <= 0 || h <= 0)
     return;
+  int sourceHeight = std::max(h + std::max(0, offsetY), totalHeight);
   BackgroundFrame *frame = nullptr;
   for (auto &item : backgroundFrames)
-    if (item->w == w && item->h == h) {
+    if (item->w == w && item->h == sourceHeight) {
       frame = item.get();
       break;
     }
   if (!frame) {
     if (backgroundFrames.size() >= 4)
       backgroundFrames.erase(backgroundFrames.begin());
-    backgroundFrames.push_back(std::make_unique<BackgroundFrame>(dc, w, h));
+    backgroundFrames.push_back(std::make_unique<BackgroundFrame>(dc, w, sourceHeight));
     frame = backgroundFrames.back().get();
   }
   bool motion = animationEnabled();
   if (frame->palette != paletteIndex || frame->animated != motion ||
       (motion && frame->time != phase)) {
-    drawBackground(frame->dc, w, h);
+    drawBackground(frame->dc, w, sourceHeight);
     frame->palette = paletteIndex;
     frame->animated = motion;
     frame->time = phase;
   }
-  BitBlt(dc, 0, 0, w, h, frame->dc, 0, 0, SRCCOPY);
+  BitBlt(dc, 0, 0, w, h, frame->dc, 0, std::max(0, offsetY), SRCCOPY);
 }
 void panel(HDC dc, int x, int y, int w, int h, bool solid) {
   shape(dc, x, y + 4, w, h, 14, Color(20, 0, 0, 0), Color(20, 0, 0, 0));
@@ -203,6 +204,37 @@ void panel(HDC dc, int x, int y, int w, int h, bool solid) {
         Color(solid ? 244 : 110, colors.field.GetR(), colors.field.GetG(), colors.field.GetB()),
         solid ? Color(244, colors.field.GetR(), colors.field.GetG(), colors.field.GetB())
               : colors.panel);
+}
+void scrim(HDC dc, int w, int h) {
+  if (w <= 0 || h <= 0)
+    return;
+  Surface surface(dc, 0, 0, w, h);
+  if (!surface.data)
+    return;
+  std::vector<unsigned char> horizontal(size_t(w) * h * 4);
+  constexpr int radius = 3;
+  for (int y = 0; y < h; ++y)
+    for (int channel = 0; channel < 3; ++channel) {
+      int sum = 0;
+      for (int dx = -radius; dx <= radius; ++dx)
+        sum += surface.data[(size_t(y) * w + std::clamp(dx, 0, w - 1)) * 4 + channel];
+      for (int x = 0; x < w; ++x) {
+        horizontal[(size_t(y) * w + x) * 4 + channel] = (unsigned char)(sum / 7);
+        sum -= surface.data[(size_t(y) * w + std::clamp(x - radius, 0, w - 1)) * 4 + channel];
+        sum += surface.data[(size_t(y) * w + std::clamp(x + radius + 1, 0, w - 1)) * 4 + channel];
+      }
+    }
+  for (int x = 0; x < w; ++x)
+    for (int channel = 0; channel < 3; ++channel) {
+      int sum = 0;
+      for (int dy = -radius; dy <= radius; ++dy)
+        sum += horizontal[(size_t(std::clamp(dy, 0, h - 1)) * w + x) * 4 + channel];
+      for (int y = 0; y < h; ++y) {
+        surface.data[(size_t(y) * w + x) * 4 + channel] = (unsigned char)(sum * .68 / 7);
+        sum -= horizontal[(size_t(std::clamp(y - radius, 0, h - 1)) * w + x) * 4 + channel];
+        sum += horizontal[(size_t(std::clamp(y + radius + 1, 0, h - 1)) * w + x) * 4 + channel];
+      }
+    }
 }
 void agentCard(HDC dc, int x, int y, int w, int h, COLORREF tint) {
   shape(dc, x, y + 4, w, h, 14, Color(18, 0, 0, 0), Color(18, 0, 0, 0));

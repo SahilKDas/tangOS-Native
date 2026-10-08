@@ -371,7 +371,7 @@ Json Backend::catalog() {
        "policy.usage",       "guide.parse",       "guide.tour",         "guide.tips",
        "projects.get",       "github.credits",    "atlas.cosmetics",    "atlas.counts",
        "atlas.progress",     "atlas.live",        "update.check",       "update.stage",
-       "bug.report",         "harvest.list", "activity.snapshot", "policy.activity", "policy.detail", "policy.match"});
+       "bug.report",         "harvest.list", "activity.snapshot", "policy.activity", "policy.detail", "policy.match", "policy.role"});
 }
 Json Backend::invoke(const std::string &m, Json a) {
   HANDLE lock = CreateFileW((directory / "backend.lock").c_str(),
@@ -1269,7 +1269,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       args["connection"] = m;
     auto result = execute("network.read", args);
     if (m == "update.check" && result.value("ok", false))
-      result["update"] = updateStatus("0.16.1", result.at("data"));
+      result["update"] = updateStatus("0.17.0", result.at("data"));
     return result;
   }
   if (m == "git.clone") {
@@ -1373,7 +1373,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto folder = directory / "exports" / ("bug-report-" + uniqueId());
     fs::create_directories(folder);
     Json debug = {{"app", "TangOS Lite"},
-                  {"version", "0.16.1"},
+                  {"version", "0.17.0"},
                   {"portOnly", settings.portOnly},
                   {"project", settings.activeProject},
                   {"connections", Json::array()}};
