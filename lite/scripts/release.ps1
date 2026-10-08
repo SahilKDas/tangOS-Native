@@ -26,6 +26,8 @@ python "$source/tests/test_help_reference.py" --exe "$out/build-a/TangOSLite.exe
 if ($LASTEXITCODE) { throw 'Original help comparisons failed' }
 python "$source/tests/test_layout_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original Atlas geometry comparisons failed' }
+python "$source/tests/test_sort_reference.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original Viewer function-list sort comparisons failed' }
 python "$source/tests/test_color_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original Atlas color comparisons failed' }
 python "$source/tests/test_batches_reference.py" --exe "$out/build-a/TangOSLite.exe"

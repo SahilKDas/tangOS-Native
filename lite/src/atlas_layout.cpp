@@ -3,7 +3,44 @@
 #include <limits>
 #include <map>
 #include <numeric>
+#include <windows.h>
 namespace lite {
+std::vector<size_t> atlasOrder(const std::vector<AtlasFunction> &functions,
+                               std::vector<size_t> indices, const std::string &sort) {
+  auto compare = [](const std::string &a, const std::string &b) {
+    if (a == b)
+      return 0;
+    if (a.empty())
+      return -1;
+    if (b.empty())
+      return 1;
+    auto wa = wide(a), wb = wide(b);
+    return CompareStringEx(L"en-US", 0, wa.c_str(), (int)wa.size(), wb.c_str(), (int)wb.size(),
+                           nullptr, nullptr, 0) -
+           CSTR_EQUAL;
+  };
+  auto address = [](const AtlasFunction &f) {
+    return f.row.contains("addr") && f.row["addr"].is_number() ? f.row["addr"].get<double>() : 0.;
+  };
+  std::stable_sort(indices.begin(), indices.end(), [&](size_t ai, size_t bi) {
+    const auto &a = functions.at(ai), &b = functions.at(bi);
+    if (sort == "size-desc")
+      return a.size > b.size;
+    if (sort == "size-asc")
+      return a.size < b.size;
+    if (sort == "name")
+      return compare(a.name, b.name) < 0;
+    if (sort == "addr")
+      return address(a) < address(b);
+    if (sort == "module") {
+      int cmp = compare(a.module, b.module);
+      return cmp ? cmp < 0 : address(a) < address(b);
+    }
+    bool am = a.state == "matched", bm = b.state == "matched";
+    return am != bm ? !am : a.size > b.size;
+  });
+  return indices;
+}
 std::vector<Tile> squarify(const std::vector<std::pair<size_t, double>> &items, double x, double y,
                            double w, double h) {
   if (w <= 0 || h <= 0)

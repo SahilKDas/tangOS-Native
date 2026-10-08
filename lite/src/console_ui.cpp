@@ -123,6 +123,7 @@ constexpr int QUEUE = 4470, QUEUE_UP = 4471, QUEUE_DOWN = 4472, QUEUE_REMOVE = 4
               TOOL_ENABLE = 4474;
 constexpr int CONNECTIONS = 4450, CONNECTION_LIST = 4451, CONNECTION_SAVE = 4452, SERVICES = 4453,
               SERVICE_RUN = 4454, SERVICE_CONFIRM = 4455, SERVICE_CANCEL = 4456;
+constexpr int ATLAS_FUNCTION_LIST = 4410, ATLAS_FUNCTION_SORT = 4411;
 constexpr int ATLAS_INSPECT = 4400, ATLAS_MODULE = 4401, ATLAS_SOURCE = 4402, ATLAS_HISTORY = 4403;
 constexpr int HELP_EDIT = 4600, HELP_TIPS = 4601;
 constexpr int DESC_SCAN = 4610, DESC_PREVIEW = 4611, DESC_CONFIRM = 4612, DESC_RELOAD = 4613,
@@ -188,6 +189,11 @@ struct ConsoleUI::Impl {
   Json batchRows = Json::array(), draftRows = Json::array();
   std::string batchShown, selectedBatch;
   ULONGLONG batchPoll = 0;
+  HWND functionList = nullptr, functionSort = nullptr;
+  std::string functionSortKey = "unmatched";
+  const std::vector<std::string> functionSortKeys = {"unmatched", "size-desc", "size-asc",
+                                                     "name",      "addr",      "module"};
+  std::vector<size_t> functionRows;
   HWND layoutChoice = nullptr, filterChoice = nullptr, colorChoice = nullptr,
        authorChoice = nullptr, draftsChoice = nullptr;
   std::string atlasColorBy = "status", authorFilter;
@@ -207,7 +213,7 @@ struct ConsoleUI::Impl {
   std::map<size_t, std::string> sourceCache;
   std::thread inspector;
   std::atomic<bool> inspectBusy{false}, inspectReady{false};
-  size_t inspectIndex = SIZE_MAX;
+  size_t inspectIndex = SIZE_MAX, pendingInspection = SIZE_MAX;
   unsigned atlasGeneration = 1, inspectGeneration = 0;
   Json inspectResult;
   struct Popup {
@@ -270,6 +276,10 @@ struct ConsoleUI::Impl {
         j = Json::object();
       advancedMode = j.contains("advanced") && j["advanced"] == true;
       allowWrites = j.contains("writes") && j["writes"] == true;
+      functionSortKey = j.value("functionSort", std::string("unmatched"));
+      if (std::find(functionSortKeys.begin(), functionSortKeys.end(), functionSortKey) ==
+          functionSortKeys.end())
+        functionSortKey = "unmatched";
       atlasColorBy = j.contains("atlasColorBy") && j["atlasColorBy"].is_string()
                          ? j["atlasColorBy"].get<std::string>()
                          : "status";
@@ -391,7 +401,8 @@ struct ConsoleUI::Impl {
     for (auto h : controls)
       DestroyWindow(h);
     controls.clear();
-    batchList = batchTitle = batchPrompt = nullptr;
+    batchList = batchTitle = batchPrompt = functionList = functionSort = nullptr;
+    functionRows.clear();
     layoutChoice = filterChoice = colorChoice = authorChoice = draftsChoice = nullptr;
     profileFields.clear();
     argumentFields.clear();
@@ -557,16 +568,22 @@ struct ConsoleUI::Impl {
       }
       authorChoice = combo(contributors, ATLAS_AUTHOR, width - 238, 510, 216, authorIndex);
       draftsChoice = control(L"BUTTON", "Show drafts and near misses", ATLAS_DRAFTS, width - 332,
-                             518, 310, 28, BS_AUTOCHECKBOX);
+                             550, 310, 28, BS_AUTOCHECKBOX);
       SendMessageW(draftsChoice, BM_SETCHECK, atlasDrafts ? BST_CHECKED : BST_UNCHECKED, 0);
       button("Controller", HOME, 18, height - 48, 108);
       button("Reload", ATLAS_LOAD, 134, height - 48, 90);
       button("Encyclopedia", ENCYCLOPEDIA, 232, height - 48, 126);
       button("Reset view", ATLAS_RESET, 366, height - 48, 104);
       button(liveAtlas ? "Local data" : "Live data", ATLAS_LIVE, 478, height - 48, 102);
-      body = edit("Select a function in the treemap to inspect it.\nUse Color to switch between "
-                  "match status and contributor colors.",
-                  0, width - 332, 90, 310, 180, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
+      auto sortIndex =
+          std::find(functionSortKeys.begin(), functionSortKeys.end(), functionSortKey) -
+          functionSortKeys.begin();
+      functionSort = combo({"unmatched first", "size (largest)", "size (smallest)", "name (A-Z)",
+                            "address", "module"},
+                           ATLAS_FUNCTION_SORT, width - 332, 90, 310, (int)sortIndex);
+      functionList = control(L"LISTBOX", "", ATLAS_FUNCTION_LIST, width - 332, 130, 310, 140,
+                             LBS_NOTIFY | WS_VSCROLL | WS_HSCROLL | LBS_NOINTEGRALHEIGHT);
+      cachedLayout.clear();
     } else if (screen == Screen::encyclopedia) {
       search = edit("", SEARCH, 18, 52, cw - 34);
       toolList = control(L"LISTBOX", "", TOOL_LIST, 18, 94, 225, height - 230,
@@ -1028,6 +1045,7 @@ struct ConsoleUI::Impl {
     pickedFunction = SIZE_MAX;
     cart.clear();
     sourceCache.clear();
+    pendingInspection = SIZE_MAX;
     auto keys = vault.values();
     auto prefs = settings;
     bool published = liveAtlas;
@@ -1375,8 +1393,13 @@ struct ConsoleUI::Impl {
     setText(profileFields["Template"], c.value("bodyTemplate", Json::object()).dump(2));
   }
   void requestInspection(size_t index) {
-    if (inspectBusy || inspectReady || !atlasReady || index >= atlas.size())
+    if (!atlasReady || index >= atlas.size())
       return;
+    if (inspectBusy || inspectReady) {
+      pendingInspection = index;
+      return;
+    }
+    pendingInspection = SIZE_MAX;
     if (inspector.joinable())
       inspector.join();
     inspectBusy = true;
@@ -1589,8 +1612,8 @@ struct ConsoleUI::Impl {
       std::transform(needle.begin(), needle.end(), needle.begin(),
                      [](unsigned char c) { return std::tolower(c); });
       int left = 18, top = 100, w = width - 390, h = height - 170;
-      std::string key = needle + "|" + atlasMode + "|" + atlasFilter + "|" + moduleFilter + "|" +
-                        std::to_string(w) + "x" + std::to_string(h);
+      std::string key = needle + "|" + atlasMode + "|" + functionSortKey + "|" + atlasFilter + "|" +
+                        moduleFilter + "|" + std::to_string(w) + "x" + std::to_string(h);
       if (key != cachedLayout) {
         filtered.clear();
         for (size_t i = 0; i < atlas.size(); i++) {
@@ -1605,6 +1628,24 @@ struct ConsoleUI::Impl {
         }
         auto aliases = atlasExtras.value("github.credits", Json::object())
                            .value("keyToLogin", std::map<std::string, std::string>{});
+        functionRows = atlasOrder(atlas, filtered, functionSortKey);
+        if (functionRows.size() > 500)
+          functionRows.resize(500); // Original Viewer roster cap.
+        if (functionList) {
+          SendMessageW(functionList, WM_SETREDRAW, FALSE, 0);
+          SendMessageW(functionList, LB_RESETCONTENT, 0, 0);
+          for (size_t i = 0; i < functionRows.size(); ++i) {
+            auto &f = atlas[functionRows[i]];
+            auto item =
+                wide(f.name + " · " + f.module + " · " + std::to_string(f.size) + "b · " + f.state);
+            SendMessageW(functionList, LB_ADDSTRING, 0, (LPARAM)item.c_str());
+            if (functionRows[i] == pickedFunction)
+              SendMessageW(functionList, LB_SETCURSEL, i, 0);
+          }
+          SendMessageW(functionList, LB_SETHORIZONTALEXTENT, 900, 0);
+          SendMessageW(functionList, WM_SETREDRAW, TRUE, 0);
+          InvalidateRect(functionList, nullptr, TRUE);
+        }
         tiles = atlasLayout(atlas, filtered, w, h, atlasMode, aliases);
         lod.compute(atlas, tiles, w, h);
         camera.clamp(w, h);
@@ -2020,6 +2061,33 @@ struct ConsoleUI::Impl {
       prefs["atlasDrafts"] = atlasDrafts;
       write(path, prefs.dump(2));
       InvalidateRect(window, nullptr, FALSE);
+      return;
+    }
+    if (id == ATLAS_FUNCTION_SORT && notification == CBN_SELCHANGE) {
+      auto at = choice(functionSort);
+      if (at >= 0 && (size_t)at < functionSortKeys.size())
+        functionSortKey = functionSortKeys[at];
+      auto path = data / "console-ui.json";
+      auto prefs = fs::exists(path) ? Json::parse(read(path), nullptr, false) : Json::object();
+      if (!prefs.is_object())
+        prefs = Json::object();
+      prefs["functionSort"] = functionSortKey;
+      write(path, prefs.dump(2));
+      cachedLayout.clear();
+      InvalidateRect(window, nullptr, FALSE);
+      return;
+    }
+    if (id == ATLAS_FUNCTION_LIST &&
+        (notification == LBN_SELCHANGE || notification == LBN_DBLCLK)) {
+      auto row = SendMessageW(functionList, LB_GETCURSEL, 0, 0);
+      if (row >= 0 && (size_t)row < functionRows.size()) {
+        pickedFunction = functionRows[(size_t)row];
+        if (notification == LBN_DBLCLK)
+          inspectFunction();
+        else
+          flyFunction(pickedFunction);
+        InvalidateRect(window, nullptr, FALSE);
+      }
       return;
     }
     if (id == BATCH_LIST && notification == LBN_SELCHANGE) {
@@ -2720,6 +2788,11 @@ struct ConsoleUI::Impl {
         }
       }
     }
+    if (pendingInspection != SIZE_MAX && !inspectBusy && !inspectReady) {
+      auto next = pendingInspection;
+      pendingInspection = SIZE_MAX;
+      requestInspection(next);
+    }
     if (screen == Screen::functionDetail && inspectText == "Loading source..." && !inspectBusy &&
         !inspectReady) {
       if (sourceCache.count(pickedFunction)) {
@@ -3204,6 +3277,28 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     throw std::runtime_error("GUI viewer fixture has no functions");
   impl->navigate(Screen::atlas);
   capture(directory / "atlas-contributors.bmp");
+  if (SendMessageW(impl->functionList, LB_GETCOUNT, 0, 0) != (LRESULT)impl->atlas.size())
+    throw std::runtime_error("Viewer function list is incomplete");
+  SendMessageW(impl->functionSort, CB_SETCURSEL, 2, 0);
+  impl->action(ATLAS_FUNCTION_SORT, CBN_SELCHANGE);
+  capture(directory / "atlas-function-list.bmp");
+  if (impl->functionRows.empty() || impl->atlas[impl->functionRows.front()].size != 60)
+    throw std::runtime_error("Viewer function list size sort failed");
+  auto listPrefs = Json::parse(read(impl->data / "console-ui.json"));
+  if (listPrefs.value("functionSort", std::string()) != "size-asc")
+    throw std::runtime_error("Viewer list sort did not persist");
+  SendMessageW(impl->functionList, LB_SETCURSEL, 0, 0);
+  impl->action(ATLAS_FUNCTION_LIST, LBN_SELCHANGE);
+  if (impl->pickedFunction != impl->functionRows.front())
+    throw std::runtime_error("Viewer list selection did not select its target");
+  RECT authorBounds{}, draftBounds{}, overlap{};
+  GetWindowRect(impl->authorChoice, &authorBounds);
+  GetWindowRect(impl->draftsChoice, &draftBounds);
+  if (IntersectRect(&overlap, &authorBounds, &draftBounds))
+    throw std::runtime_error("Viewer contributor and draft controls overlap");
+  SendMessageW(impl->functionSort, CB_SETCURSEL, 0, 0);
+  impl->action(ATLAS_FUNCTION_SORT, CBN_SELCHANGE);
+
   SendMessageW(impl->colorChoice, CB_SETCURSEL, 1, 0);
   SendMessageW(impl->draftsChoice, BM_SETCHECK, BST_UNCHECKED, 0);
   impl->action(ATLAS_COLOR, CBN_SELCHANGE);
@@ -3268,7 +3363,10 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
   impl->action(BATCH_REMOVE, BN_CLICKED);
   impl->action(BATCH_CLEAR_DONE, BN_CLICKED);
   impl->navigate(Screen::functionDetail);
-  waitFor([&] { return impl->inspectBusy.load() || impl->inspectReady.load(); });
+  waitFor([&] {
+    return impl->inspectBusy.load() || impl->inspectReady.load() ||
+           impl->pendingInspection != SIZE_MAX;
+  });
   if (impl->inspectText.find("1  int fixture_source") == std::string::npos)
     throw std::runtime_error("Native source inspection did not load numbered source");
   capture(directory / "console-8.bmp");

@@ -1183,6 +1183,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
       std::cerr << e.what() << "\n";
       return 1;
     }
+    if (smoke) {
+      write(config.parent_path() / "gui-smoke-report.txt",
+            std::string("FAIL native GUI workflow: ") + e.what() + "\n");
+      return 1;
+    }
     MessageBoxW(nullptr, wide(e.what()).c_str(), L"TangOS Lite startup failed",
                 MB_OK | MB_ICONERROR);
     return 1;

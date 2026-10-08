@@ -21,6 +21,8 @@ python "$PSScriptRoot/../tests/test_help_reference.py" --exe "$BuildDir/TangOSLi
 if ($LASTEXITCODE) { throw 'Original help comparisons failed' }
 python "$PSScriptRoot/../tests/test_layout_reference.py" --exe "$BuildDir/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original Atlas geometry comparisons failed' }
+python "$PSScriptRoot/../tests/test_sort_reference.py" --exe "$BuildDir/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original Viewer function-list sort comparisons failed' }
 python "$PSScriptRoot/../tests/test_color_reference.py" --exe "$BuildDir/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original Atlas color comparisons failed' }
 python "$PSScriptRoot/../tests/test_batches_reference.py" --exe "$BuildDir/TangOSLite.exe"

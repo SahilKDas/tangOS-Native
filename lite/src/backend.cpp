@@ -1100,6 +1100,15 @@ Json Backend::execute(const std::string &m, const Json &a) {
     return {{"color", atlasColor(a.at("row"), a.value("authors", false), a.value("nearMiss", true),
                                  a.value("aliases", std::map<std::string, std::string>{}),
                                  a.value("colors", std::map<std::string, std::string>{}))}};
+  if (m == "policy.sort") {
+    auto rows = parseAtlas(Json{{"functions", a.at("functions")}}.dump());
+    std::vector<size_t> indices(rows.size());
+    std::iota(indices.begin(), indices.end(), 0);
+    Json result = Json::array();
+    for (auto index : atlasOrder(rows, indices, a.value("sort", std::string("unmatched"))))
+      result.push_back(rows[index].id);
+    return result;
+  }
   if (m == "policy.layout") {
     auto rows = parseAtlas(Json{{"functions", a.at("functions")}}.dump());
     std::vector<size_t> indices(rows.size());

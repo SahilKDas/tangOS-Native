@@ -1,6 +1,8 @@
 #pragma once
 #include "descriptor.h"
 namespace lite {
+std::vector<size_t> atlasOrder(const std::vector<AtlasFunction> &functions,
+                               std::vector<size_t> indices, const std::string &sort);
 struct Tile {
   size_t index;
   double x, y, width, height;

@@ -42,7 +42,8 @@ $arguments = '--smoke-test "{0}" "{1}"' -f $repo, $ini
 $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru -WindowStyle Hidden
 if (-not $process.WaitForExit(60000)) { Stop-Process -Id $process.Id; throw 'GUI workflow timed out' }
 $report = Join-Path $fixture 'gui-smoke-report.txt'
-if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $report)) { throw "GUI workflow failed: exit $($process.ExitCode)" }
+if (-not (Test-Path -LiteralPath $report)) { throw "GUI workflow failed without a report: exit $($process.ExitCode)" }
+if ($process.ExitCode -ne 0) { throw (Get-Content -LiteralPath $report -Raw) }
 $result = Get-Content -LiteralPath $report -Raw
 if (-not $result.StartsWith('PASS')) { throw $result }
 $images = @('landing', 'controller', 'repository', 'workspace', 'theme-0', 'theme-1', 'theme-2', 'theme-3', 'theme-4', 'console-0', 'console-1', 'console-2', 'console-3', 'console-4', 'console-5', 'console-6', 'console-8', 'console-9', 'console-10', 'console-11', 'console-12', 'tour-expression', 'tips')
