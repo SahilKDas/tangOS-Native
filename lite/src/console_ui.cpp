@@ -202,6 +202,7 @@ struct ConsoleUI::Impl {
   std::string draftError;
   Json statsBaseline = Json::object();
   Json presence = Json::array();
+  std::map<std::string, int64_t> lastAgentSignal;
   std::string batchShown, selectedBatch;
   ULONGLONG batchPoll = 0;
   HWND functionList = nullptr, functionSort = nullptr, contributorList = nullptr;
@@ -1733,6 +1734,10 @@ struct ConsoleUI::Impl {
                         : screen == Screen::functionDetail ? "Function inspection"
                         : screen == Screen::parameters     ? "Run dock · arguments"
                                                            : "Welcome to tangOS Lite";
+    if (screen == Screen::clone)
+      title = "Clone project";
+    if (screen == Screen::support)
+      title = "Help and updates";
     skin::label(dc, wide(title), 16, 17, width - 390, 28, 16, true);
     hits.clear();
     if (screen == Screen::controller) {
@@ -1756,8 +1761,10 @@ struct ConsoleUI::Impl {
         for (auto &client : presence)
           if (client.value("agentId", std::string()) == a.id)
             connected = true;
-        skin::label(dc, wide(((a.active || connected) ? "● " : "○ ") + a.spec.name), x + 12, y + 9,
-                    w - 92, 26, 15, true, false, true);
+        auto dot = agentPresence(a.spec.kind, lastAgentSignal[a.id], a.active,
+                                 std::time(nullptr) * int64_t(1000));
+        skin::presenceDot(dc, x + 12, y + 16, dot);
+        skin::label(dc, wide(a.spec.name), x + 32, y + 9, w - 112, 26, 15, true, false, true);
         skin::panel(dc, x + 12, y + 46, w - 24, advancedMode ? 90 : 104);
         skin::label(dc, wide(a.detail.empty() ? "idle · " + a.spec.role : a.detail), x + 22, y + 54,
                     w - 44, 56, 12, false, true);
@@ -3304,6 +3311,13 @@ struct ConsoleUI::Impl {
       presence = mcp->state().value("clients", Json::array());
     else
       presence = Json::array();
+    for (auto &client : presence) {
+      auto id = client.value("agentId", std::string());
+      lastAgentSignal[id] = std::max(lastAgentSignal[id], client.value("lastSeen", int64_t(0)));
+    }
+    for (auto &agent : agents)
+      if (agent.spec.kind == "cli" && agent.active)
+        lastAgentSignal[agent.id] = std::time(nullptr) * int64_t(1000);
     if (screen == Screen::controller)
       for (size_t i = 0; i < agents.size(); ++i) {
         auto b = GetDlgItem(window, 5000 + (int)i * 16);

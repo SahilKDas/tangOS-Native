@@ -42,6 +42,8 @@ python "$source/tests/test_driver_tokens_reference.py" --exe "$out/build-a/TangO
 if ($LASTEXITCODE) { throw 'Original driver token-summary comparisons failed' }
 python "$source/tests/test_usage_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original usage-stop comparisons failed' }
+python "$source/tests/test_presence_reference.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original presence comparisons failed' }
 
 $a = "$out/build-a/TangOSLite.exe"
 $b = "$out/build-b/TangOSLite.exe"

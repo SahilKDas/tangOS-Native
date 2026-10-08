@@ -34,6 +34,18 @@ unfinished Console screens and fleet functionality.
 
 ## New native screens
 
+Controller presence uses the reference timing: API profiles are available;
+active work pulses green; an MCP signal stays green for five minutes, then
+yellow until one hour, then red. The last signal remains visible after a session
+disconnects for the lifetime of the window. CLI activity supplies local signals.
+
+MCP client templates launch this same executable with `--mcp-stdio`; no Node
+bridge is required at runtime. Legacy initialization negotiates 2024-11-05,
+2025-03-26, 2025-06-18 or 2025-11-25. Newer clients can fall back from discovery
+to that handshake. Official MCP Inspector 2.10.1 has been tested against a real
+local server and native stdio bridge. Other client UI setup remains user-owned;
+the Inspector and its dependencies are development tools and are not bundled.
+
 In Chaos Viewer, left-drag pans, right-drag selects eligible functions, the wheel zooms and WASD/arrows travel. Space adds/removes the selection from the cart. Inspect source opens numbered source and prior tries; Pop out module opens an independent Viewer that sends draft additions back to the main cart. It does not start a second agent controller.
 
 Settings provides matching, delegation, animation and live-refresh controls. Connections stores user-owned endpoint profiles with credentials referenced by local environment/vault names; nothing is enabled by default. Project services shows request results and exact mutation previews, followed by a separate confirmation. This repo needs checks the selected repository's tools and inputs asynchronously and offers setup commands you control. Agent Details → Manage queue lets you reorder/remove pending targets after stopping the agent; additions made during an active batch survive that batch's completion.

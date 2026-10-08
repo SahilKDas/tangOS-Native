@@ -1,6 +1,7 @@
 #pragma once
 #include "atlas_layout.h"
 namespace lite {
+std::string agentPresence(const std::string &kind, int64_t lastSeen, bool live, int64_t now);
 struct ViewRect {
   double x, y, width, height;
 };

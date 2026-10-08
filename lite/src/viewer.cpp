@@ -4,6 +4,13 @@
 #include <map>
 #include <sstream>
 namespace lite {
+std::string agentPresence(const std::string &kind, int64_t lastSeen, bool live, int64_t now) {
+  if (kind == "api" || (lastSeen && now - lastSeen < 5 * 60 * 1000))
+    return live ? "online live" : "online";
+  if (lastSeen && now - lastSeen < 60 * 60 * 1000)
+    return "stale";
+  return "offline";
+}
 Json readAtlasCache(const fs::path &path, const std::string &key, int64_t now, int64_t maxAge) {
   try {
     if (!fs::exists(path) || fs::file_size(path) > 128 * 1024 * 1024)

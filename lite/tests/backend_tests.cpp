@@ -195,6 +195,51 @@ int main() {
                bugReport.at("markdown").get<std::string>().find("local-fixture-secret") ==
                    std::string::npos,
            "local report includes reviewable diagnostics without credential values");
+    {
+      write(repo / "tools/port_refcheck.py",
+            "import time\nfrom pathlib import Path\nprint('tool-started', flush=True)\n"
+            "time.sleep(30)\nPath('port/finished.txt').write_text('finished')\n");
+      auto toolDescriptor = desc;
+      toolDescriptor["tools"] = Json::array({{{"id", "cancel_fixture"},
+                                              {"label", "Cancel fixture"},
+                                              {"category", "verification"},
+                                              {"readOnly", true},
+                                              {"command", "{python} tools/port_refcheck.py"},
+                                              {"args", Json::array()}}});
+      write(repo / "tangos.json", toolDescriptor.dump());
+      Runner toolRunner;
+      std::string streamed;
+      Backend cancellable(repo, dir / "cancel-tools", settings, {}, requestHttp, &toolRunner,
+                          [&](const std::string &text) {
+                            streamed += text;
+                            if (text.find("tool-started") != text.npos)
+                              toolRunner.cancel();
+                          });
+      auto run = [&](const std::string &method, Json args) {
+        auto preview = cancellable.invoke(method, args);
+        expect(preview.at("details").contains("command"), "tool/check preview contains exact argv");
+        args["confirmation"] = preview.at("confirmation");
+        return cancellable.invoke(method, args);
+      };
+      toolRunner.cancel();
+      auto before = run("checks.run", {{"name", "Port references"}});
+      expect(before.at("cancelled") == true && before.at("exit") == ERROR_CANCELLED &&
+                 !fs::exists(repo / "port/finished.txt"),
+             "check cancellation before launch reaches backend runner");
+      expect(read(fs::u8path(before.at("log").get<std::string>())).find("CANCELLED") !=
+                 std::string::npos,
+             "pre-launch cancellation preserves complete log");
+      toolRunner.reset();
+      auto during = run("tools.run", {{"tool", "cancel_fixture"}});
+      expect(during.at("cancelled") == true && during.at("exit") == ERROR_CANCELLED &&
+                 !fs::exists(repo / "port/finished.txt") &&
+                 streamed.find("tool-started") != streamed.npos,
+             "streamed tool cancellation terminates running process before later side effects");
+      expect(read(fs::u8path(during.at("log").get<std::string>())).find("tool-started") !=
+                 std::string::npos,
+             "running cancellation preserves output in durable log");
+      write(repo / "tangos.json", desc.dump());
+    }
     expect(!backend.invoke("descriptor.preview")["tools"].is_null(),
            "descriptor generation preview");
     reject([&] { confirmed("connections.set", {{"API_KEY", "credential"}}); },

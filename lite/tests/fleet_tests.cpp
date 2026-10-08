@@ -413,6 +413,14 @@ def call(method,params=None,auth=True):
   return result['result']
 try:call('ping',auth=False);raise AssertionError('unauthenticated request accepted')
 except urllib.error.HTTPError as error:assert error.code==403
+probe=json.dumps({'jsonrpc':'2.0','id':9,'method':'server/discover','params':{}}).encode()
+with urllib.request.urlopen(urllib.request.Request(url,probe,dict(headers))) as response:
+ assert json.load(response)['error']['code']==-32601
+for version in ['2024-11-05','2025-03-26','2025-06-18','2025-11-25','2100-01-01']:
+ negotiated=call('initialize',{'protocolVersion':version,'clientInfo':{'name':'External fixture','version':'1'},'capabilities':{}})
+ assert negotiated['protocolVersion']==(version if version!='2100-01-01' else '2025-11-25')
+ with urllib.request.urlopen(urllib.request.Request(url,headers=headers,method='DELETE')) as response:assert response.status==200
+ headers.pop('Mcp-Session-Id')
 call('initialize',{'protocolVersion':'2025-03-26','clientInfo':{'name':'External fixture','version':'1'},'capabilities':{}})
 assert any(t['name']=='next_batch' for t in call('tools/list')['tools'])
 batch=call('tools/call',{'name':'next_batch','arguments':{}})
@@ -447,6 +455,25 @@ print('native stdio MCP initialize, notification, session, tools, ping and EOF p
             utf8((data / "mcp.json").wstring())},
            dir});
       expect(bridge.code == 0, "MCP stdio integration: " + bridge.output);
+      auto inspector = GetEnvironmentVariableW(L"TANGOS_MCP_INSPECTOR", nullptr, 0);
+      if (inspector) {
+        std::wstring inspectorPath(inspector, 0);
+        GetEnvironmentVariableW(L"TANGOS_MCP_INSPECTOR", inspectorPath.data(), inspector);
+        inspectorPath.resize(inspector - 1);
+        auto clientConfig = data / "inspector-client.json";
+        write(clientConfig,
+              mcpClientConfiguration("Generic",
+                                     fs::u8path(selfExecutable()).parent_path() / "TangOSLite.exe",
+                                     data / "mcp.json", "External fixture")
+                  .dump(2));
+        auto actual = setup.run(
+            {{"node", utf8(inspectorPath), "--cli", "--config", utf8(clientConfig.wstring()),
+              "--server", "tangos-lite", "--method", "tools/list"},
+             dir},
+            {}, data / "inspector-tools.log");
+        expect(actual.code == 0 && actual.output.find("next_batch") != std::string::npos,
+               "official MCP Inspector interoperability: " + actual.output);
+      }
       auto serverState = mcp.state();
       expect(serverState["connectedClients"] == 0, "MCP DELETE disconnects client");
       expect(serverState["requestsSeen"].get<int>() >= 155 &&

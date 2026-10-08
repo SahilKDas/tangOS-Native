@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <chrono>
+#include <cmath>
 #include <map>
 #include <memory>
 #include <vector>
@@ -209,6 +210,18 @@ void agentCard(HDC dc, int x, int y, int w, int h, COLORREF tint) {
   shape(dc, x, y, w, h, 14, edge, edge);
   auto fill = Color(230, colors.field.GetR(), colors.field.GetG(), colors.field.GetB());
   shape(dc, x + 1, y + 1, w - 2, h - 2, 13, fill, fill);
+}
+void presenceDot(HDC dc, int x, int y, const std::string &state) {
+  auto tint = state == "stale"     ? RGB(230, 170, 20)
+              : state == "offline" ? RGB(215, 63, 67)
+                                   : RGB(30, 165, 87);
+  if (state == "online live") {
+    int alpha = animationEnabled() ? int(50 + 30 * std::sin(phase * 6)) : 60;
+    auto glow = Color(alpha, GetRValue(tint), GetGValue(tint), GetBValue(tint));
+    shape(dc, x - 4, y - 4, 20, 20, 10, glow, glow);
+  }
+  auto fill = Color(255, GetRValue(tint), GetGValue(tint), GetBValue(tint));
+  shape(dc, x, y, 12, 12, 6, fill, fill);
 }
 void label(HDC dc, const std::wstring &s, int x, int y, int w, int h, int size, bool bold,
            bool secondary, bool accent) {

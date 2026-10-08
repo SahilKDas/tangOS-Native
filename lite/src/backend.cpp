@@ -342,9 +342,9 @@ bool Backend::mutation(const std::string &m, const Json &) {
   return m == "projects.importZip" || m == "projects.discover" || m == "projects.download" ||
          m == "projects.open" || m == "projects.register" || m == "descriptor.write" ||
          m == "preferences.set" || m == "connections.set" || m == "git.action" ||
-         m == "tools.run" || m == "reports.export" || m == "bug.report" || m == "stats.clear" ||
-         m == "network.write" || m == "queue.adopt" || m == "git.clone" || m == "git.backup" ||
-         m == "git.discard" || m == "git.sync";
+         m == "checks.run" || m == "tools.run" || m == "reports.export" || m == "bug.report" ||
+         m == "stats.clear" || m == "network.write" || m == "queue.adopt" || m == "git.clone" ||
+         m == "git.backup" || m == "git.discard" || m == "git.sync";
 }
 bool enabledTool(const Json &prefs, const std::string &id) {
   auto hidden = prefs.value("disabledTools", Json::array());
@@ -360,13 +360,14 @@ Json Backend::catalog() {
        "atlas.history",      "claims.read",       "preflight",          "git.status",
        "git.syncPreview",    "git.sync",          "git.action",         "git.clone",
        "git.backup",         "git.discard",       "tools.list",         "tools.run",
-       "stats.get",          "stats.clear",       "reports.list",       "reports.export",
-       "queue.adopt",        "policy.classify",   "policy.adaptive",    "policy.pool",
-       "policy.statistics",  "policy.layout",     "policy.color",       "policy.batches",
-       "policy.source",      "policy.usage",      "guide.parse",        "guide.tour",
-       "guide.tips",         "projects.get",      "github.credits",     "atlas.cosmetics",
-       "atlas.counts",       "atlas.progress",    "atlas.live",         "update.check",
-       "bug.report",         "harvest.list"});
+       "checks.list",        "checks.run",        "policy.presence",    "stats.get",
+       "stats.clear",        "reports.list",      "reports.export",     "queue.adopt",
+       "policy.classify",    "policy.adaptive",   "policy.pool",        "policy.statistics",
+       "policy.layout",      "policy.color",      "policy.batches",     "policy.source",
+       "policy.usage",       "guide.parse",       "guide.tour",         "guide.tips",
+       "projects.get",       "github.credits",    "atlas.cosmetics",    "atlas.counts",
+       "atlas.progress",     "atlas.live",        "update.check",       "bug.report",
+       "harvest.list"});
 }
 Json Backend::invoke(const std::string &m, Json a) {
   HANDLE lock = CreateFileW((directory / "backend.lock").c_str(),
@@ -414,6 +415,19 @@ Json Backend::invoke(const std::string &m, Json a) {
     baseline = fingerprint(baseline);
     if (ticket.empty()) {
       Json details = Json::object();
+      if (m == "checks.run") {
+        bool found = false;
+        for (auto &check : discoverChecks(repository, settings))
+          if (check.name == a.at("name")) {
+            if (!check.available)
+              throw std::runtime_error(check.requirement);
+            details["command"] = preview(check.command);
+            details["requirement"] = check.requirement;
+            found = true;
+          }
+        if (!found)
+          throw std::runtime_error("Unknown discovered check");
+      }
       if (m == "projects.importZip")
         details = inspectProjectZip(fs::u8path(a.at("archive").get<std::string>()), settings);
       if (m == "git.action") {
@@ -1304,6 +1318,9 @@ Json Backend::execute(const std::string &m, const Json &a) {
   if (m == "policy.usage")
     return driverUsage(a.value("output", std::string()), a.value("productive", false),
                        a.value("elapsedMs", uint64_t(0)), a.value("streak", 0));
+  if (m == "policy.presence")
+    return agentPresence(a.at("kind").get<std::string>(), a.value("lastSeen", int64_t(0)),
+                         a.value("live", false), a.at("now").get<int64_t>());
   if (m == "policy.classify")
     return {{"classification", classifySource(a.at("source").get<std::string>())}};
   if (m == "policy.statistics") {
@@ -1524,6 +1541,32 @@ Json Backend::execute(const std::string &m, const Json &a) {
     saveJson(directory / "queues" / name, ready);
     return {{"targets", ready}, {"path", utf8((directory / "queues" / name).wstring())}};
   }
+  if (m == "checks.list" || m == "checks.run") {
+    Json rows = Json::array();
+    for (auto &check : discoverChecks(repository, settings)) {
+      if (m == "checks.list")
+        rows.push_back({{"name", check.name},
+                        {"available", check.available},
+                        {"requirement", check.requirement},
+                        {"command", preview(check.command)}});
+      else if (check.name == a.at("name")) {
+        if (!check.available)
+          throw std::runtime_error(check.requirement);
+        check.command.environment = secrets;
+        Runner local;
+        auto &runner = processRunner ? *processRunner : local;
+        auto log = directory / "logs" / ("check-" + uniqueId() + ".log");
+        auto result = runner.run(check.command, progressSink, log);
+        return {{"exit", result.code},
+                {"output", result.output},
+                {"log", utf8(log.wstring())},
+                {"cancelled", result.code == ERROR_CANCELLED}};
+      }
+    }
+    if (m == "checks.list")
+      return rows;
+    throw std::runtime_error("Unknown discovered check");
+  }
   if (m == "tools.list") {
     auto prefs = fileJson(directory / "preferences.json");
     Json out = Json::array();
@@ -1545,10 +1588,14 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto command = toolCommand(descriptor, tool, a.value("values", Json::object()), repository,
                                true, a.value("apply", false));
     command.environment = secrets;
-    Runner r;
+    Runner local;
+    auto &r = processRunner ? *processRunner : local;
     auto log = directory / (uniqueId() + "-tool.log");
-    auto result = r.run(command, {}, log);
-    return {{"exit", result.code}, {"output", result.output}, {"log", utf8(log.wstring())}};
+    auto result = r.run(command, progressSink, log);
+    return {{"exit", result.code},
+            {"output", result.output},
+            {"log", utf8(log.wstring())},
+            {"cancelled", result.code == ERROR_CANCELLED}};
   }
   Runner runner;
   Repository repo(runner, repository, settings);

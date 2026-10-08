@@ -60,7 +60,10 @@ int runMcpStdio(const fs::path &connection, const std::string &agent) {
       if (!response.session.empty())
         session = response.session;
       if (!response.body.empty()) {
-        auto message = Json::parse(response.body).dump() + "\n";
+        auto parsed = Json::parse(response.body);
+        if (request.value("method", std::string()) == "initialize" && parsed.contains("result"))
+          headers["MCP-Protocol-Version"] = parsed["result"].value("protocolVersion", "2025-03-26");
+        auto message = parsed.dump() + "\n";
         DWORD wrote;
         if (!WriteFile(output, message.data(), DWORD(message.size()), &wrote, nullptr))
           break;
@@ -126,6 +129,13 @@ struct McpServer::Impl {
     auto id = request.value("id", Json());
     try {
       auto method = request.at("method").get<std::string>();
+      if (method != "initialize" && method != "ping" && method != "tools/list" &&
+          method != "tools/call" && method.rfind("notifications/", 0) != 0)
+        return {{"jsonrpc", "2.0"},
+                {"id", id},
+                {"error", {{"code", -32601}, {"message", "Method not found: " + method}}}};
+      if (method.rfind("notifications/", 0) == 0)
+        return nullptr;
       Json result;
       if (method == "initialize") {
         auto params = request.at("params");
@@ -149,7 +159,13 @@ struct McpServer::Impl {
             throw std::runtime_error("Too many MCP sessions; disconnect an existing client");
           sessions[session] = {agent, name, now(), now()};
         }
-        result = {{"protocolVersion", "2025-03-26"},
+        auto requested = params.value("protocolVersion", std::string("2025-03-26"));
+        static const std::vector<std::string> supported = {"2025-11-25", "2025-06-18", "2025-03-26",
+                                                           "2024-11-05"};
+        auto version = std::find(supported.begin(), supported.end(), requested) != supported.end()
+                           ? requested
+                           : supported.front();
+        result = {{"protocolVersion", version},
                   {"capabilities", {{"tools", Json::object()}}},
                   {"serverInfo", {{"name", "TangOS Lite"}, {"version", "0.16.0"}}},
                   {"instructions", "Pull next_batch and follow its scoped AGENTS.md instructions. "
