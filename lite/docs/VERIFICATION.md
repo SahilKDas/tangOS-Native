@@ -54,3 +54,7 @@ Source checkpoint f668c5f. Executable: 5,186,048 bytes (5.186 decimal MB), SHA-2
 ## 0.9.0 batch workflow checkpoint
 
 Executable: 5,269,504 bytes (5.27 decimal MB), SHA-256 CBD933FA6C2E6D986AF2B19CC8D60EE5CBC1178F980F8BD44BBB4B6FA76CE5C7. Two clean builds were identical with Windows system DLL imports only. All four native suites, packaged backend/adapter tests, 520 original-code comparisons and three packaged GUI workflows passed. Tests cover actual driver delivery of saved batch instructions, refusal to edit an active batch, project draft persistence, legacy queue migration, partial completion and bounded completed history. Clearing history preserves complete logs; processed targets do not become byte-match claims. Full parity remains unfinished.
+
+## 0.10.0 source and instruction checkpoint
+
+Source checkpoint aae51d2. Executable: 5,290,496 bytes (5.290 decimal MB), SHA-256 AEB896C23D0D614245209EBE589F834229BBC748D99C4D7366F8460EDB16D723. Two clean builds were identical with Windows system DLL imports only. All four native suites, packaged backend/adapter checks, 540 original-code comparisons and three packaged GUI workflows passed. New comparisons cover the 400-line source response, CRLF/Unicode and disassembly fallback. Regression tests cover normalized local exclusions, embedded NULs, alternate streams/device paths, local AGENTS instruction delivery and duplicate agent names. Full parity remains unfinished.
