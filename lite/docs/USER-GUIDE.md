@@ -89,13 +89,15 @@ Open the project title menu (or Choose a project on first launch), choose **Add 
 
 The landing screen opens without a network request. Choose **Open Chaos Viewer** to load the descriptor's published database. If the project uses a different endpoint or needs credentials, configure your own `atlas.live` profile in **Connections**, enable it, and reload published data. Credentials belong in your environment or the encrypted local vault. Nobody else's API key is included.
 
-Viewer-only mode allows searching, sorting, panning, zooming and inspecting published function metadata. Work assignment, local tools, Git changes and agent execution require a local checkout. Use **Choose a local folder** when you have one. **Clone project** opens the existing previewed clone service; after cloning, select the resulting folder.
+Viewer-only mode allows searching, sorting, panning, zooming and inspecting published function metadata. Work assignment, local tools, Git changes and agent execution require a local checkout. Use **Choose a local folder** when you have one. **Clone project** lets you review the URL and destination, confirm, watch progress, and cancel. A successful clone opens the new checkout automatically; a failed or cancelled clone retains its partial folder and complete log.
 
-## Portable updates
+## Viewer layout
 
 In Viewer, **Full map** expands the map and hides the statistics and rosters.
 Choose **Restore layout**, or press F11 while the map has focus, to return.
 Selection, contributor filtering and cart contents remain available on restore.
+
+## Portable updates
 
 Configure your own `update.check` connection and trusted **Update asset prefix**
 (an HTTPS release directory ending in `/`). Enable downloads on that profile.

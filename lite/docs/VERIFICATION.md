@@ -136,3 +136,28 @@ capture/layout combined on this machine). This is not a sustained frame-rate or
 arbitrary-DPI benchmark. The default artifact is `lite/release/TangOSLite.exe`.
 Full UI/protocol parity remains unverified; real SM64DS failures above remain
 failures, and no real provider calls or GitHub writes were made.
+
+## 0.16.1 verified portable package
+
+Release source checkpoint: `7760d02` (cancellation checkpoint `71eba2b`).
+Two clean builds in `lite/release-0.16.1-final` produced identical Windows x64
+executables: **5,797,376 bytes (5.797 decimal MB)**, SHA256
+`90768FBF666D4002789AB6DFC602659035DE0D1E7471F2671B6FD2C5EE68E89E`.
+Imports are Windows system DLLs only. All five native suites, packaged backend,
+driver adapter, disposable Git/ZIP workflows and 858 original-code comparisons
+passed. Official MCP Inspector ran in the Fleet suite. All three packaged GUI
+workflows passed, including the real edit-control log scroll/selection and tail
+follow regression check.
+
+Additional coverage includes HTTP and stdio request cancellation, typed request
+IDs, cross-session isolation, UI Stop error responses, EOF/malformed-input
+cleanup, SSH GitHub descriptor URLs and deliberate transient Windows state-file
+locks. The first packaging attempt encountered an undiagnosed fleet state
+replacement failure; it was not promoted. State saves now retry transient lock
+errors briefly and include the path and Windows error code on persistent failure.
+The corrected package passed the complete release process.
+
+The default artifact is `lite/release/TangOSLite.exe`. Exact UI composition,
+newest stateless MCP and broader third-party/provider validation remain pending.
+The real SM64DS failures recorded above remain failures. No credentials, ROMs or
+extracted assets are included; no real provider calls or GitHub writes were made.
