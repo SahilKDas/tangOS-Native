@@ -408,6 +408,42 @@ void Fleet::editQueue(const std::string &id, size_t index, int direction, bool r
   batchBook.reconcile(id, job->state.queue);
   saveLocked();
 }
+static Json attemptedTargets(const Json &assigned, const Json &results) {
+  Json records;
+  if (results.is_array())
+    records = results;
+  else if (results.is_object() && results.contains("results"))
+    records = results["results"].is_array() ? results["results"] : Json::array();
+  else
+    return assigned; // Legacy drivers and explicit MCP completion have no per-target ledger.
+  std::set<std::string> attempted;
+  for (auto &record : records) {
+    if (!record.is_object())
+      continue;
+    for (auto field : {"name", "ref", "id", "functionId"})
+      if (record.contains(field) && record[field].is_string() &&
+          !record[field].get<std::string>().empty())
+        attempted.insert(record[field].get<std::string>());
+  }
+  Json completed = Json::array();
+  for (auto &row : assigned) {
+    bool reached = false;
+    for (auto field : {"name", "ref", "id", "functionId"})
+      if (row.contains(field) && row[field].is_string() &&
+          attempted.count(row[field].get<std::string>()))
+        reached = true;
+    if (reached)
+      completed.push_back(row);
+  }
+  return completed;
+}
+static Json readDriverResults(const fs::path &path) {
+  if (!fs::exists(path))
+    return Json();
+  if (fs::file_size(path) > 32 * 1024 * 1024)
+    throw std::runtime_error("Agent results exceed 32 MiB; complete logs retained");
+  return Json::parse(read(path), nullptr, false);
+}
 static void consumeBatch(AgentState &state) {
   std::set<std::string> finished;
   for (auto &row : state.assigned)
@@ -930,13 +966,8 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
         update("cancelled", "Stopped; partial worktree and complete logs retained");
         break;
       }
+      auto results = readDriverResults(out);
       if (job->state.spec.kind == "api") {
-        Json results;
-        if (fs::exists(out)) {
-          if (fs::file_size(out) > 32 * 1024 * 1024)
-            throw std::runtime_error("Agent results exceed 32 MiB; complete logs retained");
-          results = Json::parse(read(out), nullptr, false);
-        }
         auto usage = driverUsage(exhaustionSignal ? "402" : usageWindow, productiveDriver(results),
                                  GetTickCount64() - runStarted, quickFailStreak);
         quickFailStreak = usage.at("streak");
@@ -984,11 +1015,24 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       Backend(repository, directory.parent_path().parent_path(), settings)
           .recordAgent(job->state.id, out, "review", gates,
                        job->state.spec.role == "Unassigned" ? job->runtimeRole : std::string());
+      bool madeProgress;
       {
         std::lock_guard<std::mutex> lock(mutex);
+        job->state.assigned = attemptedTargets(job->state.assigned, results);
+        madeProgress = !job->state.assigned.empty();
         batchBook.complete(job->state.id, job->state.assigned);
         consumeBatch(job->state);
         saveLocked();
+      }
+      if (!madeProgress) {
+        {
+          std::lock_guard<std::mutex> lock(mutex);
+          job->state.spec.loop = false;
+          batchBook.park(job->state.id,
+                         "Driver results report no attempted targets; pending work retained");
+        }
+        update("partial", "No assigned targets reached; inspect results and restart manually");
+        break;
       }
       update("review", gates ? "Repository checks passed; review diff before commit"
                              : "No verification gate available; unverified changes require review");
@@ -1088,9 +1132,11 @@ void Fleet::finishBatch(const std::string &id) {
     audit(job);
     Backend(repository, directory.parent_path().parent_path(), settings)
         .recordAgent(id, job->state.results, "review", gates);
+    auto results = readDriverResults(job->state.results);
     std::lock_guard<std::mutex> lock(mutex);
     if (job->state.assigned.empty())
       job->state.assigned = job->state.queue;
+    job->state.assigned = attemptedTargets(job->state.assigned, results);
     batchBook.complete(job->state.id, job->state.assigned);
     consumeBatch(job->state);
     job->state.phase = "review";

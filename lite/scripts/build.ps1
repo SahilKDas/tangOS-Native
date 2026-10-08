@@ -29,6 +29,8 @@ python "$PSScriptRoot/../tests/test_batches_reference.py" --exe "$BuildDir/TangO
 if ($LASTEXITCODE) { throw 'Original batch comparisons failed' }
 python "$PSScriptRoot/../tests/test_source_reference.py" --exe "$BuildDir/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original source comparisons failed' }
+python "$PSScriptRoot/../tests/test_driver_tokens_reference.py" --exe "$BuildDir/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original driver token-summary comparisons failed' }
 python "$PSScriptRoot/../tests/test_usage_reference.py" --exe "$BuildDir/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original usage-stop comparisons failed' }
 python "$PSScriptRoot/../tests/audit_parity.py"

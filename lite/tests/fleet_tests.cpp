@@ -79,6 +79,8 @@ def main():
  if os.environ['GLM_MODEL']=='empty':pathlib.Path(a.out).write_text('{}');return
  if os.environ['GLM_MODEL']=='split-code':sys.stdout.write('402');sys.stdout.flush();time.sleep(.05);print('0');pathlib.Path(a.out).write_text('{}');return
  targets=[json.loads(s) for s in pathlib.Path(a.wl).read_text().splitlines()]
+ if os.environ['GLM_MODEL']=='untouched':pathlib.Path(a.out).write_text(json.dumps({'results':[]}));return
+ if os.environ['GLM_MODEL']=='partial':targets=targets[:1]
  if targets and targets[0]['name']=='one':assert 'CUSTOM_BATCH_RULE' in instructions
  body=json.dumps({'model':os.environ['GLM_MODEL'],'messages':[{'role':'user','content':instructions}]}).encode()
  request=urllib.request.Request(os.environ['GLM_BASE_URL']+'/chat/completions',body,{'Authorization':'Bearer '+os.environ['GLM_API_KEY'],'Content-Type':'application/json'})
@@ -88,7 +90,7 @@ def main():
  if os.environ['GLM_MODEL']=='bad':pathlib.Path('src/original.cpp').write_text('bad source edit')
  else:
   for row in targets:pathlib.Path('port/'+row['name']+'.txt').write_text('reviewed native fleet output')
- pathlib.Path(a.out).write_text(json.dumps({'worked':len(targets)}))
+ pathlib.Path(a.out).write_text(json.dumps({'results':[{'name':r['name'],'matched':False} for r in targets]} if os.environ['GLM_MODEL']=='partial' else {'worked':len(targets)}))
  print('driver finished',flush=True)
 if __name__=='__main__':main()
 )PY");
@@ -299,6 +301,32 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       fleet.commitReviewed(first, "Reviewed fixture", tree);
       expect(fleet.snapshot()[0].phase == "committed" || fleet.snapshot()[1].phase == "committed",
              "reviewed isolated commit");
+      a.name = "Partial ledger fixture";
+      a.model = "partial";
+      a.count = 2;
+      auto partial = fleet.add(a);
+      fleet.enqueue(partial, Json::array({{{"id", "partial1"}, {"name", "partial_one"}},
+                                          {{"id", "partial2"}, {"name", "partial_two"}},
+                                          {{"id", "partial3"}, {"name", "partial_three"}}}));
+      fleet.start(partial);
+      wait(fleet);
+      for (auto &state : fleet.snapshot())
+        if (state.id == partial)
+          expect(state.completed == 3 && state.queue.empty() &&
+                     fs::exists(state.worktree / "port/partial_two.txt") &&
+                     fs::exists(state.worktree / "port/partial_three.txt"),
+                 "authoritative partial ledger retains and eventually executes untouched targets");
+      a.name = "Untouched ledger fixture";
+      a.model = "untouched";
+      auto untouched = fleet.add(a);
+      fleet.enqueue(untouched, Json::array({{{"id", "untouched"}, {"name", "untouched"}}}));
+      fleet.start(untouched);
+      wait(fleet);
+      for (auto &state : fleet.snapshot())
+        if (state.id == untouched)
+          expect(state.completed == 0 && state.queue.size() == 1 && state.phase == "partial",
+                 "empty authoritative results preserve pending work and do not spin forever");
+      a.count = 1;
       a.name = "Bad agent";
       a.model = "bad";
       auto bad = fleet.add(a);
@@ -394,9 +422,15 @@ print('authenticated MCP protocol, tools, batch lifecycle and long polling passe
       Fleet restored(repo, data / "projects/fixture", desc, settings);
       expect(restored.draft().at("title") == "Persisted fixture draft",
              "project draft persists through fleet restart");
-      expect(restored.snapshot().size() == 5, "persistent fleet restoration: loaded " +
+      expect(restored.snapshot().size() == 7, "persistent fleet restoration: loaded " +
                                                   std::to_string(restored.snapshot().size()) +
                                                   " agents");
+      bool pendingRecovered = false;
+      for (auto &state : restored.snapshot())
+        if (state.spec.name == "Untouched ledger fixture")
+          pendingRecovered =
+              state.completed == 0 && state.queue.size() == 1 && state.phase == "partial";
+      expect(pendingRecovered, "unattempted targets and partial phase survive restart");
     }
     {
       auto file = data / "projects/fixture/fleet.json";

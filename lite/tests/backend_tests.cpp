@@ -244,6 +244,24 @@ int main() {
     expect(productiveDriver({{"nearMisses", Json::array({{{"name", "draft"}}})}}),
            "compiling near-miss summary resets exhaustion streak");
     expect(!productiveDriver({{"worked", 1}}), "generic worked count is not matching productivity");
+    auto aliases = driverResultRows({{"inputTokens", 47}, {"outputTokens", 12}});
+    auto aliasBest = Json::object();
+    auto aliasStats = updateAgentStats(Json::object(), aliases, aliasBest);
+    expect(aliasStats["tokensIn"] == 47 && aliasStats["tokensOut"] == 12 &&
+               aliasStats["attempts"] == 0,
+           "token-only driver summaries normalize aliases without phantom attempts");
+    auto fallback = driverResultRows({{"landedNames", Json::array({"real", "asm"})},
+                                      {"sources", {{"asm", "dcd 0x12345678"}}},
+                                      {"tokensOut", nullptr},
+                                      {"outputTokens", nullptr},
+                                      {"tokensPerLanded", 9}});
+    expect(fallback.back().value("tokensOut", 0) == 9,
+           "null token totals fall back to real landed count after transcription gate");
+    auto noLanded =
+        driverResultRows({{"results", Json::array({{{"name", "real"}, {"matched", true}}})},
+                          {"tokensPerLanded", 9}});
+    expect(noLanded.size() == 1 && !noLanded[0].contains("tokensOut"),
+           "matched result rows alone do not invent declared landed token costs");
     auto summary = data / "driver-summary.json";
     write(summary,
           Json({{"results", Json::array({{{"name", "real"}, {"matched", true}},

@@ -635,20 +635,25 @@ Json driverResultRows(const Json &result) {
     return result;
   if (!result.is_object())
     return Json::array();
+  Json names = Json::array();
+  for (auto field : {"landedNames", "landed", "matches"})
+    if (result.contains(field) && !result[field].is_null()) {
+      names = result[field];
+      break;
+    }
   if (!result.contains("results") && !result.contains("sources") && !result.contains("landed") &&
       !result.contains("landedNames") && !result.contains("matches") &&
-      !result.contains("nearMisses"))
-    return Json::array({result});
+      !result.contains("nearMisses")) {
+    auto row = result;
+    for (auto pair : {std::pair{"tokensIn", "inputTokens"}, std::pair{"tokensOut", "outputTokens"}})
+      if ((!row.contains(pair.first) || row[pair.first].is_null()) && row.contains(pair.second))
+        row[pair.first] = row[pair.second];
+    return Json::array({row});
+  }
   Json rows = result.value("results", Json::array());
   if (!rows.is_array())
     rows = Json::array();
   if (!result.contains("results")) {
-    Json names = Json::array();
-    for (auto field : {"landedNames", "landed", "matches"})
-      if (result.contains(field) && !result[field].is_null()) {
-        names = result[field];
-        break;
-      }
     if (names.is_array())
       for (auto &entry : names) {
         if (entry.is_string() && !entry.get<std::string>().empty())
@@ -676,14 +681,22 @@ Json driverResultRows(const Json &result) {
     return std::isfinite(n) && n >= 0 && n < 9e18 ? static_cast<int64_t>(n) : 0;
   };
   auto input = tokens("tokensIn", "inputTokens"), output = tokens("tokensOut", "outputTokens");
-  if (!result.contains("tokensOut") && !result.contains("outputTokens") &&
-      result.contains("tokensPerLanded") && result["tokensPerLanded"].is_number()) {
+  if (result.value("tokensOut", Json()).is_null() &&
+      result.value("outputTokens", Json()).is_null() && result.contains("tokensPerLanded") &&
+      result["tokensPerLanded"].is_number()) {
     auto n = result["tokensPerLanded"].get<double>();
     size_t landed = 0;
-    for (auto &row : rows)
-      if (row.is_object() && row.value("matched", Json(false)) == true &&
-          classifySource(row.value("c_source", std::string())) != "transcribed")
-        ++landed;
+    if (names.is_array())
+      for (auto &entry : names) {
+        auto name = entry.is_string() ? entry.get<std::string>()
+                    : entry.is_object() && entry.contains("name") && entry["name"].is_string()
+                        ? entry["name"].get<std::string>()
+                        : std::string();
+        if (!name.empty() &&
+            (!sources.is_object() || !sources.contains(name) || !sources[name].is_string() ||
+             classifySource(sources[name].get<std::string>()) != "transcribed"))
+          ++landed;
+      }
     auto total = n * landed;
     if (std::isfinite(total) && total >= 0 && total < 9e18)
       output = static_cast<int64_t>(total);
@@ -1100,6 +1113,12 @@ Json Backend::execute(const std::string &m, const Json &a) {
     return {{"color", atlasColor(a.at("row"), a.value("authors", false), a.value("nearMiss", true),
                                  a.value("aliases", std::map<std::string, std::string>{}),
                                  a.value("colors", std::map<std::string, std::string>{}))}};
+  if (m == "policy.driverTokens") {
+    Json best = Json::object();
+    auto stats = updateAgentStats(Json::object(), driverResultRows(a), best);
+    return {{"tokensIn", stats.value("tokensIn", 0LL)},
+            {"tokensOut", stats.value("tokensOut", 0LL)}};
+  }
   if (m == "policy.sort") {
     auto rows = parseAtlas(Json{{"functions", a.at("functions")}}.dump());
     std::vector<size_t> indices(rows.size());

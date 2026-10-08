@@ -34,6 +34,8 @@ python "$source/tests/test_batches_reference.py" --exe "$out/build-a/TangOSLite.
 if ($LASTEXITCODE) { throw 'Original batch comparisons failed' }
 python "$source/tests/test_source_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original source comparisons failed' }
+python "$source/tests/test_driver_tokens_reference.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original driver token-summary comparisons failed' }
 python "$source/tests/test_usage_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original usage-stop comparisons failed' }
 
