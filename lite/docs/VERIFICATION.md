@@ -62,3 +62,7 @@ Source checkpoint aae51d2. Executable: 5,290,496 bytes (5.290 decimal MB), SHA-2
 ## 0.11.0 execution loop checkpoint
 
 Source checkpoint 06cf95f. Executable: 5,305,856 bytes (5.306 decimal MB), SHA-256 A40A73CF0CCECCE6FCF2026A69028DBFE6BF0438B15B9662402A53A62235A129. Two clean builds were identical with Windows system DLL imports only. All four native suites, packaged backend/adapter checks, 738 original-code comparisons and three packaged GUI workflows passed. Fleet integration covers immediate streamed exhaustion, five fast-empty runs, manual restart, split numeric boundaries, one-shot queue draining and separate per-run retained files. Summary ingestion tests cover actual results[]/sources/token aliases and transcription exclusion. Full parity remains unfinished.
+
+## 0.12.0 Controller and project selection checkpoint
+
+Two clean release builds produced identical Windows x64 executables: **5,323,264 bytes (5.323 decimal MB)**, SHA256 **9ED7851ED2FF53B6A7D2E4CA17EB1FD5D3DA7BE42AE745313FD6493ED8AB5203**. Only Windows system DLLs are imported. All four native suites, adapter/backend tests, 738 actual-original-code comparisons, and all three packaged GUI workflows passed. The GUI exercises four-agent Simple/Advanced control containment and remembered canonical repository/title registration. Dense-detail mascot downsampling has a raster regression. The development-only original Controller reference rendered without errors. Full parity remains open as listed in UI-PARITY.md and LIMITATIONS.md.
