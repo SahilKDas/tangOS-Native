@@ -2,6 +2,7 @@
 #include "help.h"
 #include "atlas_layout.h"
 #include "viewer.h"
+#include "batches.h"
 #include <numeric>
 #include "repository.h"
 #include <regex>
@@ -355,10 +356,10 @@ Json Backend::catalog() {
        "git.backup",        "git.discard",       "tools.list",         "tools.run",
        "stats.get",         "stats.clear",       "reports.list",       "reports.export",
        "queue.adopt",       "policy.classify",   "policy.adaptive",    "policy.pool",
-       "policy.statistics", "policy.layout",     "policy.color",       "guide.parse",
-       "guide.tour",        "guide.tips",        "projects.get",       "github.credits",
-       "atlas.cosmetics",   "atlas.counts",      "atlas.progress",     "atlas.live",
-       "update.check",      "harvest.list"});
+       "policy.statistics", "policy.layout",     "policy.color",       "policy.batches",
+       "guide.parse",       "guide.tour",        "guide.tips",         "projects.get",
+       "github.credits",    "atlas.cosmetics",   "atlas.counts",       "atlas.progress",
+       "atlas.live",        "update.check",      "harvest.list"});
 }
 Json Backend::invoke(const std::string &m, Json a) {
   HANDLE lock = CreateFileW((directory / "backend.lock").c_str(),
@@ -959,6 +960,22 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto best = a.value("best", Json::object());
     return {{"entry", updateAgentStats(a.value("entry", Json::object()), a.at("rows"), best)},
             {"best", best}};
+  }
+  if (m == "policy.batches") {
+    BatchBook book;
+    book.restore({{"batches", a.at("batches")}});
+    auto action = a.at("action").get<std::string>();
+    if (action == "remove")
+      book.remove(a.value("id", std::string()));
+    else if (action == "reorder")
+      book.reorder(a.value("id", std::string()), a.value("direction", 1));
+    else if (action == "clearDone")
+      book.clearDone();
+    else if (action == "prune")
+      book.complete("__none__", Json::array());
+    else
+      throw std::runtime_error("Unknown batch policy operation");
+    return book.snapshot();
   }
   if (m == "policy.color")
     return {{"color", atlasColor(a.at("row"), a.value("authors", false), a.value("nearMiss", true),

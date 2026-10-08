@@ -114,7 +114,8 @@ enum class Screen {
   queue,
   requirements,
   descriptorGate,
-  mcpConnection
+  mcpConnection,
+  batches
 };
 constexpr int REQUIREMENTS = 4480, REQ_REFRESH = 4481, REQ_TERMINAL = 4482, REQ_GITHUB = 4483,
               REQ_COPY = 4484;
@@ -127,6 +128,9 @@ constexpr int HELP_EDIT = 4600, HELP_TIPS = 4601;
 constexpr int DESC_SCAN = 4610, DESC_PREVIEW = 4611, DESC_CONFIRM = 4612, DESC_RELOAD = 4613,
               DESC_FOLDER = 4614;
 constexpr int MCP_TOGGLE = 4620, MCP_CONFIG = 4621, MCP_PROMPT = 4622, MCP_COPY_CONFIG = 4623;
+constexpr int BATCHES = 4630, BATCH_LIST = 4631, BATCH_UP = 4632, BATCH_DOWN = 4633,
+              BATCH_REMOVE = 4634, BATCH_CLEAR_DONE = 4635, BATCH_SAVE_DRAFT = 4636,
+              BATCH_ENQUEUE = 4637, BATCH_CART_DRAFT = 4638, BATCH_LOG = 4639;
 struct Hit {
   RECT rect;
   int index;
@@ -179,6 +183,10 @@ struct ConsoleUI::Impl {
   std::map<std::string, HWND> argumentFields;
   std::vector<std::string> cardIds;
   size_t pickedFunction = SIZE_MAX;
+  HWND batchList = nullptr, batchTitle = nullptr, batchPrompt = nullptr;
+  Json batchRows = Json::array(), draftRows = Json::array();
+  std::string batchShown, selectedBatch;
+  ULONGLONG batchPoll = 0;
   HWND layoutChoice = nullptr, filterChoice = nullptr, colorChoice = nullptr,
        authorChoice = nullptr, draftsChoice = nullptr;
   std::string atlasColorBy = "status", authorFilter;
@@ -381,6 +389,7 @@ struct ConsoleUI::Impl {
     for (auto h : controls)
       DestroyWindow(h);
     controls.clear();
+    batchList = batchTitle = batchPrompt = nullptr;
     layoutChoice = filterChoice = colorChoice = authorChoice = draftsChoice = nullptr;
     profileFields.clear();
     argumentFields.clear();
@@ -401,6 +410,8 @@ struct ConsoleUI::Impl {
       selectedId = agents[0].id;
   }
   void navigate(Screen next) {
+    if (screen == Screen::batches && next != screen && batchTitle)
+      storeBatchDraft();
     screen = next;
     scroll = 0;
     build();
@@ -494,6 +505,7 @@ struct ConsoleUI::Impl {
       button("Settings", SETTINGS, 150, height - 48, 94);
       button("Git & reviews", GITTOOLS, 252, height - 48, 122);
       button("Tour", GUIDE, 382, height - 48, 68);
+      button("Batches", BATCHES, 458, height - 48, 94);
       button("MCP connection", OPEN_MCP, width - 332, height - 116, 144);
       button("Run logs", OPEN_LOG, width - 180, height - 116, 116);
       button("This repo needs", REQUIREMENTS, width - 332, 16, 188);
@@ -729,6 +741,58 @@ struct ConsoleUI::Impl {
                   "\nBytes: " + std::to_string(f.size),
               width - 332, 62, 310, 180);
       }
+    } else if (screen == Screen::batches) {
+      if (!fleet)
+        throw std::runtime_error("Load a valid repository descriptor first");
+      batchRows = fleet->batches();
+      auto staged = fleet->draft();
+      draftRows = staged.at("items");
+      batchList = control(L"LISTBOX", "", BATCH_LIST, 18, 64, 255, height - 212,
+                          LBS_NOTIFY | WS_VSCROLL | LBS_NOINTEGRALHEIGHT);
+      for (auto &batch : batchRows) {
+        int worked = 0;
+        for (auto &row : batch.at("items"))
+          if (row.value("worked", false))
+            ++worked;
+        auto name = wide(batch.at("status").get<std::string>() + " · " +
+                         batch.at("title").get<std::string>() + " · " + std::to_string(worked) +
+                         "/" + std::to_string(batch.at("items").size()));
+        auto index = SendMessageW(batchList, LB_ADDSTRING, 0, (LPARAM)name.c_str());
+        if (batch.at("id") == selectedBatch)
+          SendMessageW(batchList, LB_SETCURSEL, index, 0);
+      }
+      label("Draft title", 291, 62, cw - 309);
+      batchTitle = edit(staged.value("title", std::string("Batch draft")), 0, 291, 90, cw - 309);
+      label("Instructions", 291, 130, cw - 309);
+      batchPrompt = edit(staged.value("prompt", std::string()), 0, 291, 158, cw - 309, 110,
+                         ES_MULTILINE | WS_VSCROLL);
+      label(std::to_string(draftRows.size()) + " targets in saved draft", 291, 276, cw - 309);
+      body = edit("Select a queued or completed batch. Worked targets still require independent "
+                  "byte-match proof.",
+                  0, 291, 310, cw - 309, height - 473, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
+      button("Up", BATCH_UP, 18, height - 134, 62);
+      button("Down", BATCH_DOWN, 88, height - 134, 70);
+      button("Remove", BATCH_REMOVE, 166, height - 134, 98);
+      button("Clear done", BATCH_CLEAR_DONE, 18, height - 88, 116);
+      button("Use Viewer cart", BATCH_CART_DRAFT, 291, height - 134, 148);
+      button("Save draft", BATCH_SAVE_DRAFT, 447, height - 134, 104);
+      button("Enqueue draft", BATCH_ENQUEUE, 559, height - 134, 126);
+      button("Controller", HOME, 18, height - 48, 108);
+      button("Viewer", ATLAS, 134, height - 48, 96);
+      label("Assign saved draft to", width - 332, 64, 310);
+      std::vector<std::string> names;
+      int active = 0;
+      for (size_t i = 0; i < agents.size(); ++i) {
+        names.push_back(agents[i].spec.name);
+        if (agents[i].id == selectedId)
+          active = (int)i;
+      }
+      agentChoice = combo(names, 0, width - 332, 96, 310, active);
+      label("Queued/active batches and the draft persist with this project. Stop the assigned "
+            "agent before removing or reordering a batch. Clear done removes history only; "
+            "complete logs stay on disk.",
+            width - 332, 146, 310, 150);
+      button("Open selected batch logs", BATCH_LOG, width - 332, 320, 234);
     } else if (screen == Screen::mcpConnection) {
       label("MCP server", 18, 55, cw - 36, 28);
       body = edit(mcpSummary(), 0, 18, 94, cw - 36, height - 225,
@@ -1076,6 +1140,32 @@ struct ConsoleUI::Impl {
     popups.push_back(std::move(popup));
     ShowWindow(h, SW_SHOWNORMAL);
   }
+  void storeBatchDraft() {
+    if (!fleet || !batchTitle || !batchPrompt)
+      throw std::runtime_error("Open batch drafts first");
+    fleet->saveDraft(
+        {{"title", text(batchTitle)}, {"prompt", text(batchPrompt)}, {"items", draftRows}});
+  }
+  void selectBatch() {
+    auto index = SendMessageW(batchList, LB_GETCURSEL, 0, 0);
+    if (index < 0 || size_t(index) >= batchRows.size())
+      return;
+    auto &batch = batchRows.at(size_t(index));
+    selectedBatch = batch.at("id").get<std::string>();
+    std::string summary = batch.at("title").get<std::string>() +
+                          "\nAgent: " + batch.at("targetAgent").get<std::string>() +
+                          "\nStatus: " + batch.at("status").get<std::string>() + "\n\n" +
+                          batch.at("prompt").get<std::string>() + "\n\nTargets\n";
+    for (auto &row : batch.at("items"))
+      summary += (row.value("removed", false)  ? "Removed  "
+                  : row.value("worked", false) ? "Worked   "
+                                               : "Pending  ") +
+                 batchTarget(row) + "\n";
+    summary +=
+        "\n" +
+        batch.value("note", std::string("Worked targets require independent byte-match proof."));
+    setText(body, summary);
+  }
   std::string mcpSummary() {
     if (mcpBusy)
       return "Changing MCP server state… The UI remains responsive.";
@@ -1403,6 +1493,7 @@ struct ConsoleUI::Impl {
                         : screen == Screen::profile        ? "Connect AI"
                         : screen == Screen::detail         ? "AI detail"
                         : screen == Screen::descriptorGate ? "Repository setup"
+                        : screen == Screen::batches        ? "Batch queues and history"
                         : screen == Screen::mcpConnection  ? "MCP connection"
                         : screen == Screen::requirements   ? "Requirements"
                         : screen == Screen::connections    ? "Connections"
@@ -1902,6 +1993,10 @@ struct ConsoleUI::Impl {
       InvalidateRect(window, nullptr, FALSE);
       return;
     }
+    if (id == BATCH_LIST && notification == LBN_SELCHANGE) {
+      selectBatch();
+      return;
+    }
     if (id == SEARCH && notification == EN_CHANGE) {
       if (screen == Screen::atlas)
         atlasQuery = text(search);
@@ -2204,6 +2299,59 @@ struct ConsoleUI::Impl {
       navigate(Screen::controller);
       break;
     }
+    case BATCHES:
+      navigate(Screen::batches);
+      break;
+    case BATCH_LOG: {
+      auto batch = std::find_if(batchRows.begin(), batchRows.end(),
+                                [&](const Json &b) { return b.at("id") == selectedBatch; });
+      if (batch == batchRows.end())
+        throw std::runtime_error("Select a batch");
+      auto owner = batch->at("agentId").get<std::string>();
+      auto states = fleet->snapshot();
+      auto agent = std::find_if(states.begin(), states.end(),
+                                [&](const AgentState &state) { return state.id == owner; });
+      if (agent == states.end() || agent->log.empty())
+        throw std::runtime_error("No run log yet; start its assigned agent first");
+      ShellExecuteW(window, L"open", agent->log.parent_path().c_str(), nullptr, nullptr,
+                    SW_SHOWNORMAL);
+      break;
+    }
+    case BATCH_SAVE_DRAFT:
+      storeBatchDraft();
+      break;
+    case BATCH_CART_DRAFT:
+      storeBatchDraft();
+      if (cart.empty())
+        throw std::runtime_error("Choose targets in Viewer first");
+      draftRows = Json::array();
+      for (auto index : cart)
+        draftRows.push_back(atlas.at(index).row);
+      storeBatchDraft();
+      build();
+      break;
+    case BATCH_ENQUEUE:
+      storeBatchDraft();
+      if (choice(agentChoice) < 0 || size_t(choice(agentChoice)) >= agents.size())
+        throw std::runtime_error("Select an agent");
+      selectedId = agents.at(size_t(choice(agentChoice))).id;
+      fleet->enqueueDraft(selectedId);
+      build();
+      break;
+    case BATCH_UP:
+    case BATCH_DOWN:
+    case BATCH_REMOVE:
+      storeBatchDraft();
+      if (selectedBatch.empty())
+        throw std::runtime_error("Select a batch");
+      fleet->editBatch(selectedBatch, id == BATCH_UP ? -1 : 1, id == BATCH_REMOVE);
+      build();
+      break;
+    case BATCH_CLEAR_DONE:
+      storeBatchDraft();
+      fleet->clearDoneBatches();
+      build();
+      break;
     case OPEN_MCP:
       navigate(Screen::mcpConnection);
       break;
@@ -2227,7 +2375,9 @@ struct ConsoleUI::Impl {
       break;
     case OPEN_LOG: {
       auto a = activeAgent();
-      auto path = screen == Screen::detail && a ? a->worktree : data / "logs";
+      auto path = (screen == Screen::detail || screen == Screen::controller) && a && !a->log.empty()
+                      ? a->log.parent_path()
+                      : data / "logs";
       fs::create_directories(path);
       ShellExecuteW(window, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
       break;
@@ -2368,6 +2518,24 @@ struct ConsoleUI::Impl {
     }
   }
   void tick() {
+    if (screen == Screen::batches && fleet && batchList && GetTickCount64() - batchPoll >= 1000) {
+      batchPoll = GetTickCount64();
+      auto fresh = fleet->batches();
+      auto encoded = fresh.dump();
+      if (encoded != batchShown) {
+        batchShown = encoded;
+        batchRows = fresh;
+        SendMessageW(batchList, LB_RESETCONTENT, 0, 0);
+        for (auto &batch : batchRows) {
+          auto label = wide(batch.at("status").get<std::string>() + " · " +
+                            batch.at("title").get<std::string>());
+          auto index = SendMessageW(batchList, LB_ADDSTRING, 0, (LPARAM)label.c_str());
+          if (batch.at("id") == selectedBatch)
+            SendMessageW(batchList, LB_SETCURSEL, index, 0);
+        }
+        selectBatch();
+      }
+    }
     if (mcpReady.exchange(false)) {
       if (mcpWorker.joinable())
         mcpWorker.join();
@@ -2839,6 +3007,8 @@ void ConsoleUI::show(bool visible, bool atlas) {
 void ConsoleUI::resize(int width, int height) {
   if (width < 800 || height < 650 || (width == impl->width && height == impl->height))
     return;
+  if (impl->screen == Screen::batches && impl->batchTitle)
+    impl->storeBatchDraft();
   impl->width = width;
   impl->height = height;
   MoveWindow(impl->window, 14, 66, width, height, TRUE);
@@ -3011,6 +3181,23 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
   waitFor([&] { return impl->mcpBusy.load() || impl->mcpReady.load(); });
   if (!impl->mcp)
     throw std::runtime_error("MCP restart failed");
+  impl->navigate(Screen::batches);
+  impl->draftRows =
+      Json::array({{{"id", "draft-gui-target"}, {"name", "draft_gui_target"}, {"module", "port"}}});
+  setText(impl->batchTitle, "GUI saved draft");
+  setText(impl->batchPrompt, "Preserve repository rules and report verification failures.");
+  impl->action(BATCH_SAVE_DRAFT, BN_CLICKED);
+  if (impl->fleet->draft().at("title") != "GUI saved draft")
+    throw std::runtime_error("Draft editor did not save");
+  impl->action(BATCH_ENQUEUE, BN_CLICKED);
+  auto history = impl->fleet->batches();
+  if (history.empty() || history.back().at("title") != "GUI saved draft" ||
+      !impl->fleet->draft().at("items").empty())
+    throw std::runtime_error("Draft assignment did not enqueue batch");
+  impl->selectedBatch = history.back().at("id").get<std::string>();
+  capture(directory / "batch-history.bmp");
+  impl->action(BATCH_REMOVE, BN_CLICKED);
+  impl->action(BATCH_CLEAR_DONE, BN_CLICKED);
   impl->navigate(Screen::functionDetail);
   waitFor([&] { return impl->inspectBusy.load() || impl->inspectReady.load(); });
   if (impl->inspectText.find("1  int fixture_source") == std::string::npos)

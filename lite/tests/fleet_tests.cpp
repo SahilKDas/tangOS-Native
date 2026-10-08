@@ -182,7 +182,8 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       auto second = fleet.add(a);
       fleet.enqueue(
           first,
-          Json::array({{{"id", "one"}, {"name", "one"}, {"module", "port"}, {"claim", nullptr}}}));
+          Json::array({{{"id", "one"}, {"name", "one"}, {"module", "port"}, {"claim", nullptr}}}),
+          "Custom fixture batch", "CUSTOM_BATCH_RULE: obey repository rules and verify results");
       reject(
           [&] {
             fleet.enqueue(second,
@@ -191,6 +192,8 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
           "duplicate target claim");
       fleet.enqueue(second, Json::array({{{"id", "two"}, {"name", "two"}, {"module", "port"}}}));
       fleet.start(first);
+      reject([&] { fleet.editBatch(fleet.batches()[0].at("id").get<std::string>(), 1); },
+             "active batch edits rejected without stopping work");
       fleet.start(second);
       fleet.enqueue(first, Json::array({{{"id", "later"}, {"name", "later"}, {"module", "port"}}}));
       wait(fleet);
@@ -205,6 +208,28 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
           expect(state.queue[0]["id"] == "last", "queue reordered persistently");
       fleet.editQueue(first, 0, 0, true);
       fleet.clear(first);
+      auto history = fleet.batches();
+      expect(std::any_of(history.begin(), history.end(),
+                         [](const Json &b) { return b.at("status") == "done"; }),
+             "completed fleet batches retained in history");
+      fleet.saveDraft({{"title", "Draft fixture"},
+                       {"prompt", "Follow NESTED_RULE"},
+                       {"items", Json::array({{{"id", "draft-target"},
+                                               {"name", "draft_target"},
+                                               {"module", "port"}}})}});
+      fleet.enqueueDraft(first);
+      expect(fleet.draft().at("items").empty() &&
+                 fleet.batches().back().at("title") == "Draft fixture",
+             "draft consumed only after successful queue assignment");
+      auto draftBatch = fleet.batches().back().at("id").get<std::string>();
+      fleet.editBatch(draftBatch, -1);
+      fleet.editBatch(draftBatch, 1, true);
+      for (auto &state : fleet.snapshot())
+        if (state.id == first)
+          expect(state.queue.empty(), "removing queued batch updates execution queue");
+      fleet.saveDraft({{"title", "Persisted fixture draft"},
+                       {"prompt", "Follow repository rules"},
+                       {"items", Json::array()}});
       auto states = fleet.snapshot();
       for (auto &state : states) {
         expect(state.phase == "review",
@@ -216,6 +241,9 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
                "provider key not logged");
         expect(read(state.prompt).find("Role: Hard matcher") != std::string::npos,
                "resolved automatic role reaches driver instructions");
+        if (state.id == first)
+          expect(read(state.prompt).find("CUSTOM_BATCH_RULE") != std::string::npos,
+                 "saved batch instructions reach actual API driver");
         expect(read(state.prompt).find("NESTED_RULE") != std::string::npos,
                "scoped instructions delivered");
       }
@@ -334,9 +362,25 @@ print('authenticated MCP protocol, tools, batch lifecycle and long polling passe
     }
     {
       Fleet restored(repo, data / "projects/fixture", desc, settings);
+      expect(restored.draft().at("title") == "Persisted fixture draft",
+             "project draft persists through fleet restart");
       expect(restored.snapshot().size() == 5, "persistent fleet restoration: loaded " +
                                                   std::to_string(restored.snapshot().size()) +
                                                   " agents");
+    }
+    {
+      auto file = data / "projects/fixture/fleet.json";
+      auto original = read(file);
+      auto legacy = Json::parse(original);
+      legacy.erase("batchBook");
+      write(file, legacy.dump(2));
+      {
+        Fleet migrated(repo, data / "projects/fixture", desc, settings);
+        expect(!migrated.batches().empty() &&
+                   migrated.batches()[0].at("title") == "Recovered queue",
+               "legacy target queues migrate without losing unfinished work");
+      }
+      write(file, original);
     }
     write(dir / "split.py", "import "
                             "os,time,sys\ns=os.environ['TEST_API_KEY'];sys.stdout.write(s[:8]);sys."

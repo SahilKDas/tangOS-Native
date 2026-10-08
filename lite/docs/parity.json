@@ -30,8 +30,12 @@
     },
     {
       "contract": "batches",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/test_batches_reference.py",
+        "lite/tests/fleet_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "state"
     },
     {
@@ -626,14 +630,22 @@
     },
     {
       "contract": "enqueueBatch",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/test_batches_reference.py",
+        "lite/tests/fleet_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "api"
     },
     {
       "contract": "assignBatch",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/test_batches_reference.py",
+        "lite/tests/fleet_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "api"
     },
     {
@@ -682,15 +694,22 @@
     },
     {
       "contract": "removeBatch",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/test_batches_reference.py",
+        "lite/tests/fleet_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "api"
     },
     {
       "contract": "clearQueue",
       "state": "partial",
       "evidence": [
-        "Concurrent batch/queue preservation tested; original global Batch contract differs"
+        "Concurrent batch/queue preservation tested; original global Batch contract differs",
+        "lite/tests/test_batches_reference.py",
+        "lite/tests/fleet_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
       ],
       "kind": "api"
     },
@@ -710,14 +729,21 @@
       "contract": "reorderBatch",
       "state": "partial",
       "evidence": [
-        "Native target reorder persists; original batch grouping not implemented"
+        "Native target reorder persists; original batch grouping not implemented",
+        "lite/tests/test_batches_reference.py",
+        "lite/tests/fleet_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
       ],
       "kind": "api"
     },
     {
       "contract": "clearDoneBatches",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/test_batches_reference.py",
+        "lite/tests/fleet_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "api"
     },
     {

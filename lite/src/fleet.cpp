@@ -136,6 +136,7 @@ Fleet::Fleet(fs::path repo, fs::path dir, Descriptor desc, Settings prefs, Sink 
   auto file = directory / "fleet.json";
   try {
     auto persisted = fs::exists(file) ? Json::parse(read(file)) : Json({{"agents", Json::array()}});
+    batchBook.restore(persisted.value("batchBook", Json::object()));
     for (auto &j : persisted.at("agents")) {
       auto job = std::make_shared<Job>();
       job->state = parseAgent(j);
@@ -148,6 +149,18 @@ Fleet::Fleet(fs::path repo, fs::path dir, Descriptor desc, Settings prefs, Sink 
             "Previous run interrupted; inspect preserved worktree/log before resuming";
       }
       jobs[job->state.id] = job;
+    }
+    if (!persisted.contains("batchBook")) {
+      bool migrated = false;
+      for (auto &entry : jobs)
+        if (!entry.second->state.queue.empty()) {
+          batchBook.add(uniqueId(), entry.first, entry.second->state.spec.name,
+                        entry.second->state.queue, std::time(nullptr) * int64_t(1000),
+                        "Recovered queue", "");
+          migrated = true;
+        }
+      if (migrated)
+        saveLocked();
     }
   } catch (...) {
     CloseHandle(controllerOwnership);
@@ -167,6 +180,7 @@ void Fleet::saveLocked() {
   Json j = {{"version", 1}, {"repository", utf8(repository.wstring())}, {"agents", Json::array()}};
   for (auto &item : jobs)
     j["agents"].push_back(agentJson(item.second->state));
+  j["batchBook"] = batchBook.serialize();
   auto temp = directory / "fleet.tmp";
   write(temp, j.dump(2));
   if (!MoveFileExW(temp.c_str(), (directory / "fleet.json").c_str(),
@@ -205,6 +219,7 @@ void Fleet::remove(const std::string &id) {
     job->worker.join();
   std::lock_guard<std::mutex> lock(mutex);
   jobs.erase(id);
+  batchBook.clearAgent(id);
   saveLocked();
 }
 std::vector<AgentState> Fleet::snapshot() const {
@@ -217,14 +232,8 @@ std::vector<AgentState> Fleet::snapshot() const {
   }
   return out;
 }
-static std::string target(const Json &row) {
-  if (row.contains("ref"))
-    return row["ref"].is_string() ? row["ref"].get<std::string>() : row["ref"].dump();
-  if (row.contains("id"))
-    return row["id"].is_string() ? row["id"].get<std::string>() : row["id"].dump();
-  return row.value("module", std::string()) + ":" + row.value("name", std::string());
-}
-void Fleet::enqueue(const std::string &id, const Json &rows) {
+void Fleet::enqueue(const std::string &id, const Json &rows, const std::string &title,
+                    const std::string &prompt) {
   if (!rows.is_array())
     throw std::runtime_error("Worklist must be an array");
   auto claims = backend("claims.read", Json::object());
@@ -234,22 +243,111 @@ void Fleet::enqueue(const std::string &id, const Json &rows) {
   std::set<std::string> taken;
   for (auto &item : jobs)
     for (auto &row : item.second->state.queue)
-      taken.insert(target(row));
+      taken.insert(batchTarget(row));
   Json fresh = Json::array();
   for (auto &row : rows) {
     if (heldTarget(row, claims) || row.value("matched", false) || exemptTarget(row) ||
         (row.contains("claim") && !row["claim"].is_null() && row["claim"] != false))
       throw std::runtime_error("Target is already matched, exempt or externally claimed");
-    auto ref = target(row);
+    auto ref = batchTarget(row);
     if (ref.empty() || ref == ":")
       throw std::runtime_error("Work target needs id, ref or name");
     if (!taken.insert(ref).second)
       throw std::runtime_error("Target already claimed: " + ref);
     fresh.push_back(row);
   }
+  batchBook.add(uniqueId(), id, job->state.spec.name, fresh, std::time(nullptr) * int64_t(1000),
+                title, prompt);
   for (auto &row : fresh)
     job->state.queue.push_back(row);
   job->state.total = job->state.completed + (int)job->state.queue.size();
+  saveLocked();
+}
+Json Fleet::batches() const {
+  std::lock_guard<std::mutex> lock(mutex);
+  return batchBook.snapshot();
+}
+Json Fleet::draft() const {
+  std::lock_guard<std::mutex> lock(mutex);
+  return batchBook.draft();
+}
+void Fleet::saveDraft(const Json &draft) {
+  std::lock_guard<std::mutex> lock(mutex);
+  batchBook.setDraft(draft);
+  saveLocked();
+}
+void Fleet::enqueueDraft(const std::string &id) {
+  auto staged = draft();
+  if (staged.at("items").empty())
+    throw std::runtime_error("Draft has no targets");
+  enqueue(id, staged.at("items"), staged.value("title", std::string()),
+          staged.value("prompt", std::string()));
+  // Do not erase a draft edited concurrently while claims were checked.
+  std::lock_guard<std::mutex> lock(mutex);
+  if (batchBook.draft() == staged)
+    batchBook.setDraft({{"title", "Batch draft"}, {"prompt", ""}, {"items", Json::array()}});
+  saveLocked();
+}
+void Fleet::clearDoneBatches() {
+  std::lock_guard<std::mutex> lock(mutex);
+  batchBook.clearDone();
+  saveLocked();
+}
+void Fleet::editBatch(const std::string &batchId, int direction, bool remove) {
+  std::lock_guard<std::mutex> lock(mutex);
+  auto history = batchBook.snapshot();
+  auto found = std::find_if(history.begin(), history.end(),
+                            [&](const Json &b) { return b.at("id") == batchId; });
+  if (found == history.end())
+    throw std::runtime_error("Select a batch");
+  auto id = found->at("agentId").get<std::string>();
+  auto jobIt = jobs.find(id);
+  if (jobIt != jobs.end()) {
+    auto &job = jobIt->second;
+    if (job->active)
+      throw std::runtime_error("Stop agent before editing its batches");
+    if (remove && found->at("status") != "done") {
+      std::set<std::string> removed;
+      for (auto &row : found->at("items"))
+        removed.insert(batchTarget(row));
+      Json remaining = Json::array();
+      for (auto &row : job->state.queue)
+        if (!removed.count(batchTarget(row)))
+          remaining.push_back(row);
+      job->state.queue = remaining;
+    }
+  }
+  if (remove)
+    batchBook.remove(batchId);
+  else
+    batchBook.reorder(batchId, direction);
+  if (jobIt != jobs.end()) {
+    auto &state = jobIt->second->state;
+    if (!remove) {
+      std::map<std::string, Json> queued;
+      for (auto &row : state.queue)
+        queued[batchTarget(row)] = row;
+      Json ordered = Json::array();
+      for (auto &batch : batchBook.snapshot())
+        if (batch.at("agentId") == id && batch.at("status") != "done")
+          for (auto &row : batch.at("items")) {
+            auto key = batchTarget(row);
+            auto it = queued.find(key);
+            if (it != queued.end()) {
+              ordered.push_back(it->second);
+              queued.erase(it);
+            }
+          }
+      for (auto &row : state.queue)
+        if (queued.erase(batchTarget(row)))
+          ordered.push_back(row);
+      state.queue = ordered;
+    }
+    state.assigned = Json::array();
+    state.total = state.completed + int(state.queue.size());
+    if (state.phase == "queued")
+      state.phase = "idle";
+  }
   saveLocked();
 }
 void Fleet::clear(const std::string &id) {
@@ -257,6 +355,7 @@ void Fleet::clear(const std::string &id) {
   auto job = jobs.at(id);
   if (job->active)
     throw std::runtime_error("Stop agent before clearing its queue");
+  batchBook.clearAgent(id);
   job->state.queue = Json::array();
   job->state.assigned = Json::array();
   if (job->state.phase == "queued")
@@ -284,15 +383,16 @@ void Fleet::editQueue(const std::string &id, size_t index, int direction, bool r
   if (job->state.phase == "queued")
     job->state.phase = "idle";
   job->state.total = job->state.completed + (int)job->state.queue.size();
+  batchBook.reconcile(id, job->state.queue);
   saveLocked();
 }
 static void consumeBatch(AgentState &state) {
   std::set<std::string> finished;
   for (auto &row : state.assigned)
-    finished.insert(target(row));
+    finished.insert(batchTarget(row));
   Json remaining = Json::array();
   for (auto &row : state.queue)
-    if (!finished.count(target(row)))
+    if (!finished.count(batchTarget(row)))
       remaining.push_back(row);
   state.completed += (int)state.assigned.size();
   state.queue = std::move(remaining);
@@ -309,6 +409,7 @@ bool Fleet::running() const {
 void Fleet::stop(const std::string &id) {
   std::lock_guard<std::mutex> lock(mutex);
   auto job = jobs.at(id);
+  batchBook.park(id, "Stopped; partial work and complete logs retained");
   job->runner.cancel();
   job->state.spec.loop = false;
   if (job->state.spec.kind == "mcp" && !job->externalTask) {
@@ -325,6 +426,7 @@ void Fleet::stopExternal() {
     if (job->state.spec.kind != "mcp")
       continue;
     job->runner.cancel();
+    batchBook.park(item.first, "Stopped; partial work and complete logs retained");
     job->state.spec.loop = false;
     if (!job->externalTask && job->active) {
       job->active = false;
@@ -399,6 +501,8 @@ void Fleet::land(const std::string &id) {
     auto update = [&](const std::string &phase, const std::string &detail) {
       std::lock_guard<std::mutex> lock(mutex);
       job->state.phase = phase;
+      if (phase == "failed" || phase == "cancelled")
+        batchBook.park(job->state.id, detail);
       job->state.detail = detail;
       saveLocked();
     };
@@ -483,7 +587,7 @@ Json Fleet::schedule(const std::shared_ptr<Job> &job, const fs::path &cwd) {
     std::lock_guard<std::mutex> lock(mutex);
     for (auto &item : jobs)
       for (auto &row : item.second->state.queue)
-        taken.insert(target(row));
+        taken.insert(batchTarget(row));
   }
   Json values = {{"limit", job->state.spec.count + (int)taken.size() + 16},
                  {"count", job->state.spec.count + (int)taken.size() + 16},
@@ -499,7 +603,7 @@ Json Fleet::schedule(const std::shared_ptr<Job> &job, const fs::path &cwd) {
     if (s.empty() || s[0] != '{')
       continue;
     auto row = Json::parse(s);
-    if (taken.insert(target(row)).second)
+    if (taken.insert(batchTarget(row)).second)
       rows.push_back(row);
     if (rows.size() >= (size_t)job->state.spec.count)
       break;
@@ -541,6 +645,8 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
   auto update = [&](const std::string &phase, const std::string &detail) {
     std::lock_guard<std::mutex> lock(mutex);
     job->state.phase = phase;
+    if (phase == "failed" || phase == "cancelled")
+      batchBook.park(job->state.id, detail);
     job->state.detail = detail;
     saveLocked();
   };
@@ -588,7 +694,7 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       if (rows.empty())
         rows = schedule(job, job->state.worktree);
       for (auto &row : rows)
-        row["ref"] = target(row);
+        row["ref"] = batchTarget(row);
       if (auto enrich = descriptor.role("enrich")) {
         for (auto &row : rows)
           if (!row.contains("disasm") && row.contains("addr")) {
@@ -655,6 +761,10 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       instructions += "Run declared verification tools. Report failures honestly. A successful "
                       "process exit is not proof of byte matching.\nTargets:\n" +
                       rows.dump(2);
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        instructions += batchBook.instructions(id, rows);
+      }
       write(prompt, instructions);
       write(out, "");
       std::string list;
@@ -664,6 +774,8 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       {
         std::lock_guard<std::mutex> lock(mutex);
         job->state.assigned = rows;
+        if (execute && job->state.spec.kind != "mcp")
+          batchBook.activate(id, rows, std::time(nullptr) * int64_t(1000));
         job->state.prompt = prompt;
         job->state.worklist = wl;
         job->state.log = dir / "driver.log";
@@ -812,6 +924,7 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
                        job->state.spec.role == "Unassigned" ? job->runtimeRole : std::string());
       {
         std::lock_guard<std::mutex> lock(mutex);
+        batchBook.complete(job->state.id, job->state.assigned);
         consumeBatch(job->state);
         saveLocked();
       }
@@ -880,6 +993,7 @@ Json Fleet::takeBatch(const std::string &id) {
     return {{"status", "empty"}};
   job->state.phase = "running";
   job->state.detail = "External agent owns batch";
+  batchBook.activate(id, job->state.assigned, std::time(nullptr) * int64_t(1000));
   saveLocked();
   job->active = true;
   return {{"status", "assigned"},
@@ -915,6 +1029,7 @@ void Fleet::finishBatch(const std::string &id) {
     std::lock_guard<std::mutex> lock(mutex);
     if (job->state.assigned.empty())
       job->state.assigned = job->state.queue;
+    batchBook.complete(job->state.id, job->state.assigned);
     consumeBatch(job->state);
     job->state.phase = "review";
     job->state.detail = gates ? "External batch independently verified; review required"

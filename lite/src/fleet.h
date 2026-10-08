@@ -1,5 +1,6 @@
 #pragma once
 #include "descriptor.h"
+#include "batches.h"
 #include "repository.h"
 #include <windows.h>
 #include <memory>
@@ -49,6 +50,7 @@ class Fleet {
   mutable std::mutex mutex;
   std::map<std::string, std::shared_ptr<Job>> jobs;
   Sink events;
+  BatchBook batchBook;
   HANDLE controllerOwnership = INVALID_HANDLE_VALUE;
   void saveLocked();
   void drive(const std::shared_ptr<Job> &job, bool execute);
@@ -63,7 +65,14 @@ public:
   void configure(const std::string &id, AgentSpec spec);
   void remove(const std::string &id);
   std::vector<AgentState> snapshot() const;
-  void enqueue(const std::string &id, const Json &rows);
+  void enqueue(const std::string &id, const Json &rows, const std::string &title = {},
+               const std::string &prompt = {});
+  Json batches() const;
+  Json draft() const;
+  void saveDraft(const Json &draft);
+  void enqueueDraft(const std::string &id);
+  void editBatch(const std::string &id, int direction, bool remove = false);
+  void clearDoneBatches();
   void clear(const std::string &id);
   void editQueue(const std::string &id, size_t index, int direction, bool remove = false);
   void start(const std::string &id, bool execute = true);

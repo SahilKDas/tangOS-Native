@@ -1,6 +1,7 @@
 #include "repository.h"
 #include "viewer.h"
 #include "help.h"
+#include "batches.h"
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
@@ -45,6 +46,35 @@ int main() {
     expect(marqueeTiles(fixtureTiles, {60, 40, -50, -30}) == std::vector<size_t>({0, 1}),
            "reverse marquee intersects tiles");
     expect(marqueeTiles(fixtureTiles, {110, 110, 5, 5}).empty(), "marquee outside world");
+    BatchBook book;
+    Json batchRows = Json::array({{{"id", "first"}}, {{"id", "second"}}});
+    book.add("batch", "agent", "Fixture", batchRows, 123, "Fixture batch", "User instructions");
+    book.activate("agent", Json::array({batchRows[0]}), 124);
+    BatchBook resumed;
+    resumed.restore(book.serialize());
+    expect(resumed.snapshot()[0]["parked"] == true && resumed.snapshot()[0]["status"] == "queued",
+           "interrupted batches park without losing targets");
+    book.complete("agent", Json::array({batchRows[0]}));
+    expect(book.snapshot()[0]["status"] == "queued" &&
+               book.snapshot()[0]["items"][0]["worked"] == true &&
+               book.snapshot()[0]["items"][1]["worked"] == false,
+           "partial batch completion preserves unworked targets");
+    book.complete("agent", Json::array({batchRows[1]}));
+    expect(book.snapshot()[0]["status"] == "done" &&
+               book.snapshot()[0]["items"][0]["done"] == false,
+           "processed batch is not a byte-match claim");
+    for (int i = 0; i < 35; ++i) {
+      book.add(std::to_string(i), "agent", "Fixture", batchRows, i, "Fixture", "Instructions");
+      book.complete("agent", batchRows);
+    }
+    expect(book.snapshot().size() == 30 && book.snapshot()[0]["id"] == "5",
+           "batch history bounds completed records without touching logs");
+    rejects([&] { book.setDraft({{"items", Json::array({batchRows[0], batchRows[0]})}}); },
+            "duplicate draft targets rejected");
+    book.setDraft({{"title", "Saved draft"}, {"prompt", "Instructions"}, {"items", batchRows}});
+    BatchBook restored;
+    restored.restore(book.serialize());
+    expect(restored.draft() == book.draft(), "draft metadata and picks survive serialization");
     expect(!claimedTarget(Json{{"claim", nullptr}}) && !claimedTarget(Json{{"claim", false}}),
            "null/false claims remain selectable");
     expect(claimedTarget(Json{{"claim", Json::object()}}), "structured claims block selection");
