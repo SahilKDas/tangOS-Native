@@ -121,8 +121,10 @@
     },
     {
       "contract": "projects",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "Native remembered canonical local-project registry and title menu; GUI path/title registration tested. Built-in remote registry and no-clone switching remain open."
+      ],
       "kind": "state"
     },
     {
@@ -357,14 +359,18 @@
     },
     {
       "contract": "listProjects",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "Native remembered canonical local-project registry and title menu; GUI path/title registration tested. Built-in remote registry and no-clone switching remain open."
+      ],
       "kind": "api"
     },
     {
       "contract": "switchProject",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "Native remembered canonical local-project registry and title menu; GUI path/title registration tested. Built-in remote registry and no-clone switching remain open."
+      ],
       "kind": "api"
     },
     {
@@ -762,8 +768,10 @@
     },
     {
       "contract": "cloneAndOpen",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "Native clone service cancellation/restart and durable log tested using disposable local Git repositories. Dedicated clone-and-open/no-clone frontend remains open."
+      ],
       "kind": "api"
     },
     {

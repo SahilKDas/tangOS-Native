@@ -67,7 +67,7 @@ struct McpServer::Impl {
         }
         result = {{"protocolVersion", "2025-03-26"},
                   {"capabilities", {{"tools", Json::object()}}},
-                  {"serverInfo", {{"name", "TangOS Lite"}, {"version", "0.12.0"}}},
+                  {"serverInfo", {{"name", "TangOS Lite"}, {"version", "0.13.0"}}},
                   {"instructions", "Pull next_batch and follow its scoped AGENTS.md instructions. "
                                    "Work only in the assigned worktree."}};
       } else if (method == "ping")
