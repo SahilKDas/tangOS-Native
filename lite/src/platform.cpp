@@ -81,8 +81,6 @@ std::string sha256File(const fs::path &path) {
 Result Runner::run(const Command &c, const Sink &sink, const fs::path &log) {
   if (c.argv.empty())
     throw std::runtime_error("Empty command");
-  if (cancelled)
-    return {ERROR_CANCELLED, "Cancelled\n"};
   std::ofstream f;
   if (!log.empty()) {
     fs::create_directories(log.parent_path());
@@ -106,6 +104,11 @@ Result Runner::run(const Command &c, const Sink &sink, const fs::path &log) {
     if (sink)
       sink(t);
   };
+  if (cancelled) {
+    result.code = ERROR_CANCELLED;
+    store("[CANCELLED] before process launch\n");
+    return result;
+  }
   // Filter before capture, disk and callbacks, including secrets split across
   // pipe reads. Credentials never enter the durable log in plaintext.
   std::vector<std::string> secretValues;

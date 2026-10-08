@@ -18,6 +18,10 @@ const { chromium } = require(path.resolve(playwrightModule));
     await page.goto(baseUrl, { waitUntil: 'networkidle' });
     await page.getByRole('heading', { name: 'Chaos Controller', exact: true }).waitFor();
     await page.screenshot({ path: path.resolve(outputDir, 'controller.png') });
+    await page.getByRole('button', { name: 'Chaos Viewer', exact: true }).click();
+    await page.getByRole('heading', { name: /^Atlas/ }).waitFor();
+    await page.waitForTimeout(3500); // Original tab-switch splash must finish before comparison.
+    await page.screenshot({ path: path.resolve(outputDir, 'atlas.png') });
     console.log(JSON.stringify({ errors, calls: await page.evaluate(() => window.__referenceCalls) }));
     if (errors.length) throw new Error('Original reference UI reported errors');
   } finally { await browser.close(); }

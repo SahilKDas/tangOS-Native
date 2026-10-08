@@ -330,9 +330,9 @@ std::string adaptiveRole(const std::string &role, int attempts, int matches, con
   return chosen == "Refiner" && pool.value("refinerSupply", 0) == 0 ? "Drafter" : chosen;
 }
 Backend::Backend(fs::path repo, fs::path data, Settings prefs,
-                 std::map<std::string, std::string> keys, Transport http)
+                 std::map<std::string, std::string> keys, Transport http, Runner *process)
     : repository(std::move(repo)), directory(std::move(data)), settings(std::move(prefs)),
-      transport(std::move(http)), secrets(std::move(keys)) {
+      transport(std::move(http)), processRunner(process), secrets(std::move(keys)) {
   fs::create_directories(directory);
 }
 bool Backend::mutation(const std::string &m, const Json &) {
@@ -982,9 +982,11 @@ Json Backend::execute(const std::string &m, const Json &a) {
     fs::create_directories(dest.parent_path());
     Runner r;
     auto log = directory / (uniqueId() + "-clone.log");
-    auto result = r.run(
+    auto &cloneRunner = processRunner ? *processRunner : r;
+    auto result = cloneRunner.run(
         {{"git", "clone", "--progress", "--", url, utf8(dest.wstring())}, directory}, {}, log);
     return {{"exit", result.code},
+            {"cancelled", cloneRunner.isCancelled()},
             {"repository", utf8(dest.wstring())},
             {"output", redact(result.output, secrets)},
             {"log", utf8(log.wstring())}};

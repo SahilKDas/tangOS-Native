@@ -5,6 +5,7 @@
 #include <memory>
 namespace lite {
 class RemoteLease;
+class Runner;
 using Transport =
     std::function<HttpResponse(const std::string &, const std::string &, const std::string &,
                                const std::map<std::string, std::string> &)>;
@@ -23,12 +24,14 @@ class Backend {
   fs::path repository, directory;
   Settings settings;
   Transport transport;
+  Runner *processRunner;
   std::map<std::string, std::string> secrets;
   Json execute(const std::string &method, const Json &args);
 
 public:
   Backend(fs::path repo, fs::path data, Settings prefs,
-          std::map<std::string, std::string> keys = {}, Transport http = requestHttp);
+          std::map<std::string, std::string> keys = {}, Transport http = requestHttp,
+          Runner *process = nullptr);
   static bool mutation(const std::string &method, const Json &args);
   static Json catalog();
   Json invoke(const std::string &method, Json args = Json::object());

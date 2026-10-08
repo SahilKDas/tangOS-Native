@@ -223,7 +223,8 @@
     "stars": {}
   },
   "atlasCounts": {
-    "ready": false
+    "totals": {},
+    "daily": {}
   },
   "atlasProgress": {
     "ready": false

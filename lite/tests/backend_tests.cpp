@@ -1,4 +1,5 @@
 #include "backend.h"
+#include <windows.h>
 #include "repository.h"
 #include <iostream>
 #include <thread>
@@ -69,6 +70,27 @@ int main() {
     expect(backend.invoke("projects.list").size() == 1, "registered local project");
     confirmed("projects.register", {{"id", "remote"}, {"descriptor", desc}});
     expect(backend.invoke("projects.list").size() == 2, "remote no-clone descriptor");
+    Runner cloneRunner;
+    Backend cloneBackend(repo, data, settings, {}, requestHttp, &cloneRunner);
+    Json cloneArgs{{"url", utf8(repo.wstring())}};
+    auto clonePreview = cloneBackend.invoke("git.clone", cloneArgs);
+    cloneArgs["confirmation"] = clonePreview.at("confirmation");
+    cloneRunner.cancel();
+    auto cancelledClone = cloneBackend.invoke("git.clone", cloneArgs);
+    expect(cancelledClone.value("cancelled", false) && cancelledClone.at("exit") == ERROR_CANCELLED,
+           "clone respects caller cancellation");
+    expect(!fs::exists(fs::u8path(cancelledClone.at("repository").get<std::string>())) &&
+               read(fs::u8path(cancelledClone.at("log").get<std::string>())).find("CANCELLED") !=
+                   std::string::npos,
+           "cancelled clone launches no process and retains a complete log");
+    cloneRunner.reset();
+    cloneArgs.erase("confirmation");
+    clonePreview = cloneBackend.invoke("git.clone", cloneArgs);
+    cloneArgs["confirmation"] = clonePreview.at("confirmation");
+    auto localClone = cloneBackend.invoke("git.clone", cloneArgs);
+    expect(!localClone.value("cancelled", true) && localClone.at("exit") == 0 &&
+               fs::exists(fs::u8path(localClone.at("repository").get<std::string>()) / ".git"),
+           "clone runner reset permits a disposable local clone");
     expect(!backend.invoke("descriptor.preview")["tools"].is_null(),
            "descriptor generation preview");
     reject([&] { confirmed("connections.set", {{"API_KEY", "credential"}}); },

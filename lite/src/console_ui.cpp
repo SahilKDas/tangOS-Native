@@ -122,7 +122,7 @@ constexpr int REQUIREMENTS = 4480, REQ_REFRESH = 4481, REQ_TERMINAL = 4482, REQ_
 constexpr int QUEUE = 4470, QUEUE_UP = 4471, QUEUE_DOWN = 4472, QUEUE_REMOVE = 4473,
               TOOL_ENABLE = 4474;
 constexpr int CONNECTIONS = 4450, CONNECTION_LIST = 4451, CONNECTION_SAVE = 4452, SERVICES = 4453,
-              SERVICE_RUN = 4454, SERVICE_CONFIRM = 4455;
+              SERVICE_RUN = 4454, SERVICE_CONFIRM = 4455, SERVICE_CANCEL = 4456;
 constexpr int ATLAS_INSPECT = 4400, ATLAS_MODULE = 4401, ATLAS_SOURCE = 4402, ATLAS_HISTORY = 4403;
 constexpr int HELP_EDIT = 4600, HELP_TIPS = 4601;
 constexpr int DESC_SCAN = 4610, DESC_PREVIEW = 4611, DESC_CONFIRM = 4612, DESC_RELOAD = 4613,
@@ -173,6 +173,7 @@ struct ConsoleUI::Impl {
   std::string atlasError;
   std::thread loader, manualWorker;
   Runner manualRunner;
+  Runner serviceRunner;
   std::atomic<bool> manualBusy{false}, atlasReady{false};
   std::mutex outputMutex;
   std::string pending;
@@ -332,6 +333,7 @@ struct ConsoleUI::Impl {
     }
     KillTimer(window, 1);
     manualRunner.cancel();
+    serviceRunner.cancel();
     if (manualWorker.joinable())
       manualWorker.join();
     if (mcpWorker.joinable())
@@ -718,10 +720,11 @@ struct ConsoleUI::Impl {
           0, width - 332, 62, 310, height - 132, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
     } else if (screen == Screen::services) {
       std::vector<std::string> methods = {
-          "preflight",     "claims.read",     "stats.get",       "harvest.list", "reports.list",
-          "projects.list", "connections.get", "preferences.get", "git.status",   "git.syncPreview",
-          "git.sync",      "github.credits",  "atlas.cosmetics", "atlas.counts", "atlas.progress",
-          "update.check",  "reports.export",  "stats.clear",     "git.backup"};
+          "preflight",      "claims.read",     "stats.get",       "harvest.list",
+          "reports.list",   "projects.list",   "connections.get", "preferences.get",
+          "git.status",     "git.syncPreview", "git.sync",        "git.clone",
+          "github.credits", "atlas.cosmetics", "atlas.counts",    "atlas.progress",
+          "update.check",   "reports.export",  "stats.clear",     "git.backup"};
       if (std::find(methods.begin(), methods.end(), serviceMethod) == methods.end())
         methods.push_back(serviceMethod);
       auto at = std::find(methods.begin(), methods.end(), serviceMethod) - methods.begin();
@@ -731,6 +734,7 @@ struct ConsoleUI::Impl {
           edit(serviceRequest.dump(2), 0, 18, 128, cw - 36, 110, ES_MULTILINE | WS_VSCROLL);
       button("Inspect / preview", SERVICE_RUN, 18, 252, 146);
       button("Confirm preview", SERVICE_CONFIRM, 172, 252, 150);
+      button("Cancel", SERVICE_CANCEL, 330, 252, 90);
       EnableWindow(GetDlgItem(window, SERVICE_CONFIRM),
                    serviceResult.value("requiresConfirmation", false));
       body = edit(serviceResult.dump(2), 0, 18, 296, cw - 36, std::max(60, height - 360),
@@ -1322,6 +1326,7 @@ struct ConsoleUI::Impl {
       throw std::runtime_error("Wait for the current service operation");
     if (serviceWorker.joinable())
       serviceWorker.join();
+    serviceRunner.reset();
     serviceBusy = true;
     activeServiceMethod = method;
     auto prefs = settings;
@@ -1329,7 +1334,8 @@ struct ConsoleUI::Impl {
     serviceWorker = std::thread([this, method, args, prefs, keys] {
       Json result;
       try {
-        result = Backend(repository, data, prefs, keys).invoke(method, args);
+        result = Backend(repository, data, prefs, keys, requestHttp, &serviceRunner)
+                     .invoke(method, args);
       } catch (const std::exception &e) {
         result = {{"error", e.what()}};
       }
@@ -2144,6 +2150,9 @@ struct ConsoleUI::Impl {
       serviceCall(serviceMethod, serviceRequest);
       break;
     }
+    case SERVICE_CANCEL:
+      serviceRunner.cancel();
+      break;
     case SERVICE_RUN:
       serviceMethod = selected(serviceChoice);
       serviceRequest = Json::parse(text(serviceArguments));
@@ -3041,10 +3050,12 @@ void ConsoleUI::resize(int width, int height) {
   impl->build();
 }
 bool ConsoleUI::running() const {
-  return impl->manualBusy || (impl->fleet && impl->fleet->running());
+  return impl->manualBusy || impl->serviceBusy || impl->serviceReady ||
+         (impl->fleet && impl->fleet->running());
 }
 void ConsoleUI::stop() {
   impl->manualRunner.cancel();
+  impl->serviceRunner.cancel();
   if (impl->fleet)
     impl->fleet->stopAll();
 }
@@ -3271,6 +3282,10 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     throw std::runtime_error("Module popout cart relay or controller isolation failed");
   SendMessageW(popup.window, WM_CLOSE, 0, 0);
   impl->navigate(Screen::services);
+  impl->serviceRunner.reset();
+  impl->action(SERVICE_CANCEL, BN_CLICKED);
+  if (!impl->serviceRunner.isCancelled())
+    throw std::runtime_error("Native service Cancel did not reach the process runner");
   impl->serviceCall("preflight", Json::object());
   waitFor([&] { return impl->serviceBusy.load() || impl->serviceReady.load(); });
   if (impl->serviceResult.contains("error"))
