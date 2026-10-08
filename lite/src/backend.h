@@ -19,6 +19,8 @@ Json driverUsage(const std::string &output, bool productive, uint64_t elapsedMs,
 bool productiveDriver(const Json &result);
 Json driverResultRows(const Json &result);
 Json updateAgentStats(Json entry, const Json &rows, Json &best);
+Json matchObservation(const Json &values, const std::string &output, unsigned long exitCode,
+                      const std::string &source = {});
 class Backend {
   friend class RemoteLease;
   fs::path repository, directory;

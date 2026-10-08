@@ -1,6 +1,7 @@
 #include "fleet.h"
 #include "mcp.h"
 #include "atlas_layout.h"
+#include "client_setup.h"
 #include <chrono>
 #include <iostream>
 #include <stdexcept>
@@ -116,6 +117,9 @@ if __name__=='__main__':main()
                 Json::array({{{"name", "value"}, {"type", "string"}, {"required", true}}})}}})}};
     write(repo / "tools/land.py",
           "from pathlib import Path\nPath('port/landed.txt').write_text('landed fixture')\n");
+    descriptor["tools"].push_back({{"id", "match"}, {"label", "Verify match"}, {"readOnly", true},
+                                    {"command", "{python} -c {value}"},
+                                    {"args", Json::array({{{"name", "value"}, {"type", "string"}, {"required", true}}})}});
     write(repo / "tangos.json", descriptor.dump(2));
     git({"add", "."});
     git({"commit", "-m", "Disposable fleet fixture"});
@@ -183,6 +187,26 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
     Settings settings;
     {
       Fleet fleet(repo, data / "projects/fixture", desc, settings);
+      auto configPath = dir / "client-config.json";
+      write(configPath, Json{{"theme", "keep"}, {"mcpServers", {{"unrelated", {{"command", "keep.exe"}}}}}}.dump());
+      auto plan = previewClientSetup("Claude Desktop", fs::u8path(selfExecutable()), data / "mcp.json", "External fixture", configPath);
+      expect(plan.outcome.at("action") == "added" && !Json::parse(read(configPath))["mcpServers"].contains("tangos-lite"),
+             "MCP client preview is side-effect free");
+      auto installed = installClientSetup(plan);
+      auto merged = Json::parse(read(configPath));
+      expect(merged.at("theme") == "keep" && merged.at("mcpServers").contains("unrelated") &&
+                 merged.at("mcpServers").at("tangos-lite").at("args")[0] == "--mcp-stdio" &&
+                 fs::exists(fs::u8path(installed.at("backup").get<std::string>())),
+             "native client install preserves unrelated settings and retains a backup");
+      expect(previewClientSetup("Claude Desktop", fs::u8path(selfExecutable()), data / "mcp.json", "External fixture", configPath).outcome.at("action") == "unchanged",
+             "MCP reconnect detects unchanged native setup");
+      auto changedPlan = previewClientSetup("Claude Desktop", fs::u8path(selfExecutable()), data / "mcp.json", "Different agent", configPath);
+      expect(changedPlan.outcome.at("action") == "updated", "MCP changed identity previews update");
+      write(configPath, "{\"changedElsewhere\":true}");
+      reject([&] { installClientSetup(changedPlan); }, "MCP config change invalidates reviewed install");
+      write(configPath, "{ malformed");
+      reject([&] { previewClientSetup("Claude Desktop", fs::u8path(selfExecutable()), data / "mcp.json", "Agent", configPath); },
+             "MCP installation never replaces malformed client configuration");
       reject([&] { Fleet second(repo, data / "projects/fixture", desc, settings); },
              "cross-instance ownership");
       AgentSpec a;
@@ -412,6 +436,31 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
           expect(state.queue.size() == 1 && state.queue[0]["id"] == "external-later",
                  "MCP finish retains later queue additions");
       fleet.clear(external);
+      a.count = 3;
+      fleet.configure(external, a);
+      fleet.enqueue(external, Json::array({{{"id", "observed-hit"}, {"name", "observed_hit"}},
+                                           {{"id", "observed-miss"}, {"name", "observed_miss"}},
+                                           {{"id", "observed-pending"}, {"name", "observed_pending"}}}));
+      fleet.start(external);
+      wait(fleet);
+      fleet.takeBatch(external);
+      auto hit = fleet.runTool(external, "match", {{"value", "print('MATCHING VERSIONS: 1.2')"},
+                                                   {"func", "observed_hit"}, {"size", "0x40"}});
+      auto miss = fleet.runTool(external, "match", {{"value", "print('MATCHING VERSIONS: none; divergences=2')"},
+                                                    {"func", "observed_miss"}, {"size", "0x40"}});
+      expect(hit.code == 0 && miss.code == 0, "actual MCP match commands executed");
+      auto observedStats = fleet.backend("stats.get", Json::object()).at(external);
+      expect(observedStats.at("attempts") == 2 && observedStats.at("declaredMatches") == 1 &&
+                 observedStats.at("nearMisses") == 1,
+             "actual MCP verdicts feed live match and near-miss statistics");
+      fleet.finishBatch(external);
+      for (auto &state : fleet.snapshot())
+        if (state.id == external)
+          expect(state.queue.size() == 1 && state.queue[0]["name"] == "observed_pending",
+                 "observed MCP attempts consume worked targets and preserve untouched targets");
+      fleet.clear(external);
+      a.count = 1;
+      fleet.configure(external, a);
       McpServer mcp(fleet, desc, data / "mcp.json");
       expect(mcp.port() != 0 && mcp.configuration().find("127.0.0.1") != std::string::npos,
              "authenticated loopback MCP config");
@@ -432,9 +481,28 @@ def call(method,params=None,auth=True):
   return result['result']
 try:call('ping',auth=False);raise AssertionError('unauthenticated request accepted')
 except urllib.error.HTTPError as error:assert error.code==403
-probe=json.dumps({'jsonrpc':'2.0','id':9,'method':'server/discover','params':{}}).encode()
-with urllib.request.urlopen(urllib.request.Request(url,probe,dict(headers))) as response:
- assert json.load(response)['error']['code']==-32601
+def modern(method,params=None,version='2026-07-28',changes=None,expected=200):
+ p=dict(params or {});p['_meta']={'io.modelcontextprotocol/protocolVersion':version,'io.modelcontextprotocol/clientCapabilities':{}}
+ h=dict(headers);h.update({'MCP-Protocol-Version':version,'Mcp-Method':method,'Content-Type':'application/json'})
+ if method=='tools/call':h['Mcp-Name']=p['name']
+ if changes:h.update(changes)
+ body=json.dumps({'jsonrpc':'2.0','id':9,'method':method,'params':p}).encode()
+ try:response=urllib.request.urlopen(urllib.request.Request(url,body,h))
+ except urllib.error.HTTPError as error:response=error
+ with response:
+  assert response.status==expected,(response.status,response.read())
+  assert not response.headers.get('Mcp-Session-Id')
+  return json.load(response)
+discovery=modern('server/discover')['result']
+assert '2026-07-28' in discovery['supportedVersions'] and discovery['resultType']=='complete'
+assert discovery['ttlMs']==0 and discovery['cacheScope']=='private'
+assert modern('tools/list')['result']['resultType']=='complete'
+assert modern('ping',changes={'Mcp-Method':'tools/list'},expected=400)['error']['code']==-32020
+unsupported=modern('ping',version='2100-01-01',expected=400)['error']
+assert unsupported['code']==-32022 and unsupported['data']['requested']=='2100-01-01'
+assert modern('absent/method',expected=404)['error']['code']==-32601
+assert modern('tools/call',{'name':'next_batch','arguments':{}},expected=400)['error']['code']==-32602
+assert modern('tools/call',{'name':'progress','arguments':{}},changes={'Mcp-Name':'=?base64?cHJvZ3Jlc3M=?='})['result']['resultType']=='complete'
 for version in ['2024-11-05','2025-03-26','2025-06-18','2025-11-25','2100-01-01']:
  negotiated=call('initialize',{'protocolVersion':version,'clientInfo':{'name':'External fixture','version':'1'},'capabilities':{}})
  assert negotiated['protocolVersion']==(version if version!='2100-01-01' else '2025-11-25')
@@ -498,6 +566,22 @@ print('native stdio MCP initialize, notification, session, tools, ping and EOF p
             utf8((data / "mcp.json").wstring())},
            dir});
       expect(bridge.code == 0, "MCP stdio integration: " + bridge.output);
+      write(dir / "modern_stdio.py", R"PY(import subprocess,json,sys
+meta={'io.modelcontextprotocol/protocolVersion':'2026-07-28','io.modelcontextprotocol/clientCapabilities':{}}
+requests=[{'jsonrpc':'2.0','id':i,'method':method,'params':{'_meta':meta}} for i,method in enumerate(['server/discover','tools/list','ping'],1)]
+p=subprocess.run([sys.argv[1],'--mcp-stdio',sys.argv[2],'External fixture'],input=''.join(json.dumps(r)+'\n' for r in requests),text=True,capture_output=True,timeout=20)
+assert p.returncode==0,p.stderr
+responses={r['id']:r for r in map(json.loads,p.stdout.splitlines())}
+assert len(responses)==3,responses
+assert responses[1]['result']['supportedVersions'][0]=='2026-07-28'
+assert any(t['name']=='next_batch' for t in responses[2]['result']['tools'])
+assert all(r['result']['resultType']=='complete' for r in responses.values())
+print('modern MCP stdio discovery, per-request metadata, tools, ping and EOF passed')
+)PY");
+      auto modernBridge = setup.run({{"python", utf8((dir / "modern_stdio.py").wstring()),
+                          utf8((fs::u8path(selfExecutable()).parent_path() / "TangOSLite.exe").wstring()),
+                          utf8((data / "mcp.json").wstring())}, dir}, {}, data / "modern-stdio.log");
+      expect(modernBridge.code == 0, "Modern MCP stdio integration: " + modernBridge.output);
       fleet.enqueue(external, Json::array({{{"id", "stdio-cancel"}, {"name", "stdio_cancel"}}}));
       fleet.start(external);
       wait(fleet);

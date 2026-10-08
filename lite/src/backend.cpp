@@ -5,6 +5,7 @@
 #include "batches.h"
 #include "archive.h"
 #include "updater.h"
+#include "activity.h"
 #include <numeric>
 #include "repository.h"
 #include <regex>
@@ -21,6 +22,8 @@
 #include <condition_variable>
 namespace lite {
 namespace {
+std::mutex sessionStatsMutex;
+std::map<std::string, Json> sessionStats;
 std::string fingerprint(const std::string &s) {
   BCRYPT_ALG_HANDLE alg = nullptr;
   BCRYPT_HASH_HANDLE hash = nullptr;
@@ -361,14 +364,14 @@ Json Backend::catalog() {
        "atlas.history",      "claims.read",       "preflight",          "git.status",
        "git.syncPreview",    "git.sync",          "git.action",         "git.clone",
        "git.backup",         "git.discard",       "tools.list",         "tools.run",
-       "checks.list",        "checks.run",        "policy.presence",    "stats.get",
+       "checks.list",        "checks.run",        "policy.presence",    "stats.get", "stats.session",
        "stats.clear",        "reports.list",      "reports.export",     "queue.adopt",
        "policy.classify",    "policy.adaptive",   "policy.pool",        "policy.statistics",
        "policy.layout",      "policy.color",      "policy.batches",     "policy.source",
        "policy.usage",       "guide.parse",       "guide.tour",         "guide.tips",
        "projects.get",       "github.credits",    "atlas.cosmetics",    "atlas.counts",
        "atlas.progress",     "atlas.live",        "update.check",       "update.stage",
-       "bug.report",         "harvest.list"});
+       "bug.report",         "harvest.list", "activity.snapshot", "policy.activity", "policy.detail", "policy.match"});
 }
 Json Backend::invoke(const std::string &m, Json a) {
   HANDLE lock = CreateFileW((directory / "backend.lock").c_str(),
@@ -383,6 +386,21 @@ Json Backend::invoke(const std::string &m, Json a) {
   } guard{lock};
   if (m == "catalog")
     return catalog();
+  if (m == "activity.snapshot")
+    return activityBus().snapshot(utf8(repository.wstring()));
+  if (m == "policy.activity") {
+    ActivityBus bus;
+    for (auto &event : a.at("events")) bus.publish(event);
+    return bus.snapshot();
+  }
+  if (m == "policy.detail")
+    return {{"streams", activityStreams(a.value("output", std::string()))},
+            {"recommendation", sizeRecommendation(a.value("bySize", Json::object()))}};
+  if (m == "policy.role")
+    return measuredRole(a.value("stats", Json::object()));
+  if (m == "policy.match")
+    return matchObservation(a.value("values", Json::object()), a.value("output", std::string()),
+                            a.value("exit", 0UL), a.value("source", std::string()));
   if (mutation(m, a)) {
     noCredentials(a);
     auto ticket = a.value("confirmation", std::string());
@@ -795,7 +813,8 @@ Json updateAgentStats(Json entry, const Json &rows, Json &best) {
     if (div > 0)
       matched = false;
     bool firstAttempt = !key.empty() && !seen(entry["attemptedFuncs"], key),
-         firstMatch = matched && !seen(entry["matchedFuncs"], key);
+         firstMatch = matched && (key.empty() || !seen(entry["matchedFuncs"], key));
+    if (key.empty() && row.contains("matched") && row["matched"].is_boolean()) firstAttempt = true;
     if (firstAttempt) {
       entry["attempts"] = entry.value("attempts", 0) + 1;
       if (!key.empty())
@@ -848,6 +867,32 @@ Json updateAgentStats(Json entry, const Json &rows, Json &best) {
         std::floor(double(tokens) / entry["declaredMatches"].get<int>() + 0.5));
   return entry;
 }
+Json matchObservation(const Json &values, const std::string &output, unsigned long exitCode,
+                      const std::string &source) {
+  bool matched = exitCode == 0 && std::regex_search(output, std::regex("MATCHING VERSIONS:\\s*(?!none\\b)\\S", std::regex::icase)) &&
+                 classifySource(source) != "transcribed";
+  Json row{{"matched", matched}};
+  if (values.contains("func") && values["func"].is_string()) row["name"] = values["func"];
+  if (values.contains("size")) {
+    if (values["size"].is_number()) row["size"] = values["size"];
+    else if (values["size"].is_string()) {
+      try {
+        auto s = trim(values["size"].get<std::string>());
+        row["size"] = std::stoll(s, nullptr, s.size() > 1 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') ? 16 : 10);
+      } catch (...) {}
+    }
+  }
+  if (!matched) {
+    std::regex div("(\\d+)\\s+word\\(s\\)\\s+differ|divergences?\\s*=\\s*(\\d+)", std::regex::icase);
+    int64_t smallest = INT64_MAX;
+    for (auto it = std::sregex_iterator(output.begin(), output.end(), div); it != std::sregex_iterator(); ++it) {
+      try { smallest = std::min<int64_t>(smallest, std::stoll((*it)[1].matched ? (*it)[1].str() : (*it)[2].str())); } catch (...) {}
+    }
+    if (smallest != INT64_MAX) row["divergences"] = smallest;
+  }
+  if (classifySource(source) == "transcribed") row["c_source"] = "dcd 0x00000000";
+  return row;
+}
 void Backend::resetRecent(const std::string &id) {
   HANDLE lock = INVALID_HANDLE_VALUE;
   for (int attempt = 0; attempt < 100 && lock == INVALID_HANDLE_VALUE; ++attempt) {
@@ -897,6 +942,13 @@ void Backend::recordAgent(const std::string &id, const fs::path &results, const 
       rows = jsonLines(results);
   }
   auto best = fileJson(directory / "stats-best.json");
+  {
+    std::lock_guard<std::mutex> sessionLock(sessionStatsMutex);
+    auto &session = sessionStats[utf8(directory.wstring())];
+    if (!session.is_object()) session = Json::object();
+    auto sessionBest = best;
+    session[id] = updateAgentStats(session.value(id, Json::object()), rows, sessionBest);
+  }
   auto updated = updateAgentStats(entry, rows, best);
   int attempts = updated.value("attempts", 0) - entry.value("attempts", 0);
   int claims = updated.value("declaredMatches", 0) - entry.value("declaredMatches", 0);
@@ -1302,9 +1354,16 @@ Json Backend::execute(const std::string &m, const Json &a) {
   }
   if (m == "stats.get")
     return fileJson(directory / "stats.json");
+  if (m == "stats.session") {
+    std::lock_guard<std::mutex> lock(sessionStatsMutex);
+    auto found = sessionStats.find(utf8(directory.wstring()));
+    return found == sessionStats.end() ? Json::object() : found->second;
+  }
   if (m == "stats.clear") {
     saveJson(directory / "stats.json", Json::object());
     saveJson(directory / "stats-best.json", Json::object());
+    std::lock_guard<std::mutex> lock(sessionStatsMutex);
+    sessionStats.erase(utf8(directory.wstring()));
     return {{"cleared", true}};
   }
   if (m == "bug.report") {
@@ -1585,6 +1644,10 @@ Json Backend::execute(const std::string &m, const Json &a) {
         if (!check.available)
           throw std::runtime_error(check.requirement);
         check.command.environment = secrets;
+        check.command.activityTool = check.name;
+        check.command.activityLabel = check.name;
+        check.command.activityReadOnly = true;
+        check.command.activityRepository = repository;
         Runner local;
         auto &runner = processRunner ? *processRunner : local;
         auto log = directory / "logs" / ("check-" + uniqueId() + ".log");
@@ -1620,6 +1683,11 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto command = toolCommand(descriptor, tool, a.value("values", Json::object()), repository,
                                true, a.value("apply", false));
     command.environment = secrets;
+    command.activityTool = tool.id;
+    command.activityArguments = a.value("values", Json::object()).dump();
+    command.activityLabel = tool.label;
+    command.activityReadOnly = tool.readOnly;
+    command.activityRepository = repository;
     Runner local;
     auto &r = processRunner ? *processRunner : local;
     auto log = directory / (uniqueId() + "-tool.log");

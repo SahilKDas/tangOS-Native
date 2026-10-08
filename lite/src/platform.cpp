@@ -1,4 +1,5 @@
 #include "platform.h"
+#include "activity.h"
 #include <windows.h>
 #include <bcrypt.h>
 #include <chrono>
@@ -6,6 +7,8 @@
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <algorithm>
+#include <cctype>
 namespace lite {
 namespace {
 struct Handle {
@@ -89,6 +92,7 @@ Result Runner::run(const Command &c, const Sink &sink, const fs::path &log) {
       throw std::runtime_error("Cannot create durable log");
   }
   Result result{0, {}};
+  std::string activityId;
   auto store = [&](const std::string &t) {
     if (!sink) {
       if (result.output.size() + t.size() > 64 * 1024 * 1024)
@@ -103,21 +107,99 @@ Result Runner::run(const Command &c, const Sink &sink, const fs::path &log) {
     }
     if (sink)
       sink(t);
+    if (!activityId.empty())
+      activityBus().publish({{"kind", "run-output"}, {"runId", activityId}, {"chunk", t}});
   };
+  // Filter before capture, disk and callbacks, including secrets split across
+  // pipe reads. Credentials never enter the durable log in plaintext.
+  std::vector<std::string> secretValues;
+  auto sensitiveName = [](std::string name) {
+    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return char(std::toupper(c)); });
+    return name.find("KEY") != name.npos || name.find("TOKEN") != name.npos || name.find("PASSWORD") != name.npos || name.find("SECRET") != name.npos;
+  };
+  for (auto &entry : c.environment)
+    if (sensitiveName(entry.first) && !entry.second.empty())
+      secretValues.push_back(entry.second);
+  auto inheritedSecrets = GetEnvironmentStringsW();
+  if (inheritedSecrets) {
+    for (auto entry = inheritedSecrets; *entry; entry += wcslen(entry) + 1) {
+      std::wstring row(entry);
+      auto equal = row.find(L'=', row[0] == L'=' ? 1 : 0);
+      if (equal != row.npos && equal + 1 < row.size() && sensitiveName(utf8(row.substr(0, equal))))
+        secretValues.push_back(utf8(row.substr(equal + 1)));
+    }
+    FreeEnvironmentStringsW(inheritedSecrets);
+  }
+  Json arguments = c.activityArguments.empty() ? Json::object() : Json::parse(c.activityArguments);
+  if (!arguments.is_object()) arguments = Json::object();
+  std::function<void(const Json &)> findSecrets = [&](const Json &value) {
+    if (value.is_object()) for (auto it = value.begin(); it != value.end(); ++it) {
+      if (sensitiveName(it.key()) && it.value().is_string() && !it.value().get<std::string>().empty())
+        secretValues.push_back(it.value().get<std::string>());
+      findSecrets(it.value());
+    } else if (value.is_array()) for (auto &item : value) findSecrets(item);
+  };
+  findSecrets(arguments);
+  std::sort(secretValues.begin(), secretValues.end(), [](const auto &a, const auto &b) { return a.size() > b.size(); });
+  secretValues.erase(std::unique(secretValues.begin(), secretValues.end()), secretValues.end());
+  if (!log.empty() || !c.activityTool.empty()) {
+    activityId = uniqueId();
+    auto command = preview(c);
+    for (auto &secret : secretValues) {
+      size_t at = 0;
+      while ((at = command.find(secret, at)) != command.npos) {
+        command.replace(at, secret.size(), "[REDACTED]");
+        at += 10;
+      }
+    }
+    std::function<void(Json &)> scrub = [&](Json &value) {
+      if (value.is_object() || value.is_array()) { for (auto &item : value) scrub(item); }
+      else if (value.is_string()) {
+        auto s = value.get<std::string>();
+        for (auto &secret : secretValues) {
+          size_t at = 0;
+          while ((at = s.find(secret, at)) != s.npos) { s.replace(at, secret.size(), "[REDACTED]"); at += 10; }
+        }
+        value = s;
+      }
+    };
+    scrub(arguments);
+    for (auto it = arguments.begin(); it != arguments.end();) {
+      if (it.value().is_null() || it.value() == "") { it = arguments.erase(it); continue; }
+      ++it;
+    }
+    Json run{{"runId", activityId}, {"toolId", c.activityTool.empty() ? c.argv.front() : c.activityTool},
+             {"label", c.activityLabel.empty() ? c.argv.front() : c.activityLabel},
+             {"readOnly", c.activityReadOnly}, {"mutating", !c.activityReadOnly},
+             {"args", arguments}, {"commandPreview", command},
+             {"source", c.activityAgent.empty() ? "user" : "ai"},
+             {"startedAt", activityNow()}, {"status", "running"}, {"output", ""},
+             {"repository", utf8((c.activityRepository.empty() ? c.cwd : c.activityRepository).wstring())},
+             {"log", utf8(log.wstring())}};
+    if (!c.activityAgent.empty())
+      run["client"] = {{"name", c.activityAgent}, {"role", c.activityRole}};
+    if (!c.activityBatch.empty()) run["batchId"] = c.activityBatch;
+    activityBus().publish({{"kind", "run-started"}, {"run", run}});
+  }
+  struct ActivityEnd {
+    std::string id;
+    Result &result;
+    int exceptions = std::uncaught_exceptions();
+    ~ActivityEnd() noexcept {
+      if (id.empty()) return;
+      try {
+        bool failed = std::uncaught_exceptions() > exceptions || result.code != 0;
+        activityBus().publish({{"kind", "run-finished"}, {"runId", id},
+                               {"status", failed ? "error" : "ok"},
+                               {"exitCode", result.code}, {"finishedAt", activityNow()}});
+      } catch (...) {}
+    }
+  } activityEnd{activityId, result};
   if (cancelled) {
     result.code = ERROR_CANCELLED;
     store("[CANCELLED] before process launch\n");
     return result;
   }
-  // Filter before capture, disk and callbacks, including secrets split across
-  // pipe reads. Credentials never enter the durable log in plaintext.
-  std::vector<std::string> secretValues;
-  for (auto &entry : c.environment)
-    if ((entry.first.find("KEY") != entry.first.npos ||
-         entry.first.find("TOKEN") != entry.first.npos ||
-         entry.first.find("PASSWORD") != entry.first.npos) &&
-        !entry.second.empty())
-      secretValues.push_back(entry.second);
   std::string secretPending;
   auto filtered = [&](const std::string &chunk, bool final) {
     if (secretValues.empty()) {

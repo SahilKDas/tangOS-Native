@@ -28,6 +28,7 @@ struct AgentState {
   std::string id, phase = "idle", detail, branch, lastLine;
   fs::path worktree, log, prompt, worklist, results;
   Json queue = Json::array(), assigned = Json::array();
+  Json observed = Json::array();
   int completed = 0, total = 0;
   bool active = false;
 };

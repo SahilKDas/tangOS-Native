@@ -7,7 +7,37 @@
 #include <chrono>
 #include <sstream>
 #include <stdexcept>
+#include <wincrypt.h>
 namespace lite {
+namespace {
+constexpr const char *modernVersion = "2026-07-28";
+Json protocolVersions() { return Json::array({modernVersion, "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}); }
+std::string wireHeader(const std::string &value) {
+  bool safe = !value.empty() && value.front() != ' ' && value.back() != ' ' && value.rfind("=?base64?", 0) != 0;
+  for (unsigned char c : value) safe = safe && c >= 32 && c <= 126;
+  if (safe) return value;
+  DWORD count = 0;
+  CryptBinaryToStringA(reinterpret_cast<const BYTE *>(value.data()), DWORD(value.size()), CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, nullptr, &count);
+  std::string encoded(count, '\0');
+  if (!CryptBinaryToStringA(reinterpret_cast<const BYTE *>(value.data()), DWORD(value.size()), CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, encoded.data(), &count))
+    throw std::runtime_error("Cannot encode MCP header");
+  encoded.resize(count);
+  return "=?base64?" + encoded + "?=";
+}
+std::string readWireHeader(const std::string &value) {
+  if (value.rfind("=?base64?", 0) != 0) return value;
+  if (value.size() < 11 || value.substr(value.size() - 2) != "?=") throw std::runtime_error("Invalid encoded MCP header");
+  auto encoded = value.substr(9, value.size() - 11);
+  DWORD count = 0;
+  if (!CryptStringToBinaryA(encoded.c_str(), DWORD(encoded.size()), CRYPT_STRING_BASE64 | CRYPT_STRING_STRICT, nullptr, &count, nullptr, nullptr))
+    throw std::runtime_error("Invalid base64 MCP header");
+  std::string decoded(count, '\0');
+  if (!CryptStringToBinaryA(encoded.c_str(), DWORD(encoded.size()), CRYPT_STRING_BASE64 | CRYPT_STRING_STRICT, reinterpret_cast<BYTE *>(decoded.data()), &count, nullptr, nullptr))
+    throw std::runtime_error("Invalid base64 MCP header");
+  decoded.resize(count);
+  return decoded;
+}
+}
 Json mcpClientConfiguration(const std::string &client, const fs::path &executable,
                             const fs::path &connection, const std::string &agent) {
   if (agent.empty())
@@ -51,12 +81,25 @@ int runMcpStdio(const fs::path &connection, const std::string &agent) {
           worker.first.join();
     }
   };
-  bool hasToolCalls = false, disconnected = false;
+  bool hasToolCalls = false, disconnected = false, modernTraffic = false;
+  auto transportInstance = uniqueId();
   auto disconnect = [&] {
-    if (session.empty() || disconnected)
+    if ((session.empty() && !modernTraffic) || disconnected)
       return;
     disconnected = true;
     try {
+      if (modernTraffic) {
+        auto finalHeaders = headers;
+        finalHeaders.erase("Mcp-Session-Id");
+        finalHeaders["MCP-Protocol-Version"] = modernVersion;
+        finalHeaders["Mcp-Method"] = "notifications/io.tangos/disconnect";
+        Json message{{"jsonrpc", "2.0"}, {"method", "notifications/io.tangos/disconnect"},
+                      {"params", {{"_meta", {{"io.modelcontextprotocol/protocolVersion", modernVersion},
+                         {"io.modelcontextprotocol/clientCapabilities", Json::object()},
+                         {"io.tangos/transportInstance", transportInstance}}}}}};
+        requestHttp(url, "POST", message.dump(), finalHeaders);
+      }
+      if (session.empty()) return;
       auto finalHeaders = headers;
       finalHeaders["Mcp-Session-Id"] = session;
       requestHttp(url, "DELETE", "", finalHeaders);
@@ -71,7 +114,7 @@ int runMcpStdio(const fs::path &connection, const std::string &agent) {
                   bool initialize) {
     try {
       auto response = requestHttp(url, "POST", request.dump(), requestHeaders);
-      if (response.status != 200 && response.status != 202)
+      if (response.status != 200 && response.status != 202 && response.body.empty())
         throw std::runtime_error("Local MCP HTTP " + std::to_string(response.status));
       if (initialize && !response.session.empty())
         session = response.session;
@@ -125,18 +168,34 @@ int runMcpStdio(const fs::path &connection, const std::string &agent) {
       if (!session.empty())
         headers["Mcp-Session-Id"] = session;
       auto method = request.value("method", std::string());
+      auto metadata = request.value("params", Json::object()).value("_meta", Json::object());
+      bool modern = method == "server/discover" || metadata.contains("io.modelcontextprotocol/protocolVersion") ||
+                    (modernTraffic && session.empty() && method != "initialize");
+      auto requestHeaders = headers;
+      if (modern) {
+        modernTraffic = true;
+        if (method.rfind("notifications/", 0) == 0) {
+          request["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] = modernVersion;
+          request["params"]["_meta"]["io.modelcontextprotocol/clientCapabilities"] = Json::object();
+        }
+        request["params"]["_meta"]["io.tangos/agent"] = agent;
+        request["params"]["_meta"]["io.tangos/transportInstance"] = transportInstance;
+        requestHeaders.erase("Mcp-Session-Id");
+        requestHeaders["MCP-Protocol-Version"] = metadata.value("io.modelcontextprotocol/protocolVersion", std::string(modernVersion));
+        requestHeaders["Mcp-Method"] = method;
+        if (method == "tools/call") requestHeaders["Mcp-Name"] = wireHeader(request.at("params").at("name").get<std::string>());
+      }
       if (method == "tools/call")
         hasToolCalls = true;
       if (method == "initialize")
-        send(request, headers, true);
+        send(request, requestHeaders, true);
       else if (method == "notifications/cancelled")
-        send(request, headers, false);
+        send(request, requestHeaders, false);
       else {
         workers.reap();
         if (workers.rows.size() >= 24)
           throw std::runtime_error("MCP bridge pending request limit reached");
         auto done = std::make_shared<std::atomic<bool>>(false);
-        auto requestHeaders = headers;
         workers.rows.emplace_back(std::thread([&, request, requestHeaders, done] {
                                     send(request, requestHeaders, false);
                                     done->store(true);
@@ -184,6 +243,7 @@ struct McpServer::Impl {
     int64_t connectedAt, lastSeen;
   };
   std::map<std::string, Session> sessions;
+  std::map<std::string, Session> statelessPresence;
   std::mutex requestsMutex;
   struct PendingRequest {
     Runner process;
@@ -199,7 +259,12 @@ struct McpServer::Impl {
     Impl *owner;
     std::string key;
     std::shared_ptr<PendingRequest> runner;
+    std::atomic<bool> monitorDone{false};
+    std::thread monitor;
+    explicit RequestGuard(Impl *value) : owner(value) {}
     ~RequestGuard() {
+      monitorDone = true;
+      if (monitor.joinable()) monitor.join();
       if (!runner)
         return;
       std::lock_guard<std::mutex> lock(owner->requestsMutex);
@@ -221,14 +286,32 @@ struct McpServer::Impl {
       else
         ++it;
     }
+    for (auto it = statelessPresence.begin(); it != statelessPresence.end();)
+      if (it->second.lastSeen < cutoff) it = statelessPresence.erase(it); else ++it;
   }
   Impl(Fleet &f, Descriptor d) : fleet(f), descriptor(std::move(d)) {}
-  Json rpc(const Json &request, std::string &session) {
+  Json rpc(const Json &request, std::string &session, SOCKET socket = INVALID_SOCKET) {
     auto id = request.value("id", Json());
-    RequestGuard operation{this, "", {}};
+    RequestGuard operation(this);
     try {
       auto method = request.at("method").get<std::string>();
-      if (method != "initialize" && method != "ping" && method != "tools/list" &&
+      auto params = request.value("params", Json::object());
+      auto meta = params.value("_meta", Json::object());
+      bool modern = method == "server/discover" || meta.contains("io.modelcontextprotocol/protocolVersion");
+      std::string requestScope = session;
+      if (modern) {
+        if (!meta.contains("io.modelcontextprotocol/protocolVersion") || !meta["io.modelcontextprotocol/protocolVersion"].is_string() ||
+            !meta.contains("io.modelcontextprotocol/clientCapabilities") || !meta["io.modelcontextprotocol/clientCapabilities"].is_object())
+          throw std::runtime_error("Every modern MCP request requires protocolVersion and clientCapabilities metadata");
+        if (meta.at("io.modelcontextprotocol/protocolVersion") != modernVersion)
+          return {{"jsonrpc", "2.0"}, {"id", id}, {"error", {{"code", -32022}, {"message", "Unsupported protocol version"},
+                           {"data", {{"supported", protocolVersions()}, {"requested", meta.at("io.modelcontextprotocol/protocolVersion")}}}}}};
+        auto instance = meta.value("io.tangos/transportInstance", std::string());
+        if (!instance.empty() && (instance.size() > 128 || instance.find_first_not_of("0123456789abcdef-") != instance.npos))
+          throw std::runtime_error("Invalid transport instance identifier");
+        requestScope = "stateless:" + (instance.empty() ? uniqueId() : instance);
+      }
+      if (method != "server/discover" && method != "initialize" && method != "ping" && method != "tools/list" &&
           method != "tools/call" && method.rfind("notifications/", 0) != 0)
         return {{"jsonrpc", "2.0"},
                 {"id", id},
@@ -239,17 +322,29 @@ struct McpServer::Impl {
           if (!cancelled.is_string() && !cancelled.is_number_integer())
             return nullptr;
           std::lock_guard<std::mutex> lock(requestsMutex);
-          auto found = pendingRequests.find(session + "\n" + cancelled.dump());
+          auto found = pendingRequests.find(requestScope + "\n" + cancelled.dump());
           if (found != pendingRequests.end())
             found->second->cancel();
         } catch (...) {
         } // Unknown, completed and malformed notifications are ignored.
         return nullptr;
       }
+      if (method == "notifications/io.tangos/disconnect" && modern) {
+        std::lock_guard<std::mutex> lock(requestsMutex);
+        auto prefix = requestScope + "\n";
+        for (auto &pending : pendingRequests) if (pending.first.rfind(prefix, 0) == 0) pending.second->cancel();
+        std::lock_guard<std::mutex> presenceLock(sessionsMutex);
+        statelessPresence.erase(requestScope);
+        return nullptr;
+      }
       if (method.rfind("notifications/", 0) == 0)
         return nullptr;
       Json result;
-      if (method == "initialize") {
+      if (method == "server/discover") {
+        result = {{"supportedVersions", protocolVersions()}, {"capabilities", {{"tools", Json::object()}}},
+                   {"instructions", "Use next_batch with explicit io.tangos/agent metadata; follow the assigned AGENTS.md. No automatic commits or pushes."},
+                   {"ttlMs", 0}, {"cacheScope", "private"}};
+      } else if (method == "initialize" && !modern) {
         auto params = request.at("params");
         auto name = params.at("clientInfo").at("name").get<std::string>();
         std::string agent;
@@ -288,7 +383,20 @@ struct McpServer::Impl {
         return Json();
       else {
         std::string agent;
-        {
+        if (modern) {
+          auto selected = meta.value("io.tangos/agent", std::string());
+          for (auto &s : fleet.snapshot()) if (s.spec.kind == "mcp" && (s.id == selected || s.spec.name == selected)) {
+            if (!agent.empty()) throw std::runtime_error("Ambiguous explicitly selected MCP agent");
+            agent = s.id;
+          }
+          auto name = meta.value("io.modelcontextprotocol/clientInfo", Json::object()).value("name", std::string("MCP client"));
+          if (!agent.empty() && !meta.value("io.tangos/transportInstance", std::string()).empty()) {
+            std::lock_guard<std::mutex> lock(sessionsMutex);
+            if (statelessPresence.size() >= 128 && !statelessPresence.count(requestScope)) statelessPresence.erase(statelessPresence.begin());
+            auto old = statelessPresence.find(requestScope);
+            statelessPresence[requestScope] = {agent, name, old == statelessPresence.end() ? now() : old->second.connectedAt, now()};
+          }
+        } else {
           std::lock_guard<std::mutex> lock(sessionsMutex);
           auto it = sessions.find(session);
           if (it == sessions.end())
@@ -337,7 +445,7 @@ struct McpServer::Impl {
         } else if (method == "tools/call") {
           if (!id.is_string() && !id.is_number_integer())
             throw std::runtime_error("Tool requests require a string or integer request ID");
-          operation.key = session + "\n" + id.dump();
+          operation.key = requestScope + "\n" + id.dump();
           {
             std::lock_guard<std::mutex> lock(requestsMutex);
             if (pendingRequests.count(operation.key))
@@ -345,8 +453,23 @@ struct McpServer::Impl {
             operation.runner = std::make_shared<PendingRequest>();
             pendingRequests.emplace(operation.key, operation.runner);
           }
+          if (modern && socket != INVALID_SOCKET) {
+            operation.monitor = std::thread([&operation, socket] {
+              while (!operation.monitorDone) {
+                fd_set readers; FD_ZERO(&readers); FD_SET(socket, &readers);
+                timeval timeout{0, 100000};
+                if (select(0, &readers, nullptr, nullptr, &timeout) > 0) {
+                  char byte;
+                  if (recv(socket, &byte, 1, MSG_PEEK) <= 0) { operation.runner->cancel(); break; }
+                  Sleep(50);
+                }
+              }
+            });
+          }
           auto params = request.at("params");
           auto name = params.at("name").get<std::string>();
+          if (modern && agent.empty() && name != "progress" && name != "backend_read")
+            throw std::runtime_error("Select a configured MCP agent using explicit io.tangos/agent request metadata");
           auto args = params.value("arguments", Json::object());
           std::string text;
           if (name == "backend_read")
@@ -383,6 +506,11 @@ struct McpServer::Impl {
       }
       if (operation.runner && operation.runner->cancelledByPeer)
         return nullptr;
+      if (modern) {
+        result["resultType"] = "complete";
+        result["_meta"]["io.modelcontextprotocol/serverInfo"] = {{"name", "TangOS Lite"}, {"version", "0.16.1"}};
+        if (method == "tools/list") { result["ttlMs"] = 0; result["cacheScope"] = "private"; }
+      }
       return {{"jsonrpc", "2.0"}, {"id", id}, {"result", result}};
     } catch (const std::exception &e) {
       if (operation.runner && operation.runner->cancelledByPeer)
@@ -481,7 +609,50 @@ struct McpServer::Impl {
           throw std::runtime_error("Incomplete body");
         body.append(bytes, n);
       }
-      auto session = fields["mcp-session-id"];
+      auto request = Json::parse(body.substr(0, length));
+      auto id = request.is_object() ? request.value("id", Json()) : Json();
+      auto fail = [&](int status, int code, const std::string &message, Json data = nullptr) {
+        Json error = {{"code", code}, {"message", message}};
+        if (!data.is_null()) error["data"] = data;
+        reply(status, Json({{"jsonrpc", "2.0"}, {"id", id}, {"error", error}}).dump(), "");
+      };
+      if (!request.is_object() || request.value("jsonrpc", std::string()) != "2.0" ||
+          !request.contains("method") || !request["method"].is_string() ||
+          (request.contains("id") && !id.is_string() && !id.is_number_integer())) {
+        fail(400, -32600, "Invalid JSON-RPC request");
+        closesocket(socket);
+        return;
+      }
+      auto method = request["method"].get<std::string>();
+      auto params = request.value("params", Json::object());
+      auto meta = params.is_object() ? params.value("_meta", Json::object()) : Json::object();
+      bool modern = method == "server/discover" || meta.contains("io.modelcontextprotocol/protocolVersion") ||
+                    fields["mcp-protocol-version"] == modernVersion;
+      auto session = modern ? std::string() : fields["mcp-session-id"];
+      if (modern) {
+        if (!meta.is_object() || !meta.contains("io.modelcontextprotocol/protocolVersion") ||
+            !meta["io.modelcontextprotocol/protocolVersion"].is_string() ||
+            !meta.contains("io.modelcontextprotocol/clientCapabilities") || !meta["io.modelcontextprotocol/clientCapabilities"].is_object()) {
+          fail(400, -32602, "Required per-request protocolVersion and clientCapabilities metadata is missing");
+          closesocket(socket); return;
+        }
+        auto version = meta["io.modelcontextprotocol/protocolVersion"].get<std::string>();
+        bool mirrors = fields["mcp-protocol-version"] == version && fields["mcp-method"] == method;
+        if (method == "tools/call" || method == "resources/read" || method == "prompts/get") {
+          auto key = method == "resources/read" ? "uri" : "name";
+          try { mirrors = mirrors && params.contains(key) && params[key].is_string() &&
+                fields.count("mcp-name") && readWireHeader(fields["mcp-name"]) == params[key].get<std::string>(); }
+          catch (...) { mirrors = false; }
+        }
+        if (!mirrors) {
+          fail(400, -32020, "MCP routing headers do not match request metadata");
+          closesocket(socket); return;
+        }
+        if (version != modernVersion) {
+          fail(400, -32022, "Unsupported protocol version", {{"supported", protocolVersions()}, {"requested", version}});
+          closesocket(socket); return;
+        }
+      }
       if (!session.empty()) {
         std::lock_guard<std::mutex> lock(sessionsMutex);
         expireLocked();
@@ -492,8 +663,13 @@ struct McpServer::Impl {
         }
         sessions.at(session).lastSeen = now();
       }
-      auto result = rpc(Json::parse(body.substr(0, length)), session);
-      reply(result.is_null() ? 202 : 200, result.is_null() ? "" : result.dump(), session);
+      auto result = rpc(request, session, socket);
+      int status = result.is_null() ? 202 : 200;
+      if (modern && result.contains("error")) {
+        auto code = result["error"].value("code", 0);
+        status = code == -32601 ? 404 : 400;
+      }
+      reply(status, result.is_null() ? "" : result.dump(), modern ? "" : session);
     } catch (const std::exception &) {
       reply(400, "{}", "");
     }
@@ -570,6 +746,9 @@ Json McpServer::state() const {
                        {"name", entry.second.name},
                        {"connectedAt", entry.second.connectedAt},
                        {"lastSeen", entry.second.lastSeen}});
+  for (auto &entry : impl->statelessPresence)
+    clients.push_back({{"id", entry.first}, {"agentId", entry.second.agent}, {"name", entry.second.name},
+                       {"connectedAt", entry.second.connectedAt}, {"lastSeen", entry.second.lastSeen}});
   return {{"running", true},
           {"url", "http://127.0.0.1:" + std::to_string(impl->boundPort) + "/mcp"},
           {"connectedClients", clients.size()},

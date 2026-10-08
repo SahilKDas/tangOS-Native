@@ -23,6 +23,8 @@ if ($LASTEXITCODE) { throw 'Packaged ZIP import tests failed' }
 python "$source/tests/test_reference_parity.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original Console comparisons failed' }
 python "$source/tests/test_statistics_reference.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE -ne 0) { throw 'Statistics reference tests failed' }
+python "$source/tests/test_activity_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original statistics comparisons failed' }
 python "$source/tests/test_preflight_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original preflight comparisons failed' }

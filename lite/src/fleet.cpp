@@ -74,6 +74,7 @@ Json agentJson(const AgentState &s) {
           {"results", utf8(s.results.wstring())},
           {"queue", s.queue},
           {"assigned", s.assigned},
+          {"observed", s.observed},
           {"completed", s.completed},
           {"total", s.total}};
 }
@@ -105,9 +106,10 @@ AgentState parseAgent(const Json &j) {
   s.results = fs::u8path(j.value("results", std::string()));
   s.queue = j.value("queue", Json::array());
   s.assigned = j.value("assigned", Json::array());
+  s.observed = j.value("observed", Json::array());
   s.completed = j.value("completed", 0);
   s.total = j.value("total", 0);
-  if (!s.queue.is_array() || !s.assigned.is_array() || s.id.empty() ||
+  if (!s.queue.is_array() || !s.assigned.is_array() || !s.observed.is_array() || s.id.empty() ||
       s.id.find_first_not_of("0123456789abcdef-") != s.id.npos)
     throw std::runtime_error("Invalid fleet state");
   if (s.spec.count < 1 || s.spec.count > 200 || s.spec.attempts < 1 || s.spec.attempts > 20 ||
@@ -986,6 +988,7 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       {
         std::lock_guard<std::mutex> lock(mutex);
         job->state.assigned = rows;
+        job->state.observed = Json::array();
         if (execute && job->state.spec.kind != "mcp")
           batchBook.activate(id, rows, std::time(nullptr) * int64_t(1000));
         job->state.prompt = prompt;
@@ -1083,6 +1086,11 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
           leaseBackend.reserve(rows, job->state.spec.name, [job] { job->runner.cancel(); });
       update("running", "Driving " + std::to_string(rows.size()) + " targets");
       auto runStarted = GetTickCount64();
+      c.activityTool = job->state.spec.kind == "cli" ? "cli" : "drive";
+      c.activityLabel = "Drive " + job->state.spec.name;
+      c.activityAgent = job->state.spec.name;
+      c.activityRole = job->executionRole;
+      c.activityRepository = repository;
       bool exhaustionSignal = false;
       std::string usageWindow;
       auto result = job->runner.run(
@@ -1287,6 +1295,11 @@ void Fleet::finishBatch(const std::string &id, Runner *request) {
         .recordAgent(id, job->state.results, "review", gates);
     auto results = readDriverResults(job->state.results);
     std::lock_guard<std::mutex> lock(mutex);
+    if (!job->state.observed.empty()) {
+      auto rows = driverResultRows(results);
+      for (auto &row : job->state.observed) rows.push_back(row);
+      results = {{"results", rows}};
+    }
     if (job->state.assigned.empty())
       job->state.assigned = job->state.queue;
     job->state.assigned = attemptedTargets(job->state.assigned, results);
@@ -1349,8 +1362,35 @@ Result Fleet::runTool(const std::string &id, const std::string &tool, const Json
     auto c = toolCommand(descriptor, descriptor.tool(tool), args, job->state.worktree, true, false);
     for (auto &entry : vault.values())
       c.environment[entry.first] = entry.second;
+    c.activityTool = tool;
+    c.activityArguments = args.dump();
+    c.activityLabel = descriptor.tool(tool).label;
+    c.activityReadOnly = descriptor.tool(tool).readOnly;
+    c.activityAgent = job->state.spec.name;
+    c.activityRole = job->state.spec.role;
+    c.activityRepository = repository;
     auto result = process.run(c, {}, directory / fs::u8path(id) / (uniqueId() + "-tool.log"));
     audit(job);
+    if (tool == "match" && result.code != ERROR_CANCELLED) {
+      std::string source;
+      if (args.contains("c") && args["c"].is_string()) {
+        auto candidate = fs::u8path(args["c"].get<std::string>());
+        if (candidate.is_absolute())
+          candidate = candidate.lexically_relative(job->state.worktree);
+        auto path = confinedPath(job->state.worktree, utf8(candidate.wstring()));
+        if (fs::exists(path) && fs::file_size(path) <= 1024 * 1024) source = read(path);
+        else source = "dcd 0x00000000"; // Missing candidate cannot receive match credit.
+      }
+      auto observed = matchObservation(args, result.output, result.code, source);
+      auto record = directory / fs::u8path(id) / (uniqueId() + "-observed.json");
+      write(record, Json{{"results", Json::array({observed})}}.dump(2));
+      Backend(repository, directory.parent_path().parent_path(), settings)
+          .recordAgent(id, record, "running", 0);
+      std::lock_guard<std::mutex> lock(mutex);
+      job->state.observed.push_back(observed);
+      if (job->state.observed.size() > 2000) job->state.observed.erase(job->state.observed.begin());
+      saveLocked();
+    }
     job->externalTask = false;
     {
       std::lock_guard<std::mutex> lock(mutex);

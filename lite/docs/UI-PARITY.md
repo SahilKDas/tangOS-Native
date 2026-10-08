@@ -64,3 +64,22 @@ checksum, executable-header, trusted-host and rollback boundaries. The official
 MCP Inspector CLI has exercised the native bridge. Paid providers and other
 desktop clients remain unverified. Real local compiler/ROM-dependent checks ran
 and retained their failures as documented in VERIFICATION.md.
+
+The next native checkpoint adds a bounded process-local activity bus, real
+session statistics independent of persisted lifetime totals, model-separated
+live output, ten recent runs with expansion, copy feedback, and measured role
+recommendations. There are 111 direct original activity/detail comparisons and
+32 original incremental-statistics comparisons. The actual native-window fixture
+`lite/out/gui-controller-activity-017-b` passes latest-run hydration, recent-run
+expansion, model isolation and scope switching. Equivalent Windows slash/case
+paths resolve to the same activity scope. Complete output remains in disk logs.
+The contributor strip now includes color dots, daily badges and toggle filtering.
+These functional checks do not establish exact modal, card or overlay geometry.
+
+Client connection can preview and install native stdio configuration for Claude
+Code, Claude Desktop, Cursor and VS Code. It preserves unrelated entries, backs
+up an existing file and rejects edits made after preview. Disposable installation
+tests pass; no personal client configuration or API keys were changed in testing.
+MCP supports 2026-07-28 per-request discovery alongside four legacy handshake
+versions. HTTP routing mirrors, encoded names, metadata, cache hints and result
+types have integration coverage; modern stdio and the official Inspector pass.

@@ -388,6 +388,17 @@ int main() {
     auto uniqueStats = backend.invoke("stats.get")["fixture"];
     expect(uniqueStats["declaredMatches"] == 1 && uniqueStats["attempts"] == 2,
            "repeated verification counts unique functions once");
+    expect(backend.invoke("stats.session")["fixture"]["attempts"] == 2,
+           "session statistics independently deduplicate repeated attempts");
+    auto hydrated = backend.invoke("stats.get");
+    hydrated["previous-launch"] = uniqueStats;
+    hydrated["previous-launch"]["attemptedFuncs"].push_back("earlier");
+    hydrated["previous-launch"]["attempts"] = 3;
+    write(data / "stats.json", hydrated.dump(2));
+    backend.recordAgent("previous-launch", results, "review", 1);
+    expect(backend.invoke("stats.get")["previous-launch"]["attempts"] == 3 &&
+               backend.invoke("stats.session")["previous-launch"]["attempts"] == 2,
+           "this-session tally counts revisited functions without inflating lifetime statistics");
     backend.resetRecent("fixture");
     expect(backend.invoke("stats.get")["fixture"]["recent"].empty(),
            "adaptive demotion resets old-rung misses");

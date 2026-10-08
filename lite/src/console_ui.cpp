@@ -3,6 +3,8 @@
 #include "atlas_layout.h"
 #include "viewer.h"
 #include "backend.h"
+#include "activity.h"
+#include "client_setup.h"
 #include "network.h"
 #include <commctrl.h>
 #include <shellapi.h>
@@ -159,6 +161,9 @@ constexpr int SUPPORT = 4850, SUPPORT_CHECK = 4851, SUPPORT_REPORT = 4852, SUPPO
               SUPPORT_COPY = 4854, SUPPORT_FOLDER = 4855, SUPPORT_RELEASE = 4856,
               SUPPORT_DOWNLOAD = 4857, SUPPORT_RESTART = 4858;
 constexpr int MCP_EXPORT = 4830, DETAIL_LOOP = 4840;
+constexpr int MCP_INSTALL = 4831;
+constexpr int DETAIL_SCOPE = 4841, DETAIL_MODEL = 4842, DETAIL_COPY = 4843,
+              DETAIL_RECENT = 4844, DETAIL_REVEAL = 4845, DETAIL_LIVE = 4846;
 constexpr int CLONE_DEST = 4810, CLONE_PREVIEW = 4811, CLONE_CONFIRM = 4812, CLONE_CANCEL = 4813;
 constexpr int MCP_TOGGLE = 4620, MCP_CONFIG = 4621, MCP_PROMPT = 4622, MCP_COPY_CONFIG = 4623;
 constexpr int BATCHES = 4630, BATCH_LIST = 4631, BATCH_UP = 4632, BATCH_DOWN = 4633,
@@ -277,6 +282,14 @@ struct ConsoleUI::Impl {
   std::string cloneUrl, cloneDestination;
   Json cloneArguments;
   Json agentStats = Json::object(), pendingStats;
+  Json sessionAgentStats = Json::object(), pendingSessionStats;
+  HWND detailScope = nullptr, detailModel = nullptr, detailRuns = nullptr, detailRunOutput = nullptr;
+  bool detailLifetime = false;
+  std::string detailTab = "all", detailRunId, detailRunsEncoded;
+  Json detailActivity = Json::array(), detailStreams = Json::object(), detailLatest = Json::object();
+  std::vector<std::string> detailModels;
+  ULONGLONG detailPoll = 0;
+  ULONGLONG detailCopiedUntil = 0;
   std::thread statsWorker;
   std::atomic<bool> statsBusy{false}, statsReady{false};
   ULONGLONG statsPoll = 0;
@@ -285,6 +298,7 @@ struct ConsoleUI::Impl {
   HWND serviceChoice = nullptr, serviceArguments = nullptr, detailProgress = nullptr;
   std::string supportDescription;
   Json portableUpdate = Json::object();
+  Json clientInstallResult = Json::object();
 
   std::vector<Tile> tiles;
   std::string atlasQuery, atlasMode = "ov", atlasFilter = "all", cachedLayout;
@@ -466,6 +480,10 @@ struct ConsoleUI::Impl {
     functionRows.clear();
     layoutChoice = filterChoice = colorChoice = authorChoice = draftsChoice = nullptr;
     profileFields.clear();
+    detailScope = detailModel = detailRuns = detailRunOutput = nullptr;
+    detailRunsEncoded.clear();
+    detailModels.clear();
+    detailPoll = 0;
     argumentFields.clear();
     logBox = search = agentChoice = toolList = argsBox = body = keyChoice = keyEdit = writes =
         advanced = portOnly = loop = nullptr;
@@ -690,7 +708,9 @@ struct ConsoleUI::Impl {
         functionList = control(L"LISTBOX", "", ATLAS_FUNCTION_LIST, width - 332, 130, 310, 140,
                                LBS_NOTIFY | WS_VSCROLL | WS_HSCROLL | LBS_NOINTEGRALHEIGHT);
         contributorList = control(L"LISTBOX", "", ATLAS_CONTRIBUTORS, 18, 104, cw - 36, 32,
-                                  LBS_NOTIFY | LBS_MULTICOLUMN | WS_HSCROLL | LBS_NOINTEGRALHEIGHT);
+                                  LBS_NOTIFY | LBS_MULTICOLUMN | WS_HSCROLL | LBS_NOINTEGRALHEIGHT |
+                                  LBS_OWNERDRAWFIXED | LBS_HASSTRINGS);
+        SendMessageW(contributorList, LB_SETITEMHEIGHT, 0, 28);
         SendMessageW(contributorList, LB_SETCOLUMNWIDTH, 200, 0);
       }
       cachedLayout.clear();
@@ -982,6 +1002,7 @@ struct ConsoleUI::Impl {
           combo({"Claude Code", "Claude Desktop", "Cursor", "VS Code", "Generic"}, 0, width - 332,
                 310, 310);
       button("Export client setup", MCP_EXPORT, width - 332, 354, 196);
+      button("Connect selected client", MCP_INSTALL, width - 332, 394, 218);
       body = edit(mcpSummary(), 0, 18, 94, cw - 36, height - 225,
                   ES_MULTILINE | ES_READONLY | WS_VSCROLL);
       button(mcpBusy ? "Working…" : (mcp ? "Stop server" : "Start server"), MCP_TOGGLE, 18,
@@ -992,8 +1013,8 @@ struct ConsoleUI::Impl {
       button("Controller", HOME, 18, height - 48, 108);
       label("Your clients and credentials", width - 332, 62, 310, 28);
       label("Add an MCP agent in Controller with its exact client name. Copy this local connection "
-            "configuration into your chosen client. API accounts and keys remain your own. No "
-            "external client configuration is changed automatically.",
+            "configuration into your chosen client, or use Connect to preview and install it. "
+            "API accounts and keys remain your own. Unrelated settings are preserved and backed up.",
             width - 332, 104, 310, 170);
     } else if (screen == Screen::parameters) {
       auto &tool = descriptor.tool(toolId);
@@ -1041,9 +1062,19 @@ struct ConsoleUI::Impl {
       button("Open logs", OPEN_LOG, 346, 52, 144);
       detailProgress = control(PROGRESS_CLASSW, "", 0, 18, 87, cw - 36, 10);
       button("Toggle loop", DETAIL_LOOP, width - 332, 374, 170);
-      body = edit("", 0, 18, 98, cw - 36, 310, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
-      logBox = edit("", 0, 18, 425, cw - 36, height - 504,
+      detailScope = combo({"This session", "All-time"}, DETAIL_SCOPE, 18, 103, 150, detailLifetime ? 1 : 0);
+      body = edit("", 0, 18, 141, cw - 36, 180, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
+      detailModel = combo({"All"}, DETAIL_MODEL, 18, 329, 190);
+      button("Copy output", DETAIL_COPY, 218, 329, 120);
+      label("Live / latest output", 348, 333, 190);
+      logBox = edit("", 0, 18, 367, cw - 36, std::max(50, height - 600),
                     ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL);
+      detailRuns = control(L"LISTBOX", "", DETAIL_RECENT, 18, height - 225, cw - 36, 62,
+                           LBS_NOTIFY | WS_VSCROLL | WS_HSCROLL);
+      detailRunOutput = edit("", 0, 18, height - 157, cw - 36, 64,
+                            ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL);
+      button("Live", DETAIL_LIVE, 18, height - 87, 90);
+      button("Open run folder", DETAIL_REVEAL, 118, height - 87, 150);
       label("Independent verification & publication", width - 332, 57, 310, 40);
       auto a = activeAgent();
       label(a ? a->detail : "Select an agent", width - 332, 108, 310, 120);
@@ -1482,8 +1513,10 @@ struct ConsoleUI::Impl {
     CloseClipboard();
   }
   std::string statisticsSummary(const std::string &id) const {
-    auto stat = agentStats.value(id, Json::object());
-    std::string out = "Lifetime statistics\n\nDeclared matches: " +
+    auto stat = (screen == Screen::detail && !detailLifetime ? sessionAgentStats : agentStats).value(id, Json::object());
+    auto role = measuredRole(agentStats.value(id, Json::object()));
+    std::string out = (screen == Screen::detail && !detailLifetime ? "This session" : "Lifetime statistics") +
+                      std::string("\n\nDeclared matches: ") +
                       std::to_string(stat.value("declaredMatches", 0)) +
                       "\nUnique attempted functions: " + std::to_string(stat.value("attempts", 0)) +
                       "\nNear misses: " + std::to_string(stat.value("nearMisses", 0));
@@ -1500,12 +1533,9 @@ struct ConsoleUI::Impl {
         out += "\n" + i.key() + " · " + std::to_string(i.value().value("attempts", 0)) + " / " +
                std::to_string(i.value().value("matches", 0));
     }
-    auto baseline = statsBaseline.value(id, Json::object());
-    out += "\n\nThis session: " +
-           std::to_string(stat.value("attempts", 0) - baseline.value("attempts", 0)) +
-           " attempted, " +
-           std::to_string(stat.value("declaredMatches", 0) - baseline.value("declaredMatches", 0)) +
-           " declared matches";
+    out += "\n\nBest as: " + (role["role"].is_null() ? std::string("not sure yet") : role["role"].get<std::string>()) +
+           " — " + role["why"].get<std::string>();
+    out += "\nRecommendation: " + sizeRecommendation(stat.value("bySize", Json::object()));
     for (auto &client : presence)
       if (client.value("agentId", std::string()) == id)
         out += "\nMCP connected: " + client.value("name", std::string()) + " (last activity " +
@@ -1514,6 +1544,64 @@ struct ConsoleUI::Impl {
                           1000)) +
                "s ago)";
     return out + "\n\nDeclarations require independent matching proof before publication.";
+  }
+  void refreshDetailActivity() {
+    auto agent = activeAgent();
+    if (!agent || !detailRuns || !detailModel) return;
+    detailActivity = Json::array();
+    for (auto &run : activityBus().snapshot(utf8(repository.wstring())))
+      if (run.value("source", std::string()) == "ai" &&
+          run.value("client", Json::object()).value("name", std::string()) == agent->spec.name)
+        detailActivity.push_back(run);
+    std::stable_sort(detailActivity.begin(), detailActivity.end(), [](const Json &a, const Json &b) {
+      return a.value("startedAt", int64_t(0)) > b.value("startedAt", int64_t(0));
+    });
+    detailLatest = detailActivity.empty() ? Json::object() : detailActivity.front();
+    for (auto &run : detailActivity)
+      if (run.value("status", std::string()) == "running") { detailLatest = run; break; }
+    auto output = detailLatest.empty() ? (agent->log.empty() ? "" : tailFile(agent->log))
+                                      : detailLatest.value("output", std::string());
+    detailStreams = activityStreams(output);
+    std::vector<std::string> models{"all"};
+    for (auto &model : detailStreams.at("models")) models.push_back(model.get<std::string>());
+    if (models != detailModels) {
+      detailModels = models;
+      SendMessageW(detailModel, CB_RESETCONTENT, 0, 0);
+      int active = 0;
+      for (size_t i = 0; i < models.size(); ++i) {
+        auto label = wide(i == 0 ? "All" : models[i]);
+        SendMessageW(detailModel, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        if (models[i] == detailTab) active = static_cast<int>(i);
+      }
+      detailTab = models[active];
+      SendMessageW(detailModel, CB_SETCURSEL, active, 0);
+    }
+    if (!detailStreams.at("byTab").contains(detailTab)) detailTab = "all";
+    updateLiveText(logBox, detailStreams.at("byTab").at(detailTab).get<std::string>());
+    auto metadata = Json::array();
+    for (size_t i = 0; i < std::min<size_t>(10, detailActivity.size()); ++i) {
+      auto &run = detailActivity[i];
+      metadata.push_back({{"id", run.at("runId")}, {"status", run.at("status")}});
+    }
+    auto encoded = metadata.dump();
+    if (encoded != detailRunsEncoded) {
+      detailRunsEncoded = encoded;
+      SendMessageW(detailRuns, LB_RESETCONTENT, 0, 0);
+      for (size_t i = 0; i < metadata.size(); ++i) {
+        auto &run = detailActivity[i];
+        auto label = wide(run.value("status", std::string()) + " · " + run.value("label", std::string()) +
+                          " · " + run.value("commandPreview", std::string()));
+        SendMessageW(detailRuns, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        if (run.at("runId") == detailRunId) SendMessageW(detailRuns, LB_SETCURSEL, i, 0);
+      }
+    }
+    for (auto &run : detailActivity)
+      if (run.at("runId") == detailRunId) {
+        auto duration = std::max<int64_t>(0, run.value("finishedAt", activityNow()) - run.value("startedAt", int64_t(0)));
+        updateLiveText(detailRunOutput, run.value("label", std::string()) + " · " + std::to_string(duration) +
+                        "ms\n" + run.value("commandPreview", std::string()) + "\n" + run.value("output", std::string()));
+        break;
+      }
   }
   static std::string preflightSummary(const Json &r) {
     if (r.empty())
@@ -1968,7 +2056,10 @@ struct ConsoleUI::Impl {
           SendMessageW(contributorList, LB_ADDSTRING, 0, (LPARAM)L"Everyone");
           int at = 1;
           for (auto &entry : ranked) {
-            auto name = wide(entry.first + " · " + std::to_string(entry.second) + " matches");
+            auto daily = atlasExtras.value("atlas.counts", Json::object()).value("daily", Json::object());
+            int recent = daily.value(entry.first, 0);
+            auto name = wide(entry.first + " " + std::to_string(entry.second) +
+                             (recent > 0 ? "  ▲" + std::to_string(recent) : ""));
             SendMessageW(contributorList, LB_ADDSTRING, 0, (LPARAM)name.c_str());
             if (entry.first == authorFilter)
               SendMessageW(contributorList, LB_SETCURSEL, at, 0);
@@ -2286,6 +2377,29 @@ struct ConsoleUI::Impl {
     fleet->commitReviewed(selectedId, "Reviewed agent work: " + agentName, tree);
   }
   void action(int id, int notification) {
+    if (id == DETAIL_SCOPE && notification == CBN_SELCHANGE) {
+      detailLifetime = choice(detailScope) == 1;
+      detailPoll = 0;
+      tick();
+      return;
+    }
+    if (id == DETAIL_MODEL && notification == CBN_SELCHANGE) {
+      auto index = choice(detailModel);
+      if (index >= 0 && static_cast<size_t>(index) < detailModels.size()) {
+        detailTab = detailModels[index];
+        setText(logBox, "");
+        refreshDetailActivity();
+      }
+      return;
+    }
+    if (id == DETAIL_RECENT && notification == LBN_SELCHANGE) {
+      auto index = SendMessageW(detailRuns, LB_GETCURSEL, 0, 0);
+      if (index >= 0 && static_cast<size_t>(index) < detailActivity.size()) {
+        detailRunId = detailActivity[index].at("runId");
+        refreshDetailActivity();
+      }
+      return;
+    }
     if (rebuilding)
       return;
     if (id >= 5000 && id < 5000 + (int)cardIds.size() * 16) {
@@ -2369,9 +2483,10 @@ struct ConsoleUI::Impl {
     }
     if (id == ATLAS_CONTRIBUTORS && notification == LBN_SELCHANGE) {
       auto row = SendMessageW(contributorList, LB_GETCURSEL, 0, 0);
-      authorFilter = row <= 0 || size_t(row) > contributorRank.size()
-                         ? std::string()
-                         : contributorRank[size_t(row) - 1].first;
+      auto selected = row <= 0 || size_t(row) > contributorRank.size()
+                         ? std::string() : contributorRank[size_t(row) - 1].first;
+      authorFilter = authorFilter == selected ? std::string() : selected;
+      SendMessageW(contributorList, LB_SETCURSEL, authorFilter.empty() ? 0 : row, 0);
       InvalidateRect(window, nullptr, FALSE);
       return;
     }
@@ -2673,6 +2788,26 @@ struct ConsoleUI::Impl {
       build();
       break;
     }
+    case DETAIL_COPY:
+      if (detailStreams.contains("byTab") && detailStreams.at("byTab").contains(detailTab)) {
+        copyText(window, detailStreams.at("byTab").at(detailTab).get<std::string>());
+        detailCopiedUntil = GetTickCount64() + 1400;
+        setText(GetDlgItem(window, DETAIL_COPY), "Copied");
+      }
+      break;
+    case DETAIL_LIVE:
+      detailRunId.clear();
+      setText(detailRunOutput, "Select a recent run to expand its output.");
+      SendMessageW(detailRuns, LB_SETCURSEL, -1, 0);
+      break;
+    case DETAIL_REVEAL:
+      for (auto &run : detailActivity)
+        if (run.at("runId") == detailRunId && !run.value("log", std::string()).empty()) {
+          auto path = fs::u8path(run.at("log").get<std::string>()).parent_path();
+          ShellExecuteW(window, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+          break;
+        }
+      break;
     case MCP_EXPORT: {
       if (!mcp)
         throw std::runtime_error("Start MCP first");
@@ -2688,6 +2823,21 @@ struct ConsoleUI::Impl {
       fs::create_directories(path.parent_path());
       write(path, config.dump(2));
       ShellExecuteW(window, L"open", L"notepad.exe", path.c_str(), nullptr, SW_SHOWNORMAL);
+      break;
+    }
+    case MCP_INSTALL: {
+      if (!mcp || mcpBusy) throw std::runtime_error("Start MCP first");
+      auto a = activeAgent();
+      if (!a || a->spec.kind != "mcp") throw std::runtime_error("Select an MCP agent in Controller first");
+      auto connection = data / "mcp-client.json";
+      write(connection, mcp->configuration());
+      auto plan = previewClientSetup(selected(profileFields["MCP client"]), fs::u8path(selfExecutable()),
+                                     connection, a->spec.name);
+      auto prompt = wide(plan.outcome.dump(2));
+      if (MessageBoxW(window, prompt.c_str(), L"Review MCP client setup", MB_OKCANCEL | MB_ICONINFORMATION) == IDOK) {
+        clientInstallResult = installClientSetup(plan);
+        setText(body, mcpSummary() + "\n\nClient setup: " + clientInstallResult.dump(2));
+      }
       break;
     }
     case HOME:
@@ -3200,6 +3350,7 @@ struct ConsoleUI::Impl {
     }
     if (screen == Screen::mcpConnection && body) {
       auto summary = mcpSummary();
+      if (!clientInstallResult.empty()) summary += "\n\nClient setup: " + clientInstallResult.dump(2);
       if (text(body) != summary)
         setText(body, summary);
     }
@@ -3208,6 +3359,7 @@ struct ConsoleUI::Impl {
       std::lock_guard<std::mutex> lock(outputMutex);
       if (!pendingStats.contains("error")) {
         agentStats = std::move(pendingStats);
+        sessionAgentStats = std::move(pendingSessionStats);
       }
       InvalidateRect(window, nullptr, FALSE);
     }
@@ -3219,15 +3371,17 @@ struct ConsoleUI::Impl {
       statsBusy = true;
       auto prefs = settings;
       statsWorker = std::thread([this, prefs] {
-        Json result;
+        Json result, session;
         try {
           result = Backend(repository, data, prefs).invoke("stats.get");
+          session = Backend(repository, data, prefs).invoke("stats.session");
         } catch (const std::exception &e) {
           result = {{"error", e.what()}};
         }
         {
           std::lock_guard<std::mutex> lock(outputMutex);
           pendingStats = std::move(result);
+          pendingSessionStats = std::move(session);
         }
         statsReady = true;
         statsBusy = false;
@@ -3417,21 +3571,32 @@ struct ConsoleUI::Impl {
       appendText(logBox, out);
     if ((screen == Screen::clone || screen == Screen::batches) && body && !out.empty())
       appendText(body, out);
-    if (screen == Screen::detail) {
+    if (screen == Screen::detail && GetTickCount64() - detailPoll >= 200) {
+      if (detailCopiedUntil && GetTickCount64() >= detailCopiedUntil) {
+        detailCopiedUntil = 0;
+        setText(GetDlgItem(window, DETAIL_COPY), "Copy output");
+      }
+      detailPoll = GetTickCount64();
       auto a = activeAgent();
       if (a) {
-        setText(body,
+        refreshDetailActivity();
+        std::vector<std::pair<std::string, int>> tools;
+        for (auto &run : detailActivity) {
+          auto id = run.value("toolId", std::string());
+          auto found = std::find_if(tools.begin(), tools.end(), [&](const auto &t) { return t.first == id; });
+          if (found == tools.end()) tools.push_back({id, 1}); else ++found->second;
+        }
+        std::stable_sort(tools.begin(), tools.end(), [](const auto &a, const auto &b) { return a.second > b.second; });
+        std::string called;
+        for (auto &tool : tools) called += "  " + tool.first + " ×" + std::to_string(tool.second);
+        updateLiveText(body,
                 a->spec.name + " · " + a->phase + "\n" + a->detail +
                     "\nWorktree: " + utf8(a->worktree.wstring()) + "\nBranch: " + a->branch + "\n" +
                     std::to_string(a->completed) + " worked; " + std::to_string(a->queue.size()) +
-                    " queued\nLog: " + utf8(a->log.wstring()) + "\n\n" + statisticsSummary(a->id));
+                    " queued\nLog: " + utf8(a->log.wstring()) + "\nTools called:" + called + "\n\n" + statisticsSummary(a->id));
         if (detailProgress) {
           SendMessageW(detailProgress, PBM_SETRANGE32, 0, std::max(1, a->total));
           SendMessageW(detailProgress, PBM_SETPOS, a->completed, 0);
-        }
-        if (!a->log.empty()) {
-          auto tail = tailFile(a->log);
-          updateLiveText(logBox, tail);
         }
       }
     }
@@ -3473,6 +3638,39 @@ struct ConsoleUI::Impl {
         return 0;
       case WM_DRAWITEM: {
         auto item = (DRAWITEMSTRUCT *)l;
+        if (item->CtlType == ODT_LISTBOX && item->CtlID == ATLAS_CONTRIBUTORS) {
+          FillRect(item->hDC, &item->rcItem, self->fieldBrush);
+          if (item->itemID == (UINT)-1) return TRUE;
+          auto bounds = item->rcItem;
+          bounds.left += 5; bounds.right -= 5; bounds.top += 2; bounds.bottom -= 2;
+          if (item->itemState & ODS_SELECTED) {
+            auto brush = CreateSolidBrush(RGB(202, 228, 247));
+            FillRect(item->hDC, &bounds, brush); DeleteObject(brush);
+          }
+          auto rank = size_t(item->itemID);
+          if (rank > 0 && rank <= self->contributorRank.size()) {
+            auto name = self->contributorRank[rank - 1].first;
+            auto color = self->atlasAuthorColors[name];
+            unsigned rgb = 0x8896a5;
+            if (color.size() == 7 && color[0] == '#') {
+              try { rgb = std::stoul(color.substr(1), nullptr, 16); } catch (...) {}
+            }
+            auto brush = CreateSolidBrush(RGB((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255));
+            auto old = SelectObject(item->hDC, brush);
+            auto pen = SelectObject(item->hDC, GetStockObject(NULL_PEN));
+            Ellipse(item->hDC, bounds.left + 4, bounds.top + 6, bounds.left + 14, bounds.top + 16);
+            SelectObject(item->hDC, pen); SelectObject(item->hDC, old); DeleteObject(brush);
+            bounds.left += 20;
+          } else bounds.left += 6;
+          auto length = SendMessageW(item->hwndItem, LB_GETTEXTLEN, item->itemID, 0);
+          std::wstring title(size_t(std::max<LRESULT>(0, length)) + 1, 0);
+          SendMessageW(item->hwndItem, LB_GETTEXT, item->itemID, (LPARAM)title.data());
+          auto oldFont = SelectObject(item->hDC, self->font);
+          SetBkMode(item->hDC, TRANSPARENT); SetTextColor(item->hDC, skin::text());
+          DrawTextW(item->hDC, title.c_str(), -1, &bounds, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+          SelectObject(item->hDC, oldFont);
+          return TRUE;
+        }
         if (item->CtlType == ODT_BUTTON) {
           skin::button(*item,
                        item->CtlID == GO || item->CtlID == TOOL_RUN || item->CtlID == SAVE_PROFILE,
@@ -4019,7 +4217,39 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     for (auto &id : extraAgents)
       impl->fleet->remove(id);
     impl->navigate(Screen::detail);
+    impl->detailPoll = 0;
     impl->tick();
+    if (impl->detailActivity.empty() || text(impl->logBox).find("fleet workflow") == std::string::npos) {
+      write(directory / "activity-failure.json", Json{{"repository", utf8(impl->repository.wstring())},
+            {"selected", impl->selectedId}, {"activity", activityBus().snapshot()},
+            {"visible", text(impl->logBox)}}.dump(2));
+      throw std::runtime_error("Agent detail did not hydrate the latest real run output");
+    }
+    SendMessageW(impl->detailRuns, LB_SETCURSEL, 0, 0);
+    impl->action(DETAIL_RECENT, LBN_SELCHANGE);
+    if (text(impl->detailRunOutput).find("fleet workflow") == std::string::npos)
+      throw std::runtime_error("Recent run expansion lost retained output");
+    auto runId = "fanout-fixture-" + uniqueId();
+    auto selectedAgent = impl->activeAgent();
+    activityBus().publish({{"kind", "run-started"}, {"run", {{"runId", runId}, {"toolId", "drive"},
+        {"label", "Fan-out fixture"}, {"source", "ai"}, {"client", {{"name", selectedAgent->spec.name}}},
+        {"repository", utf8(impl->repository.wstring())}, {"startedAt", activityNow()}, {"status", "running"},
+        {"output", ""}, {"commandPreview", "fixture"}}}});
+    activityBus().publish({{"kind", "run-output"}, {"runId", runId},
+                           {"chunk", u8"⟦vendor/one⟧ first model\n⟦vendor/two⟧ second model\n"}});
+    impl->refreshDetailActivity();
+    SendMessageW(impl->detailModel, CB_SETCURSEL, 2, 0);
+    impl->action(DETAIL_MODEL, CBN_SELCHANGE);
+    if (text(impl->logBox).find("second model") == std::string::npos ||
+        text(impl->logBox).find("first model") != std::string::npos)
+      throw std::runtime_error("Agent detail model tabs did not isolate live streams");
+    activityBus().publish({{"kind", "run-finished"}, {"runId", runId}, {"status", "ok"},
+                           {"exitCode", 0}, {"finishedAt", activityNow()}});
+    SendMessageW(impl->detailScope, CB_SETCURSEL, 1, 0);
+    impl->action(DETAIL_SCOPE, CBN_SELCHANGE);
+    if (!impl->detailLifetime || text(impl->body).find("Lifetime statistics") == std::string::npos)
+      throw std::runtime_error("Agent detail statistics scope did not switch");
+    write(directory / "detail-gui-report.txt", "PASS: actual latest run, recent expansion, live model tabs, lifetime/session scope");
     setText(impl->logBox, impl->fleet->review(impl->selectedId));
     write(directory / "fleet-gui-report.txt",
           "PASS: packaged CLI agent, isolated worktree, instructions, independent checks, live UI, "

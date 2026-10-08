@@ -14,6 +14,7 @@ def main():
           {'name':'upper','matched':False,'size':2048},
           {'name':'lower','matched':False,'size':65}]
     rows += [{'name':f'recent-{i}','matched':i%3==0,'size':16} for i in range(20)]
+    rows += [{'matched':False,'size':64}, {'matched':True,'size':64}, {'matched':True,'size':64}]
     with tempfile.TemporaryDirectory(prefix='tangos-stats-reference-') as folder:
         tmp=pathlib.Path(folder);repo=tmp/'repo';repo.mkdir()
         (repo/'tangos.json').write_text(json.dumps({'tangosVersion':'1','project':{'name':'fixture','title':'Fixture'},'tools':[]}))
