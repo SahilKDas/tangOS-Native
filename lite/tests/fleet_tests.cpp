@@ -69,13 +69,17 @@ int main(int argc, char **argv) {
         "argparse,json\np=argparse.ArgumentParser();p.add_argument('--out');p.add_argument('--"
         "limit',type=int);a=p.parse_args()\nwith open(a.out,'w') as f:\n for n in range(a.limit): "
         "f.write(json.dumps({'id':str(n),'name':'target'+str(n),'module':'port'})+'\\n')\n");
-    write(repo / "tools/driver.py", R"PY(import argparse,json,os,time,urllib.request,pathlib
+    write(repo / "tools/driver.py", R"PY(import argparse,json,os,time,urllib.request,pathlib,sys
 INSTRUCTIONS = 'base driver rules'
 def main():
  p=argparse.ArgumentParser();p.add_argument('--wl');p.add_argument('--out');p.add_argument('--prompt');p.add_argument('--jobs');p.add_argument('--attempts');a=p.parse_args()
  instructions=pathlib.Path(a.prompt).read_text(encoding='utf-8')
  assert 'ROOT_RULE' in instructions and 'NESTED_RULE' in instructions and 'never modify src/' in instructions
+ if os.environ['GLM_MODEL']=='exhausted':print('402 payment required',flush=True);return
+ if os.environ['GLM_MODEL']=='empty':pathlib.Path(a.out).write_text('{}');return
+ if os.environ['GLM_MODEL']=='split-code':sys.stdout.write('402');sys.stdout.flush();time.sleep(.05);print('0');pathlib.Path(a.out).write_text('{}');return
  targets=[json.loads(s) for s in pathlib.Path(a.wl).read_text().splitlines()]
+ if targets and targets[0]['name']=='one':assert 'CUSTOM_BATCH_RULE' in instructions
  body=json.dumps({'model':os.environ['GLM_MODEL'],'messages':[{'role':'user','content':instructions}]}).encode()
  request=urllib.request.Request(os.environ['GLM_BASE_URL']+'/chat/completions',body,{'Authorization':'Bearer '+os.environ['GLM_API_KEY'],'Content-Type':'application/json'})
  with urllib.request.urlopen(request) as response: assert json.load(response)['choices'][0]['message']['content']=='verified fixture response'
@@ -214,8 +218,10 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       wait(fleet);
       for (auto &state : fleet.snapshot())
         if (state.id == first)
-          expect(state.completed == 1 && state.queue.size() == 1,
-                 "queued-during-run target is retained");
+          expect(state.completed == 2 && state.queue.empty() &&
+                     fs::exists(state.worktree / "port/later.txt"),
+                 "one-shot agent drains targets queued during execution");
+      fleet.enqueue(first, Json::array({{{"id", "later"}, {"name", "later"}, {"module", "port"}}}));
       fleet.enqueue(first, Json::array({{{"id", "last"}, {"name", "last"}, {"module", "port"}}}));
       fleet.editQueue(first, 1, -1);
       for (auto &state : fleet.snapshot())
@@ -256,9 +262,15 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
                "provider key not logged");
         expect(read(state.prompt).find("Role: Hard matcher") != std::string::npos,
                "resolved automatic role reaches driver instructions");
-        if (state.id == first)
-          expect(read(state.prompt).find("CUSTOM_BATCH_RULE") != std::string::npos,
-                 "saved batch instructions reach actual API driver");
+        if (state.id == first) {
+          bool retained = false;
+          for (auto &file : fs::directory_iterator(state.prompt.parent_path()))
+            if (file.is_regular_file() &&
+                file.path().filename().string().find("-instructions.txt") != std::string::npos &&
+                read(file.path()).find("CUSTOM_BATCH_RULE") != std::string::npos)
+              retained = true;
+          expect(retained, "complete per-run batch instructions preserved after queue draining");
+        }
         expect(read(state.prompt).find("NESTED_RULE") != std::string::npos,
                "scoped instructions delivered");
         expect(read(state.prompt).find("LOCAL_ROOT_RULE") != std::string::npos &&
@@ -399,6 +411,46 @@ print('authenticated MCP protocol, tools, batch lifecycle and long polling passe
                "legacy target queues migrate without losing unfinished work");
       }
       write(file, original);
+    }
+    {
+      Fleet guarded(repo, data / "projects/usage-guard", desc, settings);
+      AgentSpec api;
+      api.name = "Usage fixture";
+      api.key = "TEST_API_KEY";
+      api.model = "exhausted";
+      api.baseUrl = "http://127.0.0.1:" + trim(read(dir / "port.txt"));
+      api.count = 1;
+      api.loop = true;
+      auto id = guarded.add(api);
+      guarded.enqueue(id, Json::array({{{"id", "preserved"}, {"name", "preserved"}}}));
+      guarded.start(id);
+      wait(guarded);
+      auto stopped = guarded.snapshot()[0];
+      expect(stopped.phase == "exhausted" && !stopped.spec.loop && stopped.completed == 0 &&
+                 stopped.detail.find("API reported") != std::string::npos &&
+                 stopped.queue.size() == 1 &&
+                 read(stopped.log).find("402 payment required") != std::string::npos,
+             "explicit usage exhaustion stops only this agent and preserves pending work/log");
+      api.model = "empty";
+      guarded.configure(id, api);
+      guarded.start(id);
+      wait(guarded);
+      stopped = guarded.snapshot()[0];
+      expect(stopped.phase == "exhausted" && !stopped.spec.loop && stopped.completed == 4 &&
+                 stopped.queue.size() == 1 &&
+                 stopped.detail.find("5 fast empty") != std::string::npos,
+             "five fast empty runs stop refill loop; manual restart clears previous exhaustion");
+      api.name = "Split boundary fixture";
+      api.model = "split-code";
+      api.loop = false;
+      auto split = guarded.add(api);
+      guarded.enqueue(split, Json::array({{{"id", "split"}, {"name", "split"}}}));
+      guarded.start(split);
+      wait(guarded);
+      for (auto &state : guarded.snapshot())
+        if (state.id == split)
+          expect(state.phase == "review" && state.completed == 1,
+                 "split numeric output 4020 is not an explicit quota signal");
     }
     write(dir / "split.py", "import "
                             "os,time,sys\ns=os.environ['TEST_API_KEY'];sys.stdout.write(s[:8]);sys."

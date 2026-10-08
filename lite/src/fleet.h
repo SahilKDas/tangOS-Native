@@ -26,7 +26,7 @@ struct AgentSpec {
 struct AgentState {
   AgentSpec spec;
   std::string id, phase = "idle", detail, branch, lastLine;
-  fs::path worktree, log, prompt, worklist;
+  fs::path worktree, log, prompt, worklist, results;
   Json queue = Json::array(), assigned = Json::array();
   int completed = 0, total = 0;
   bool active = false;

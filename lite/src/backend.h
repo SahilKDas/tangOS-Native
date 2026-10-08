@@ -14,6 +14,9 @@ bool enabledTool(const Json &preferences, const std::string &id);
 std::string classifySource(const std::string &source);
 Json poolDifficulty(const std::vector<AtlasFunction> &functions);
 std::string adaptiveRole(const std::string &role, int attempts, int matches, const Json &pool);
+Json driverUsage(const std::string &output, bool productive, uint64_t elapsedMs, int streak);
+bool productiveDriver(const Json &result);
+Json driverResultRows(const Json &result);
 Json updateAgentStats(Json entry, const Json &rows, Json &best);
 class Backend {
   friend class RemoteLease;

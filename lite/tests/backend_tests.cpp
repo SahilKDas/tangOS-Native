@@ -214,6 +214,30 @@ int main() {
     backend.resetRecent("fixture");
     expect(backend.invoke("stats.get")["fixture"]["recent"].empty(),
            "adaptive demotion resets old-rung misses");
+    expect(productiveDriver({{"landedNames", Json::array({"real"})}}),
+           "driver landed summary productive");
+    expect(!productiveDriver(
+               {{"landedNames", Json::array({"bad"})}, {"sources", {{"bad", "dcd 0x12345678"}}}}),
+           "transcribed driver summary cannot reset exhaustion streak");
+    expect(productiveDriver({{"nearMisses", Json::array({{{"name", "draft"}}})}}),
+           "compiling near-miss summary resets exhaustion streak");
+    expect(!productiveDriver({{"worked", 1}}), "generic worked count is not matching productivity");
+    auto summary = data / "driver-summary.json";
+    write(summary,
+          Json({{"results", Json::array({{{"name", "real"}, {"matched", true}},
+                                         {{"name", "transcribed"}, {"matched", true}},
+                                         {{"name", "miss"}, {"matched", false}}})},
+                {"sources", {{"real", "int real(){return 1;}"}, {"transcribed", "dcd 0x12345678"}}},
+                {"inputTokens", 25},
+                {"outputTokens", 10}})
+              .dump());
+    backend.recordAgent("summary", summary, "review", 1);
+    auto summaryStats = backend.invoke("stats.get")["summary"];
+    expect(summaryStats["attempts"] == 3 && summaryStats["declaredMatches"] == 1 &&
+               summaryStats["tokensIn"] == 25 && summaryStats["tokensOut"] == 10,
+           "actual driver summary ingests target rows, token aliases and transcription gate");
+    expect(!summaryStats["attemptedFuncs"].empty() && summaryStats["attemptedFuncs"].size() == 3,
+           "summary metadata does not create phantom unnamed attempts");
     Json best = Json::object();
     auto statsFixture = updateAgentStats(
         Json::object(),

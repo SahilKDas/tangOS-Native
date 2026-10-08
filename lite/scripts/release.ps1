@@ -32,6 +32,8 @@ python "$source/tests/test_batches_reference.py" --exe "$out/build-a/TangOSLite.
 if ($LASTEXITCODE) { throw 'Original batch comparisons failed' }
 python "$source/tests/test_source_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original source comparisons failed' }
+python "$source/tests/test_usage_reference.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original usage-stop comparisons failed' }
 
 $a = "$out/build-a/TangOSLite.exe"
 $b = "$out/build-b/TangOSLite.exe"
@@ -46,7 +48,7 @@ if ($size -ge 50000000) { throw 'Executable exceeds strict 50 MB limit' }
 $imports = & objdump -p "$out/TangOSLite.exe" | Select-String 'DLL Name:' | ForEach-Object { $_.Line.Trim() }
 $compiler = (& g++ --version | Select-Object -First 1)
 $cmake = (& cmake --version | Select-Object -First 1)
-$report = "TangOS Lite 0.10.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
+$report = "TangOS Lite 0.11.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
 Set-Content -LiteralPath "$out/SIZE.txt" -Value $report -Encoding utf8
 Copy-Item -LiteralPath "$source/README.md" -Destination "$out/README.md"
 Copy-Item -LiteralPath "$source/../LICENSE" -Destination "$out/LICENSE"

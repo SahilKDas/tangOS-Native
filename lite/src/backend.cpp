@@ -357,9 +357,10 @@ Json Backend::catalog() {
        "stats.get",         "stats.clear",       "reports.list",       "reports.export",
        "queue.adopt",       "policy.classify",   "policy.adaptive",    "policy.pool",
        "policy.statistics", "policy.layout",     "policy.color",       "policy.batches",
-       "policy.source",     "guide.parse",       "guide.tour",         "guide.tips",
-       "projects.get",      "github.credits",    "atlas.cosmetics",    "atlas.counts",
-       "atlas.progress",    "atlas.live",        "update.check",       "harvest.list"});
+       "policy.source",     "policy.usage",      "guide.parse",        "guide.tour",
+       "guide.tips",        "projects.get",      "github.credits",     "atlas.cosmetics",
+       "atlas.counts",      "atlas.progress",    "atlas.live",         "update.check",
+       "harvest.list"});
 }
 Json Backend::invoke(const std::string &m, Json a) {
   HANDLE lock = CreateFileW((directory / "backend.lock").c_str(),
@@ -581,6 +582,116 @@ std::unique_ptr<RemoteLease> Backend::reserve(const Json &targets, const std::st
   return std::make_unique<RemoteLease>(*this, targets, agent, std::move(cancel));
 }
 
+Json driverUsage(const std::string &output, bool productive, uint64_t elapsedMs, int streak) {
+  static const std::regex exhausted(
+      R"(\b402\b|payment required|insufficient|out of (credit|quota|balance)|quota (exceeded|exhausted)|billing|no credit)",
+      std::regex::icase);
+  std::string reason;
+  if (std::regex_search(output, exhausted)) {
+    streak = 0;
+    reason = "API reported out of usage (credit/quota exhausted)";
+  } else if (!productive && elapsedMs < 20000) {
+    ++streak;
+    if (streak >= 5) {
+      reason = std::to_string(streak) + " fast empty runs in a row (key likely out of usage)";
+      streak = 0;
+    }
+  } else {
+    streak = 0;
+  }
+  return {{"streak", streak}, {"reason", reason}, {"stopped", !reason.empty()}};
+}
+bool productiveDriver(const Json &result) {
+  if (!result.is_object())
+    return false;
+  Json names = Json::array();
+  for (auto field : {"landedNames", "landed", "matches"})
+    if (result.contains(field) && !result[field].is_null()) {
+      names = result[field];
+      break;
+    }
+  auto sources = result.value("sources", Json::object());
+  if (names.is_array())
+    for (auto &entry : names) {
+      std::string name = entry.is_string() ? entry.get<std::string>()
+                         : entry.is_object() && entry.contains("name") && entry["name"].is_string()
+                             ? entry["name"].get<std::string>()
+                             : "";
+      if (!name.empty() &&
+          (!sources.is_object() || !sources.contains(name) || !sources[name].is_string() ||
+           classifySource(sources[name].get<std::string>()) != "transcribed"))
+        return true;
+    }
+  auto nearMisses = result.value("nearMisses", Json::array());
+  if (nearMisses.is_array())
+    for (auto &entry : nearMisses)
+      if (entry.is_object() && entry.contains("name") && entry["name"].is_string() &&
+          !entry["name"].get<std::string>().empty())
+        return true;
+  return false;
+}
+Json driverResultRows(const Json &result) {
+  if (result.is_array())
+    return result;
+  if (!result.is_object())
+    return Json::array();
+  if (!result.contains("results") && !result.contains("sources") && !result.contains("landed") &&
+      !result.contains("landedNames") && !result.contains("matches") &&
+      !result.contains("nearMisses"))
+    return Json::array({result});
+  Json rows = result.value("results", Json::array());
+  if (!rows.is_array())
+    rows = Json::array();
+  if (!result.contains("results")) {
+    Json names = Json::array();
+    for (auto field : {"landedNames", "landed", "matches"})
+      if (result.contains(field) && !result[field].is_null()) {
+        names = result[field];
+        break;
+      }
+    if (names.is_array())
+      for (auto &entry : names) {
+        if (entry.is_string() && !entry.get<std::string>().empty())
+          rows.push_back({{"name", entry}, {"matched", true}});
+        else if (entry.is_object() && entry.contains("name") && entry["name"].is_string()) {
+          auto row = entry;
+          row["matched"] = true;
+          rows.push_back(row);
+        }
+      }
+  }
+  auto sources = result.value("sources", Json::object());
+  for (auto &row : rows)
+    if (row.is_object() && row.contains("name") && row["name"].is_string() && sources.is_object() &&
+        sources.contains(row["name"].get<std::string>()) &&
+        sources[row["name"].get<std::string>()].is_string())
+      row["c_source"] = sources[row["name"].get<std::string>()];
+  auto tokens = [&](const char *primary, const char *alias) -> int64_t {
+    auto value = result.contains(primary) && !result[primary].is_null()
+                     ? result[primary]
+                     : result.value(alias, Json(0));
+    if (!value.is_number())
+      return 0;
+    auto n = value.get<double>();
+    return std::isfinite(n) && n >= 0 && n < 9e18 ? static_cast<int64_t>(n) : 0;
+  };
+  auto input = tokens("tokensIn", "inputTokens"), output = tokens("tokensOut", "outputTokens");
+  if (!result.contains("tokensOut") && !result.contains("outputTokens") &&
+      result.contains("tokensPerLanded") && result["tokensPerLanded"].is_number()) {
+    auto n = result["tokensPerLanded"].get<double>();
+    size_t landed = 0;
+    for (auto &row : rows)
+      if (row.is_object() && row.value("matched", Json(false)) == true &&
+          classifySource(row.value("c_source", std::string())) != "transcribed")
+        ++landed;
+    auto total = n * landed;
+    if (std::isfinite(total) && total >= 0 && total < 9e18)
+      output = static_cast<int64_t>(total);
+  }
+  if (input || output)
+    rows.push_back({{"tokensIn", input}, {"tokensOut", output}});
+  return rows;
+}
 Json updateAgentStats(Json entry, const Json &rows, Json &best) {
   if (!entry.contains("attemptedFuncs")) {
     entry["attempts"] = 0;
@@ -626,7 +737,7 @@ Json updateAgentStats(Json entry, const Json &rows, Json &best) {
     }
     if (div > 0)
       matched = false;
-    bool firstAttempt = !seen(entry["attemptedFuncs"], key),
+    bool firstAttempt = !key.empty() && !seen(entry["attemptedFuncs"], key),
          firstMatch = matched && !seen(entry["matchedFuncs"], key);
     if (firstAttempt) {
       entry["attempts"] = entry.value("attempts", 0) + 1;
@@ -724,10 +835,7 @@ void Backend::recordAgent(const std::string &id, const fs::path &results, const 
     auto contents = read(results);
     auto parsed = Json::parse(contents, nullptr, false);
     if (!parsed.is_discarded()) {
-      if (parsed.is_array())
-        rows = parsed;
-      else
-        rows.push_back(parsed);
+      rows = driverResultRows(parsed);
     } else
       rows = jsonLines(results);
   }
@@ -954,6 +1062,9 @@ Json Backend::execute(const std::string &m, const Json &a) {
     saveJson(directory / "exports" / name, bundle);
     return {{"path", utf8((directory / "exports" / name).wstring())}};
   }
+  if (m == "policy.usage")
+    return driverUsage(a.value("output", std::string()), a.value("productive", false),
+                       a.value("elapsedMs", uint64_t(0)), a.value("streak", 0));
   if (m == "policy.classify")
     return {{"classification", classifySource(a.at("source").get<std::string>())}};
   if (m == "policy.statistics") {

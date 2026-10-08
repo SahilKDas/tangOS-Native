@@ -71,6 +71,7 @@ Json agentJson(const AgentState &s) {
           {"log", utf8(s.log.wstring())},
           {"prompt", utf8(s.prompt.wstring())},
           {"worklist", utf8(s.worklist.wstring())},
+          {"results", utf8(s.results.wstring())},
           {"queue", s.queue},
           {"assigned", s.assigned},
           {"completed", s.completed},
@@ -101,6 +102,7 @@ AgentState parseAgent(const Json &j) {
   s.log = fs::u8path(j.value("log", std::string()));
   s.prompt = fs::u8path(j.value("prompt", std::string()));
   s.worklist = fs::u8path(j.value("worklist", std::string()));
+  s.results = fs::u8path(j.value("results", std::string()));
   s.queue = j.value("queue", Json::array());
   s.assigned = j.value("assigned", Json::array());
   s.completed = j.value("completed", 0);
@@ -140,6 +142,12 @@ Fleet::Fleet(fs::path repo, fs::path dir, Descriptor desc, Settings prefs, Sink 
     for (auto &j : persisted.at("agents")) {
       auto job = std::make_shared<Job>();
       job->state = parseAgent(j);
+      if (job->state.results.empty())
+        job->state.results = directory / fs::u8path(job->state.id) / "results.output";
+      for (auto &path :
+           {job->state.log, job->state.prompt, job->state.worklist, job->state.results})
+        if (!path.empty())
+          confinedPath(directory, utf8(path.wstring()));
       if (!job->state.worktree.empty())
         confinedPath(directory, utf8(job->state.worktree.wstring()));
       if (job->state.phase == "running" || job->state.phase == "scheduling" ||
@@ -504,8 +512,8 @@ void Fleet::land(const std::string &id) {
       throw std::runtime_error("Stop agent before landing results");
     if (!tool)
       throw std::runtime_error("No console.land tool declared by this repository");
-    if (!fs::exists(directory / id / "results.output"))
-      throw std::runtime_error("No driver results.output exists for this agent");
+    if (!fs::exists(job->state.results))
+      throw std::runtime_error("No retained driver result exists for this agent");
   }
   if (job->worker.joinable())
     job->worker.join();
@@ -524,7 +532,7 @@ void Fleet::land(const std::string &id) {
       auto dir = directory / job->state.id;
       update("landing", "Applying declared land tool in isolated worktree");
       auto command = toolCommand(descriptor, *tool,
-                                 {{"out", utf8((dir / "results.output").wstring())},
+                                 {{"out", utf8(job->state.results.wstring())},
                                   {"wl", utf8(job->state.worklist.wstring())},
                                   {"no_claims", true}},
                                  job->state.worktree, true, true);
@@ -693,6 +701,7 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       job->state.branch = branch;
       saveLocked();
     }
+    int quickFailStreak = 0;
     do {
       update("scheduling", "Preparing instructions and worklist");
       Json rows;
@@ -707,6 +716,10 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       }
       if (rows.empty())
         rows = schedule(job, job->state.worktree);
+      if (job->runner.isCancelled()) {
+        update("cancelled", "Stopped after scheduling; driver was not launched");
+        break;
+      }
       for (auto &row : rows)
         row["ref"] = batchTarget(row);
       if (auto enrich = descriptor.role("enrich")) {
@@ -749,8 +762,10 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
               throw std::runtime_error("No enriched context returned for target");
           }
       }
-      auto prompt = dir / "instructions.txt", wl = dir / "worklist.jsonl",
-           out = dir / "results.output";
+      auto runId = uniqueId();
+      auto prompt = dir / fs::u8path(runId + "-instructions.txt"),
+           wl = dir / fs::u8path(runId + "-worklist.jsonl"),
+           out = dir / fs::u8path(runId + "-results.output");
       Repository r(job->runner, job->state.worktree, settings);
       auto executionRole =
           job->state.spec.role == "Unassigned"
@@ -795,6 +810,7 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
           batchBook.activate(id, rows, std::time(nullptr) * int64_t(1000));
         job->state.prompt = prompt;
         job->state.worklist = wl;
+        job->state.results = out;
         job->state.log = dir / "driver.log";
         saveLocked();
       }
@@ -886,10 +902,19 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       auto lease =
           leaseBackend.reserve(rows, job->state.spec.name, [job] { job->runner.cancel(); });
       update("running", "Driving " + std::to_string(rows.size()) + " targets");
+      auto runStarted = GetTickCount64();
+      bool exhaustionSignal = false;
+      std::string usageWindow;
       auto result = job->runner.run(
           c,
           [&](const std::string &text) {
             auto clean = redact(text, secrets);
+            if (job->state.spec.kind == "api" && !exhaustionSignal) {
+              usageWindow += clean;
+              exhaustionSignal = driverUsage(usageWindow + "x", true, 0, 0).at("stopped");
+              if (usageWindow.size() > 128)
+                usageWindow.erase(0, usageWindow.size() - 128);
+            }
             {
               std::lock_guard<std::mutex> lock(mutex);
               job->state.lastLine = trim(clean).substr(0, 180);
@@ -904,6 +929,26 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       if (job->runner.isCancelled()) {
         update("cancelled", "Stopped; partial worktree and complete logs retained");
         break;
+      }
+      if (job->state.spec.kind == "api") {
+        Json results;
+        if (fs::exists(out)) {
+          if (fs::file_size(out) > 32 * 1024 * 1024)
+            throw std::runtime_error("Agent results exceed 32 MiB; complete logs retained");
+          results = Json::parse(read(out), nullptr, false);
+        }
+        auto usage = driverUsage(exhaustionSignal ? "402" : usageWindow, productiveDriver(results),
+                                 GetTickCount64() - runStarted, quickFailStreak);
+        quickFailStreak = usage.at("streak");
+        if (usage.at("stopped") == true) {
+          {
+            std::lock_guard<std::mutex> lock(mutex);
+            job->state.spec.loop = false;
+            batchBook.park(id, usage.at("reason"));
+          }
+          update("exhausted", usage.at("reason"));
+          break;
+        }
       }
       if (result.code)
         throw std::runtime_error("Driver exited " + std::to_string(result.code) +
@@ -950,7 +995,7 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       bool again;
       {
         std::lock_guard<std::mutex> lock(mutex);
-        again = job->state.spec.loop;
+        again = job->state.spec.loop || !job->state.queue.empty();
       }
       if (!again)
         break;
@@ -1017,7 +1062,7 @@ Json Fleet::takeBatch(const std::string &id) {
           {"worktree", utf8(job->state.worktree.wstring())},
           {"instructions", read(job->state.prompt)},
           {"targets", job->state.assigned.empty() ? job->state.queue : job->state.assigned},
-          {"resultsPath", utf8((directory / fs::u8path(id) / "results.output").wstring())}};
+          {"resultsPath", utf8(job->state.results.wstring())}};
 }
 void Fleet::finishBatch(const std::string &id) {
   std::shared_ptr<Job> job;
@@ -1042,7 +1087,7 @@ void Fleet::finishBatch(const std::string &id) {
       }
     audit(job);
     Backend(repository, directory.parent_path().parent_path(), settings)
-        .recordAgent(id, directory / fs::u8path(id) / "results.output", "review", gates);
+        .recordAgent(id, job->state.results, "review", gates);
     std::lock_guard<std::mutex> lock(mutex);
     if (job->state.assigned.empty())
       job->state.assigned = job->state.queue;
