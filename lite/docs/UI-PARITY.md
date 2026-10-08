@@ -8,7 +8,12 @@ External profiles default off. Live refresh requires the user's explicit setting
 
 The ten-step tour and editable tips now use the reference parser format and Tango expressions, with safe native workflow guidance. Descriptor generation, editing, side-effect-free preview, confirmation and reload are tested against disposable missing/invalid descriptors.
 
-Remaining work includes the original project/remote/no-clone gates, complete global/unassigned batch handoff and draft-generation controls, complete contributor legend and function list, hover bubbles, full helper spotlight/update/report overlays and automatic MCP client registration, portable update application, and complete independent-client/provider protocol comparisons. Native controls, dock composition, background alignment, animation positions and confirmation screens still need side-by-side visual checks. Arbitrary DPI and large-database performance remain unverified.
+Remaining work includes complete reference composition for Controller and Viewer,
+helper spotlight/update/report overlays, automatic MCP client registration,
+portable update application, and independent-client/provider protocol comparisons.
+Native controls, dock composition, background alignment, animation positions and
+confirmation screens still need side-by-side visual checks. Arbitrary DPI and
+large-database performance remain unverified.
 
 Automatic pushing conflicts with the requested mandatory outgoing-commit preview. It stays disabled. Port-only protections and protected asset preservation also take precedence over unsafe reference behavior. These are explicit product constraints, not missing checks to bypass.
 
@@ -31,3 +36,16 @@ The native project title now opens a remembered local-project menu. Selecting a 
 The Viewer now includes a selectable function roster with the original 500-row cap and six sorting modes. Twenty-four direct original-sort comparisons cover empty/single/mixed lists, stable ties, case and accents. Sort preferences persist, roster selection selects/zooms the target, and the GUI test checks contributor/draft controls do not overlap. Latest source-inspection requests are queued while an earlier request runs; the GUI regression switches targets during inspection and verifies numbered source for the final target. Original Controller and Viewer reference captures both render without errors. Full Viewer screen composition, complete contributor roster, hover interactions and unusual locale behavior remain open.
 
 0.15.0 adds remote descriptor import, remembered remote/local project selection, a no-checkout landing screen and published viewer-only mode. Native GUI coverage verifies no network at landing, no Git checkout/Fleet/MCP, explicit published loading, and disabled assignment including the keyboard shortcut. Automatic registry discovery, ZIP import and automatic post-clone project switching remain open; this is not a full parity claim.
+
+The 0.16.0 source checkpoint adds a complete destination/preview/progress/cancel/
+clone-and-open flow, opt-in startup registry discovery, public descriptor warming
+and 24-hour offline fallback, and native stored/DEFLATE ZIP import. Backend tests
+cover discovery and credential isolation; disposable ZIP tests cover valid import
+and adversarial path/content cases. Native window tests cover clone completion,
+global batch handoff, local report preview/save and fresh/stale published caching.
+Controller details include lifetime/session statistics, queue edge controls and
+per-agent durable logs. Viewer includes a contributor strip and metadata hover.
+Draft generation uses isolated worktrees. MCP client templates and the native
+stdio bridge have transport integration tests. These additions supersede earlier
+unfinished feature notes, but do not establish exact full-screen parity or real
+provider/client interoperability. Reproducible 0.16.0 packaging remains pending.

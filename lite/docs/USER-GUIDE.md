@@ -50,6 +50,29 @@ Viewer color and contributor controls are independent of the grouping layout. Ch
 
 ## Remote projects and viewer-only mode
 
+**Import project ZIP** accepts a stored/DEFLATE ZIP with a valid `tangos.json`,
+including GitHub archives with one enclosing folder. Pick the archive and parent
+folder, review the complete file list, then confirm. The destination must be new.
+Import initializes Git and remembers the project; files remain untracked until
+you explicitly review and commit them. No archive script executes. ZIP64,
+encrypted archives, symlinks, path traversal, case collisions, protected assets,
+credential content, archives over 128 MiB, files over 16 MiB, and expanded content
+over 256 MiB are refused. Failed imports retain their partial folder for inspection.
+
+Remote discovery uses your **projects.registry** connection. Set its URL to your
+project registry (the Console reference uses `https://tangos.dev/api/projects`),
+method GET, and enable it. In `connections.json`, set
+`"allowDescriptorDownloads": true` (or check **Allow public GitHub descriptor downloads**) on that profile to permit fetching public
+GitHub descriptors. Choose **Discover remote projects** in the project menu,
+then choose a discovered project to download its descriptor and open Viewer.
+Registry credentials are never forwarded to GitHub. Valid descriptors are cached
+for 24 hours; an offline refresh preserves the previous descriptor and projects.
+Discovery preserves local checkout paths and does not remove remembered entries.
+Check **Allow automatic leases / project discovery** on `projects.registry` to
+refresh the registry and warm descriptors at startup. Both automatic access and
+descriptor downloads are opt-in. Cancellation stops warming between requests;
+each in-flight HTTP request retains the bounded network timeout.
+
 Open the project title menu (or Choose a project on first launch), choose **Add remote project**, and select a downloaded `tangos.json` descriptor. The project is remembered in `projects.json`; `active_project` in `settings.ini` restores it next launch. You do not need to clone it to view published progress.
 
 The landing screen opens without a network request. Choose **Open Chaos Viewer** to load the descriptor's published database. If the project uses a different endpoint or needs credentials, configure your own `atlas.live` profile in **Connections**, enable it, and reload published data. Credentials belong in your environment or the encrypted local vault. Nobody else's API key is included.

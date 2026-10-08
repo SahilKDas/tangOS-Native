@@ -47,9 +47,11 @@ enum {
   REPOSITORY_TAB,
   TOOLBOX,
   PROJECT_MENU,
-  SELECT_PROJECT
+  SELECT_PROJECT,
+  DISCOVER_PROJECTS
 };
 bool workspaceReady = false, workspaceRemote = false;
+bool discoveryPending = false;
 bool repositoryView = false;
 bool toolboxOpen = false;
 HWND themeCombo, minimizeButton, maximizeButton, closeButton, projectButton;
@@ -189,7 +191,7 @@ std::string resourceText(int id) {
 }
 void about() {
   reviewDialog(
-      "TangOS Lite 0.15.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
+      "TangOS Lite 0.16.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
       "for checks and Git; Repository for status.\nAlways read AGENTS.md and review "
       "changes before publication.\n\n" +
           resourceText(204) + "\n\nMinGW-w64 libwinpthread\n" + resourceText(202) +
@@ -561,7 +563,7 @@ void paintChrome(HDC dc, int w, int h) {
     skin::label(dc, L"Repository status", rail + 16, 345, 308, 24, 14, true);
   skin::label(dc, L"Port-only  ·  Review before push", rail + 16, h - 139, 300, 23, 12, true, true);
   skin::mascot(dc, w - 137, h - 127, 96);
-  skin::label(dc, L"v0.15.0", w - 74, h - 27, 60, 18, 10, false, true);
+  skin::label(dc, L"v0.16.0", w - 74, h - 27, 60, 18, 10, false, true);
 }
 void snapshot(const fs::path &path) {
   RECT rect;
@@ -649,6 +651,55 @@ void browse() {
     d->Release();
   }
 }
+fs::path chooseImportPath(const wchar_t *title, bool folder) {
+  IFileDialog *dialog = nullptr;
+  if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                              IID_PPV_ARGS(&dialog))))
+    throw std::runtime_error("Cannot open the project import picker");
+  dialog->SetTitle(title);
+  if (folder) {
+    DWORD options = 0;
+    dialog->GetOptions(&options);
+    dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+  } else {
+    COMDLG_FILTERSPEC filter[] = {{L"Project ZIP", L"*.zip"}};
+    dialog->SetFileTypes(1, filter);
+  }
+  fs::path chosen;
+  if (SUCCEEDED(dialog->Show(window))) {
+    IShellItem *item = nullptr;
+    if (SUCCEEDED(dialog->GetResult(&item))) {
+      PWSTR path = nullptr;
+      if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+        chosen = path;
+        CoTaskMemFree(path);
+      }
+      item->Release();
+    }
+  }
+  dialog->Release();
+  return chosen;
+}
+void importProjectZip() {
+  auto archive = chooseImportPath(L"Import project from ZIP", false);
+  if (archive.empty())
+    return;
+  auto parent = chooseImportPath(L"Choose parent folder for the new project", true);
+  if (parent.empty())
+    return;
+  auto destination = parent / archive.stem();
+  start([archive, destination] {
+    Backend backend(repo, dataDir, settings, {}, requestHttp, &runner, output);
+    Json args{{"archive", utf8(archive.wstring())}, {"destination", utf8(destination.wstring())}};
+    auto preview = backend.invoke("projects.importZip", args);
+    if (!approve("Import into a new folder; no archive scripts will run.\n" + preview.dump(2)))
+      return;
+    args["confirmation"] = preview.at("confirmation");
+    auto result = backend.invoke("projects.importZip", args);
+    output(result.at("notice").get<std::string>() + "\n");
+    openProjectState(result.at("id").get<std::string>());
+  });
+}
 void projectMenu() {
   if (consoleUI && consoleUI->running())
     throw std::runtime_error("Stop agents before switching repositories");
@@ -662,8 +713,6 @@ void projectMenu() {
     if (!cloned)
       title += " · viewer only";
     auto flags = MF_STRING | (entry.value("active", false) ? MF_CHECKED : 0);
-    if (!cloned && !entry.contains("descriptor"))
-      flags |= MF_GRAYED;
     AppendMenuW(menu, flags, 1 + ids.size(), wide(title).c_str());
     ids.push_back(id);
   }
@@ -671,6 +720,8 @@ void projectMenu() {
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(menu, MF_STRING, 10000, L"Open another local repository…");
   AppendMenuW(menu, MF_STRING, 10001, L"Add remote project (tangos.json)…");
+  AppendMenuW(menu, MF_STRING, 10002, L"Discover remote projects…");
+  AppendMenuW(menu, MF_STRING, 10003, L"Import project ZIP…");
   RECT bounds;
   GetWindowRect(projectButton, &bounds);
   auto selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, bounds.left, bounds.bottom, 0,
@@ -680,8 +731,73 @@ void projectMenu() {
     browse();
   else if (selected == 10001)
     importRemoteProject();
-  else if (selected > 0 && selected <= ids.size())
-    selectProject(ids[selected - 1]);
+  else if (selected == 10003)
+    importProjectZip();
+  else if (selected == 10002)
+    start([] {
+      Backend backend(repo, dataDir, settings);
+      auto args = Json::object();
+      auto preview = backend.invoke("projects.discover", args);
+      args["confirmation"] = preview.at("confirmation");
+      auto result = backend.invoke("projects.discover", args);
+      output(result.dump(2) + "\n");
+    });
+  else if (selected > 0 && selected <= ids.size()) {
+    auto id = ids[selected - 1];
+    auto entry = Backend(repo, dataDir, settings).invoke("projects.get", {{"id", id}});
+    if (!entry.contains("descriptor") && entry.value("repository", std::string()).empty())
+      start([id] {
+        Backend backend(repo, dataDir, settings);
+        Json args{{"id", id}};
+        auto preview = backend.invoke("projects.download", args);
+        args["confirmation"] = preview.at("confirmation");
+        auto result = backend.invoke("projects.download", args);
+        if (result.contains("warning"))
+          output(result["warning"].get<std::string>() + "\n");
+        openProjectState(id);
+      });
+    else
+      selectProject(id);
+  }
+}
+void automaticDiscovery() {
+  if (smoke)
+    return;
+  if (busy) {
+    discoveryPending = true;
+    return;
+  }
+  auto profiles = Backend(repo, dataDir, settings).invoke("connections.get");
+  if (!profiles.contains("projects.registry"))
+    return;
+  auto profile = profiles["projects.registry"];
+  if (!profile.value("enabled", false) || !profile.value("automatic", false))
+    return;
+  start([profile] {
+    Backend backend(repo, dataDir, settings);
+    Json args = Json::object();
+    auto preview = backend.invoke("projects.discover", args);
+    args["confirmation"] = preview.at("confirmation");
+    auto result = backend.invoke("projects.discover", args);
+    output("Refreshed remote project registry.\n");
+    if (profile.value("allowDescriptorDownloads", false))
+      for (auto &entry : result.at("projects")) {
+        if (runner.isCancelled())
+          break;
+        if (entry.value("cloned", false))
+          continue;
+        try {
+          Json download{{"id", entry.at("id")}};
+          auto ticket = backend.invoke("projects.download", download);
+          download["confirmation"] = ticket.at("confirmation");
+          auto cached = backend.invoke("projects.download", download);
+          if (cached.contains("warning"))
+            output(cached["warning"].get<std::string>() + "\n");
+        } catch (const std::exception &error) {
+          output(std::string(error.what()) + "\n");
+        }
+      }
+  });
 }
 LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   switch (m) {
@@ -955,6 +1071,9 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case PROJECT_MENU:
           projectMenu();
           break;
+        case DISCOVER_PROJECTS:
+          automaticDiscovery();
+          break;
         case BROWSE:
           if (consoleUI && consoleUI->running())
             throw std::runtime_error("Stop fleet runs before switching repositories");
@@ -1089,6 +1208,10 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (worker.joinable())
       worker.join();
     busy = false;
+    if (discoveryPending) {
+      discoveryPending = false;
+      PostMessageW(h, WM_COMMAND, DISCOVER_PROJECTS, 0);
+    }
     InvalidateRect(h, nullptr, FALSE);
     EnableWindow(runButton, TRUE);
     EnableWindow(actionButton, TRUE);
@@ -1289,6 +1412,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
       PostMessageW(h, WM_COMMAND, SELECT_PROJECT, 0);
     else if (!smoke && !settings.repository.empty())
       PostMessageW(h, WM_COMMAND, SELECT, 0);
+    if (!smoke)
+      PostMessageW(h, WM_COMMAND, DISCOVER_PROJECTS, 0);
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
       if (!IsDialogMessageW(h, &msg)) {

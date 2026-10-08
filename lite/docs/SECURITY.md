@@ -85,3 +85,21 @@ Source reads relax only the port-only editing restriction; all asset, credential
 ## Remote viewer boundary (0.15.0)
 
 Remote descriptors are validated before registration. Opening a project writes only a confined metadata cache (`tangos.json` and a viewer-only marker), never clones or executes descriptor tools. Registry and active selection are human-readable local files. Published reads begin only when the user opens/reloads Viewer; enabled connection profiles and local credentials remain user-controlled. Remote windows create no Fleet or MCP server. Tool execution, Git state changes and keyboard/mouse work assignment are blocked in viewer-only mode. The existing clone service retains preview, confirmation, cancellation and full logs. A remote descriptor is still untrusted configuration: choosing a local checkout later does not sandbox its scripts.
+
+## Discovery and archive import (0.16.0)
+
+Registry discovery requires the user's enabled `projects.registry` connection.
+Automatic startup discovery requires its separate `automatic` opt-in. Public
+GitHub descriptor downloads require `allowDescriptorDownloads`; registry secrets
+are not forwarded to that host. A failed refresh retains cached project data.
+Downloaded descriptors are validated, credential-screened and limited to 1 MiB.
+
+ZIP import validates the central directory, file boundaries, CRCs, bounded
+DEFLATE output and all file contents before creating a new destination. It rejects
+traversal, device/alternate-stream names, Git metadata, links, duplicate paths,
+file/directory collisions, protected assets and recognized credential content.
+It does not execute imported scripts, stage files, or make an initial commit.
+Importing fresh source files is distinct from repairing `src/`: subsequent
+port-only edits, commits and pushes retain the existing source protections.
+Git initialization uses an empty hooks path. A failure after extraction retains
+the new folder for inspection; it never recursively deletes user data.

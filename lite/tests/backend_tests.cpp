@@ -76,6 +76,65 @@ int main() {
                loadDescriptor(viewPath).title == "Backend fixture",
            "remote project opens a confined metadata-only view without cloning");
     expect(requests == 0, "project registration and opening send no external requests");
+    {
+      auto discoveryData = dir / "discovery";
+      fs::create_directories(discoveryData);
+      write(discoveryData / "connections.json",
+            Json{{"projects.registry",
+                  {{"enabled", true},
+                   {"allowDescriptorDownloads", true},
+                   {"url", "https://registry.example.invalid/projects"},
+                   {"keyEnv", "USER_KEY"}}}}
+                .dump());
+      int descriptorRequests = 0;
+      bool offline = false;
+      Backend discovery(
+          repo, discoveryData, settings, {{"USER_KEY", "local-fixture-secret"}},
+          [&](auto &url, auto &, auto &, auto &headers) {
+            if (offline)
+              return HttpResponse{503, "offline"};
+            if (url == "https://registry.example.invalid/projects") {
+              expect(headers.at("Authorization") == "Bearer local-fixture-secret",
+                     "registry uses only user-owned credentials");
+              return HttpResponse{
+                  200, Json{{"projects",
+                             Json::array({{{"id", "remote-discovered"},
+                                           {"title", "Published project"},
+                                           {"github", "https://github.com/fixture/project.git"}}})}}
+                           .dump()};
+            }
+            ++descriptorRequests;
+            expect(url == "https://raw.githubusercontent.com/fixture/project/HEAD/tangos.json" &&
+                       headers.empty(),
+                   "descriptor URL derived without forwarding registry secrets");
+            return HttpResponse{200, desc.dump()};
+          });
+      auto run = [&](const std::string &method, Json args = Json::object()) {
+        auto preview = discovery.invoke(method, args);
+        args["confirmation"] = preview.at("confirmation");
+        return discovery.invoke(method, args);
+      };
+      auto preview = discovery.invoke("projects.discover");
+      expect(descriptorRequests == 0 && !fs::exists(discoveryData / "projects.json"),
+             "discovery preview makes no external request or registry changes");
+      expect(run("projects.discover").at("discovered") == 1,
+             "registry discovery merges remote project");
+      Json target{{"id", "remote-discovered"}};
+      expect(!run("projects.download", target).at("cached").get<bool>() && descriptorRequests == 1,
+             "download and validate remote descriptor");
+      expect(run("projects.download", target).at("cached") == true && descriptorRequests == 1,
+             "24 hour fresh descriptor cache makes no network request");
+      offline = true;
+      target["force"] = true;
+      expect(run("projects.download", target).at("stale") == true,
+             "offline refresh preserves descriptor and reports stale cache");
+      reject([&] { run("projects.discover"); }, "offline registry refresh reports failure");
+      expect(discovery.invoke("projects.list").size() == 1,
+             "offline registry never discards remembered projects");
+      auto opened = run("projects.open", {{"id", "remote-discovered"}});
+      expect(opened.at("cloned") == false && opened.at("descriptor") == desc,
+             "downloaded descriptor opens in viewer-only mode without a checkout");
+    }
     reject(
         [&] {
           confirmed("projects.register", {{"id", "remote\nport_only=false"}, {"descriptor", desc}});

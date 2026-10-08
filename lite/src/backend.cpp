@@ -3,6 +3,7 @@
 #include "atlas_layout.h"
 #include "viewer.h"
 #include "batches.h"
+#include "archive.h"
 #include <numeric>
 #include "repository.h"
 #include <regex>
@@ -338,7 +339,8 @@ Backend::Backend(fs::path repo, fs::path data, Settings prefs,
   fs::create_directories(directory);
 }
 bool Backend::mutation(const std::string &m, const Json &) {
-  return m == "projects.open" || m == "projects.register" || m == "descriptor.write" ||
+  return m == "projects.importZip" || m == "projects.discover" || m == "projects.download" ||
+         m == "projects.open" || m == "projects.register" || m == "descriptor.write" ||
          m == "preferences.set" || m == "connections.set" || m == "git.action" ||
          m == "tools.run" || m == "reports.export" || m == "bug.report" || m == "stats.clear" ||
          m == "network.write" || m == "queue.adopt" || m == "git.clone" || m == "git.backup" ||
@@ -351,19 +353,20 @@ bool enabledTool(const Json &prefs, const std::string &id) {
 }
 Json Backend::catalog() {
   return Json::array(
-      {"projects.list",    "projects.register", "projects.open",   "descriptor.preview",
-       "descriptor.write", "preferences.get",   "preferences.set", "connections.get",
-       "connections.set",  "network.read",      "network.write",   "atlas.load",
-       "atlas.source",     "atlas.history",     "claims.read",     "preflight",
-       "git.status",       "git.syncPreview",   "git.sync",        "git.action",
-       "git.clone",        "git.backup",        "git.discard",     "tools.list",
-       "tools.run",        "stats.get",         "stats.clear",     "reports.list",
-       "reports.export",   "queue.adopt",       "policy.classify", "policy.adaptive",
-       "policy.pool",      "policy.statistics", "policy.layout",   "policy.color",
-       "policy.batches",   "policy.source",     "policy.usage",    "guide.parse",
-       "guide.tour",       "guide.tips",        "projects.get",    "github.credits",
-       "atlas.cosmetics",  "atlas.counts",      "atlas.progress",  "atlas.live",
-       "update.check",     "bug.report",        "harvest.list"});
+      {"projects.importZip", "projects.discover", "projects.download",  "projects.list",
+       "projects.register",  "projects.open",     "descriptor.preview", "descriptor.write",
+       "preferences.get",    "preferences.set",   "connections.get",    "connections.set",
+       "network.read",       "network.write",     "atlas.load",         "atlas.source",
+       "atlas.history",      "claims.read",       "preflight",          "git.status",
+       "git.syncPreview",    "git.sync",          "git.action",         "git.clone",
+       "git.backup",         "git.discard",       "tools.list",         "tools.run",
+       "stats.get",          "stats.clear",       "reports.list",       "reports.export",
+       "queue.adopt",        "policy.classify",   "policy.adaptive",    "policy.pool",
+       "policy.statistics",  "policy.layout",     "policy.color",       "policy.batches",
+       "policy.source",      "policy.usage",      "guide.parse",        "guide.tour",
+       "guide.tips",         "projects.get",      "github.credits",     "atlas.cosmetics",
+       "atlas.counts",       "atlas.progress",    "atlas.live",         "update.check",
+       "bug.report",         "harvest.list"});
 }
 Json Backend::invoke(const std::string &m, Json a) {
   HANDLE lock = CreateFileW((directory / "backend.lock").c_str(),
@@ -399,9 +402,20 @@ Json Backend::invoke(const std::string &m, Json a) {
     for (auto name : {"connections.json", "preferences.json", "projects.json"})
       if (fs::exists(directory / name))
         baseline += read(directory / name);
+    if (m == "projects.importZip") {
+      auto archive = fs::u8path(a.at("archive").get<std::string>());
+      auto destination = fs::u8path(a.at("destination").get<std::string>());
+      if (!fs::is_regular_file(archive) || fs::file_size(archive) > 128 * 1024 * 1024 ||
+          !destination.is_absolute() || fs::exists(destination))
+        throw std::runtime_error(
+            "Choose a ZIP under 128 MiB and an absolute new destination folder");
+      baseline += sha256File(archive);
+    }
     baseline = fingerprint(baseline);
     if (ticket.empty()) {
       Json details = Json::object();
+      if (m == "projects.importZip")
+        details = inspectProjectZip(fs::u8path(a.at("archive").get<std::string>()), settings);
       if (m == "git.action") {
         Runner r;
         Repository repo(r, repository, settings);
@@ -947,6 +961,124 @@ Json Backend::execute(const std::string &m, const Json &a) {
     prefs.merge_patch(a);
     saveJson(directory / "preferences.json", prefs);
     return prefs;
+  }
+  if (m == "projects.importZip") {
+    auto destination = fs::u8path(a.at("destination").get<std::string>());
+    auto result =
+        extractProjectZip(fs::u8path(a.at("archive").get<std::string>()), destination, settings);
+    Runner local;
+    auto &runner = processRunner ? *processRunner : local;
+    auto log = directory / "logs" / ("zip-import-" + uniqueId() + ".log");
+    auto init = runner.run({{"git", "-c", "core.hooksPath=", "init", "-b", "main"}, destination},
+                           progressSink, log);
+    if (init.code != 0)
+      throw std::runtime_error("ZIP extracted but Git initialization failed; inspect " +
+                               utf8(log.wstring()));
+    auto descriptor = loadDescriptor(destination);
+    auto id = "local:" + fingerprint(utf8(fs::weakly_canonical(destination).wstring()));
+    execute("projects.register", {{"id", id},
+                                  {"repository", utf8(destination.wstring())},
+                                  {"descriptor", descriptor.document}});
+    result["path"] = utf8(destination.wstring());
+    result["id"] = id;
+    result["log"] = utf8(log.wstring());
+    result["notice"] =
+        "Imported files are untracked. Preview and review your initial commit before publishing.";
+    return result;
+  }
+  if (m == "projects.discover") {
+    auto result = execute("network.read", {{"connection", "projects.registry"}});
+    if (!result.value("ok", false))
+      throw std::runtime_error("Registry unavailable; cached projects remain available");
+    auto payload = result.at("data");
+    auto rows = payload.is_array() ? payload : payload.value("projects", Json::array());
+    if (!rows.is_array() || rows.size() > 1000)
+      throw std::runtime_error("Registry must contain at most 1000 projects");
+    auto list = fileJson(directory / "projects.json", Json::array());
+    std::set<std::string> ids;
+    for (auto &row : rows) {
+      if (!row.is_object())
+        throw std::runtime_error("Invalid registry row");
+      auto id = row.value("id", std::string());
+      if (id.empty())
+        continue;
+      if (id.size() > 4096 || id.find_first_of("\r\n") != id.npos || id.find('\0') != id.npos ||
+          !ids.insert(id).second)
+        throw std::runtime_error("Invalid or duplicate registry id");
+      Json entry{{"id", id}};
+      for (auto &known : list)
+        if (known.at("id") == id)
+          entry = known;
+      for (auto key : {"title", "github", "tagline"})
+        if (row.contains(key) && !row[key].is_null()) {
+          auto value = row.at(key).get<std::string>();
+          if (!value.empty())
+            entry[key] = value;
+        }
+      if (row.contains("descriptor")) {
+        if (row["descriptor"].dump().size() > 1024 * 1024)
+          throw std::runtime_error("Registry descriptor exceeds 1 MiB");
+        auto parsed = parseDescriptor(row["descriptor"].dump());
+        entry["descriptor"] = parsed.document;
+        entry["title"] = parsed.title;
+        entry["descriptorAt"] = std::time(nullptr);
+      }
+      bool found = false;
+      for (auto &known : list)
+        if (known.at("id") == id) {
+          known = entry;
+          found = true;
+        }
+      if (!found)
+        list.push_back(entry);
+    }
+    noCredentials(list);
+    saveJson(directory / "projects.json", list);
+    return {{"discovered", ids.size()}, {"projects", execute("projects.list", {})}};
+  }
+  if (m == "projects.download") {
+    auto profiles = fileJson(directory / "connections.json");
+    if (!profiles.contains("projects.registry") ||
+        !profiles["projects.registry"].value("enabled", false) ||
+        !profiles["projects.registry"].value("allowDescriptorDownloads", false))
+      throw std::runtime_error(
+          "Enable projects.registry and allowDescriptorDownloads locally first");
+    auto list = fileJson(directory / "projects.json", Json::array());
+    for (auto &entry : list) {
+      if (entry.at("id") != a.at("id"))
+        continue;
+      auto now = std::time(nullptr);
+      auto at = entry.value("descriptorAt", int64_t(0));
+      if (entry.contains("descriptor") && !a.value("force", false) && at <= now && now - at < 86400)
+        return {{"cached", true}, {"project", entry}};
+      try {
+        auto github = entry.value("github", std::string());
+        std::smatch match;
+        if (!std::regex_match(
+                github, match,
+                std::regex(
+                    R"(^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$)")))
+          throw std::runtime_error(
+              "Descriptor needs a credential-free GitHub HTTPS repository URL");
+        auto url = "https://raw.githubusercontent.com/" + match[1].str() + "/" + match[2].str() +
+                   "/HEAD/tangos.json";
+        auto response = transport(url, "GET", "", {});
+        if (response.status != 200 || response.body.size() > 1024 * 1024)
+          throw std::runtime_error("Descriptor download failed or exceeds 1 MiB");
+        auto parsed = parseDescriptor(response.body);
+        noCredentials(parsed.document);
+        entry["descriptor"] = parsed.document;
+        entry["title"] = parsed.title;
+        entry["descriptorAt"] = now;
+        saveJson(directory / "projects.json", list);
+        return {{"cached", false}, {"project", entry}};
+      } catch (const std::exception &error) {
+        if (!entry.contains("descriptor"))
+          throw;
+        return {{"cached", true}, {"stale", true}, {"warning", error.what()}, {"project", entry}};
+      }
+    }
+    throw std::runtime_error("Unknown registered project");
   }
   if (m == "projects.list") {
     auto rows = fileJson(directory / "projects.json", Json::array());

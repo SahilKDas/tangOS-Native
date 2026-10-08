@@ -1,5 +1,23 @@
 use tiny_skia::*;
 
+// ZIP uses the already present native DEFLATE implementation. Bounds are supplied
+// by the validated central directory; no archive data is executed.
+#[no_mangle]
+pub unsafe extern "C" fn tangos_inflate(
+    input: *const u8, input_len: usize, output: *mut u8, output_len: usize,
+) -> i32 {
+    if input.is_null() || output.is_null() || input_len > 128 * 1024 * 1024 ||
+       output_len > 16 * 1024 * 1024 { return -1; }
+    let compressed = std::slice::from_raw_parts(input, input_len);
+    match miniz_oxide::inflate::decompress_to_vec_with_limit(compressed, output_len.max(1)) {
+        Ok(bytes) if bytes.len() == output_len => {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), output, output_len);
+            0
+        }
+        _ => -1,
+    }
+}
+
 fn color(c: u32) -> Color {
     Color::from_rgba8((c >> 16) as u8, (c >> 8) as u8, c as u8, (c >> 24) as u8)
 }

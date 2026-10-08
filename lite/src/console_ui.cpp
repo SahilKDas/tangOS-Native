@@ -595,7 +595,7 @@ struct ConsoleUI::Impl {
       button("Git", GITTOOLS, 178, height - 48, 56);
       button("Tango", GUIDE, 242, height - 48, 60);
       button("Batches", BATCHES, 310, height - 48, 76);
-      button("Help / updates", SUPPORT, 394, height - 48, 132);
+      button("Help", SUPPORT, 394, height - 48, 94);
       button(mcp && mcp->state().value("running", false) ? "MCP: ON" : "MCP: OFF", OPEN_MCP,
              cw - 240, 16, 108);
       if (controllerNeedsRail()) {
@@ -794,7 +794,8 @@ struct ConsoleUI::Impl {
       y += 40;
       for (auto entry : std::vector<std::pair<std::string, std::string>>{
                {"Enabled", "Enable this connection"},
-               {"Automatic", "Allow automatic remote leases"}}) {
+               {"Automatic", "Allow automatic leases / project discovery"},
+               {"Descriptors", "Allow public GitHub descriptor downloads"}}) {
         profileFields[entry.first] =
             control(L"BUTTON", entry.second, 0, 214, y, cw - 232, 30, BS_AUTOCHECKBOX);
         y += 38;
@@ -1568,6 +1569,8 @@ struct ConsoleUI::Impl {
                  it == methods.end() ? 0 : it - methods.begin(), 0);
     SendMessageW(profileFields["Enabled"], BM_SETCHECK, c.value("enabled", false), 0);
     SendMessageW(profileFields["Automatic"], BM_SETCHECK, c.value("automatic", false), 0);
+    SendMessageW(profileFields["Descriptors"], BM_SETCHECK,
+                 c.value("allowDescriptorDownloads", false), 0);
     setText(profileFields["Template"], c.value("bodyTemplate", Json::object()).dump(2));
   }
   void requestInspection(size_t index) {
@@ -2457,6 +2460,8 @@ struct ConsoleUI::Impl {
       c["keyPrefix"] = text(profileFields["Key prefix"]);
       c["enabled"] = SendMessageW(profileFields["Enabled"], BM_GETCHECK, 0, 0) == BST_CHECKED;
       c["automatic"] = SendMessageW(profileFields["Automatic"], BM_GETCHECK, 0, 0) == BST_CHECKED;
+      c["allowDescriptorDownloads"] =
+          SendMessageW(profileFields["Descriptors"], BM_GETCHECK, 0, 0) == BST_CHECKED;
       c["bodyTemplate"] = Json::parse(text(profileFields["Template"]));
       serviceMethod = "connections.set";
       serviceRequest = connectionProfiles;
