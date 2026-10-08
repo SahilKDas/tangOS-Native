@@ -357,9 +357,9 @@ Json Backend::catalog() {
        "stats.get",         "stats.clear",       "reports.list",       "reports.export",
        "queue.adopt",       "policy.classify",   "policy.adaptive",    "policy.pool",
        "policy.statistics", "policy.layout",     "policy.color",       "policy.batches",
-       "guide.parse",       "guide.tour",        "guide.tips",         "projects.get",
-       "github.credits",    "atlas.cosmetics",   "atlas.counts",       "atlas.progress",
-       "atlas.live",        "update.check",      "harvest.list"});
+       "policy.source",     "guide.parse",       "guide.tour",         "guide.tips",
+       "projects.get",      "github.credits",    "atlas.cosmetics",    "atlas.counts",
+       "atlas.progress",    "atlas.live",        "update.check",       "harvest.list"});
 }
 Json Backend::invoke(const std::string &m, Json a) {
   HANDLE lock = CreateFileW((directory / "backend.lock").c_str(),
@@ -961,6 +961,12 @@ Json Backend::execute(const std::string &m, const Json &a) {
     return {{"entry", updateAgentStats(a.value("entry", Json::object()), a.at("rows"), best)},
             {"best", best}};
   }
+  if (m == "policy.source")
+    return sourceEnvelope(a.at("source").get<std::string>(), a.value("kind", std::string("src")),
+                          a.value("path", std::string()));
+  if (m == "atlas.source" && ((!a.contains("id") && !a.contains("path")) ||
+                              (a.contains("id") && (!a["id"].is_string() || repository.empty()))))
+    return nullptr;
   if (m == "policy.batches") {
     BatchBook book;
     book.restore({{"batches", a.at("batches")}});
@@ -1034,10 +1040,37 @@ Json Backend::execute(const std::string &m, const Json &a) {
   }
   if (m == "atlas.load")
     return fileJson(confinedPath(repository, descriptor.database));
+  if (m == "atlas.source" && a.contains("id")) {
+    if (a.contains("srcPath") && a["srcPath"].is_string() &&
+        !a["srcPath"].get<std::string>().empty()) {
+      try {
+        auto result = execute("atlas.source", {{"path", a["srcPath"]}});
+        return sourceEnvelope(result.at("source").get<std::string>(), "src", a["srcPath"]);
+      } catch (
+          const std::exception &) { /* best-effort fallback; privacy/path guards stay enforced */
+      }
+    }
+    try {
+      auto db = execute("atlas.load", Json::object());
+      for (auto &row : db.value("functions", Json::array()))
+        if (row.contains("id") && row["id"] == a["id"] && row.contains("disasm") &&
+            row["disasm"].is_string() && !row["disasm"].get<std::string>().empty()) {
+          auto text = row["disasm"].get<std::string>();
+          if (!blockedBlob(text).empty())
+            return nullptr;
+          return sourceEnvelope(text, "disasm");
+        }
+    } catch (const std::exception &) {
+    }
+    return nullptr;
+  }
   if (m == "atlas.source") {
     auto path = confinedPath(repository, a.at("path"));
-    auto why = blockedPath(a.at("path"), settings);
-    if (!why.empty() && a.at("path").get<std::string>().rfind("src/", 0) != 0)
+    auto readSettings = settings;
+    readSettings.portOnly = false; // Reading public source does not authorize editing it.
+    auto relative = path.lexically_relative(fs::weakly_canonical(repository)).generic_u8string();
+    auto why = blockedPath(relative, readSettings);
+    if (!why.empty())
       throw std::runtime_error("Protected source path");
     if (fs::file_size(path) > 1024 * 1024)
       throw std::runtime_error("Source exceeds 1 MiB");

@@ -187,12 +187,22 @@ void Fleet::saveLocked() {
                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
     throw std::runtime_error("Cannot save fleet state");
 }
+static std::string agentNameKey(std::string name) {
+  name = trim(name);
+  std::transform(name.begin(), name.end(), name.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return name;
+}
 std::string Fleet::add(AgentSpec spec) {
+  spec.name = trim(spec.name);
   auto job = std::make_shared<Job>();
   job->state.spec = std::move(spec);
   job->state.id = uniqueId();
   parseAgent(agentJson(job->state));
   std::lock_guard<std::mutex> lock(mutex);
+  for (auto &entry : jobs)
+    if (agentNameKey(entry.second->state.spec.name) == agentNameKey(job->state.spec.name))
+      throw std::runtime_error("Agent name already exists; choose a unique name");
   jobs[job->state.id] = job;
   saveLocked();
   return job->state.id;
@@ -202,6 +212,10 @@ void Fleet::configure(const std::string &id, AgentSpec spec) {
   auto j = jobs.at(id);
   if (j->active)
     throw std::runtime_error("Stop agent before changing configuration");
+  spec.name = trim(spec.name);
+  for (auto &entry : jobs)
+    if (entry.first != id && agentNameKey(entry.second->state.spec.name) == agentNameKey(spec.name))
+      throw std::runtime_error("Agent name already exists; choose a unique name");
   auto s = j->state;
   s.spec = std::move(spec);
   parseAgent(agentJson(s));
@@ -742,8 +756,11 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
           job->state.spec.role == "Unassigned"
               ? (job->executionRole.empty() ? std::string("Hard matcher") : job->executionRole)
               : job->state.spec.role;
+      Repository selected(job->runner, repository, settings);
       std::string instructions =
-          "TangOS Lite coordinated agent\nRole: " + executionRole + "\n" + r.agentHandoff() + "\n";
+          "TangOS Lite coordinated agent\nRole: " + executionRole + "\n" + r.agentHandoff() +
+          "\nCurrent selected-checkout coordination instructions (including local updates):\n" +
+          selected.agentHandoff() + "\n";
       auto project = descriptor.document.at("project");
       for (auto field : {"readFirst", "rules", "submitting", "knownWalls", "nearMissNote"})
         instructions += project.value(field, std::string()) + "\n";

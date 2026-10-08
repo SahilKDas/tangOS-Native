@@ -1,11 +1,24 @@
 #include "descriptor.h"
 #include <algorithm>
+#include <cctype>
 #include <set>
 #include <stdexcept>
 namespace lite {
 fs::path confinedPath(const fs::path &root, const std::string &relative) {
+  if (std::any_of(relative.begin(), relative.end(), [](unsigned char c) { return c < 32; }))
+    throw std::runtime_error("Control character in repository path");
+  auto colon = relative.find(':');
+  if (colon != relative.npos && (colon != 1 || !std::isalpha((unsigned char)relative[0]) ||
+                                 relative.find(':', colon + 1) != relative.npos))
+    throw std::runtime_error("Alternate data streams are not repository paths");
+  if (relative.rfind("\\\\?\\", 0) == 0 || relative.rfind("\\\\.\\", 0) == 0)
+    throw std::runtime_error("Device paths are not repository paths");
   auto base = fs::weakly_canonical(root);
-  auto result = fs::weakly_canonical(base / fs::u8path(relative));
+  auto candidate = (base / fs::u8path(relative)).lexically_normal();
+  auto lexical = candidate.lexically_relative(base);
+  if (lexical.empty() || lexical.is_absolute() || *lexical.begin() == "..")
+    throw std::runtime_error("Path escapes repository: " + relative);
+  auto result = fs::weakly_canonical(candidate);
   auto rel = result.lexically_relative(base);
   if (rel.empty() || rel.is_absolute() || (!rel.empty() && *rel.begin() == ".."))
     throw std::runtime_error("Path escapes repository: " + relative);

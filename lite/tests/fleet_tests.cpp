@@ -113,6 +113,10 @@ if __name__=='__main__':main()
     write(repo / "tangos.json", descriptor.dump(2));
     git({"add", "."});
     git({"commit", "-m", "Disposable fleet fixture"});
+    write(repo / "AGENTS.md",
+          read(repo / "AGENTS.md") + "LOCAL_ROOT_RULE: preserve local instructions.\n");
+    fs::create_directories(repo / "port/local");
+    write(repo / "port/local/AGENTS.md", "UNTRACKED_NESTED_RULE: coordinate local work.\n");
     auto layout = squarify({{0, 80}, {1, 120}, {2, 60}}, 0, 0, 800, 600);
     double area = 0;
     for (auto &tile : layout) {
@@ -130,6 +134,10 @@ if __name__=='__main__':main()
     reject([&] { toolCommand(desc, desc.tool("drive"), Json::object(), repo, false); },
            "write gate");
     reject([&] { confinedPath(repo, "../escape"); }, "descriptor cwd confinement");
+    reject([&] { confinedPath(repo, std::string("file\0suffix", 11)); },
+           "embedded NUL path denied");
+    reject([&] { confinedPath(repo, "AGENTS.md:hidden"); }, "alternate data stream denied");
+    reject([&] { confinedPath(repo, R"(\\?\C:\fixture)"); }, "device path denied");
     auto invalid = descriptor;
     invalid["tools"].push_back(invalid["tools"][0]);
     reject([&] { parseDescriptor(invalid.dump()); }, "duplicate tool IDs");
@@ -180,6 +188,13 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       auto first = fleet.add(a);
       a.name = "API B";
       auto second = fleet.add(a);
+      auto duplicate = a;
+      duplicate.name = "  api a  ";
+      reject([&] { fleet.add(duplicate); },
+             "duplicate agent names cannot route clients ambiguously");
+      reject([&] { fleet.configure(second, duplicate); }, "duplicate rename refused");
+      duplicate.name = "   ";
+      reject([&] { fleet.add(duplicate); }, "blank trimmed agent name refused");
       fleet.enqueue(
           first,
           Json::array({{{"id", "one"}, {"name", "one"}, {"module", "port"}, {"claim", nullptr}}}),
@@ -246,6 +261,9 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
                  "saved batch instructions reach actual API driver");
         expect(read(state.prompt).find("NESTED_RULE") != std::string::npos,
                "scoped instructions delivered");
+        expect(read(state.prompt).find("LOCAL_ROOT_RULE") != std::string::npos &&
+                   read(state.prompt).find("UNTRACKED_NESTED_RULE") != std::string::npos,
+               "modified and untracked checkout instructions reach isolated agents");
       }
       expect(!fs::exists(repo / "port/one.txt") && !fs::exists(repo / "port/two.txt"),
              "main checkout untouched by fleet");

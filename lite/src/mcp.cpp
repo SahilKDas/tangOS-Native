@@ -49,8 +49,10 @@ struct McpServer::Impl {
         std::string agent;
         for (auto &s : fleet.snapshot())
           if (s.spec.kind == "mcp" && s.spec.name == name) {
+            if (!agent.empty())
+              throw std::runtime_error(
+                  "Ambiguous MCP agent name; rename duplicate agents in Controller");
             agent = s.id;
-            break;
           }
         if (agent.empty())
           throw std::runtime_error(
@@ -65,7 +67,7 @@ struct McpServer::Impl {
         }
         result = {{"protocolVersion", "2025-03-26"},
                   {"capabilities", {{"tools", Json::object()}}},
-                  {"serverInfo", {{"name", "TangOS Lite"}, {"version", "0.9.0"}}},
+                  {"serverInfo", {{"name", "TangOS Lite"}, {"version", "0.10.0"}}},
                   {"instructions", "Pull next_batch and follow its scoped AGENTS.md instructions. "
                                    "Work only in the assigned worktree."}};
       } else if (method == "ping")

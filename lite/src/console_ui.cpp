@@ -1370,23 +1370,27 @@ struct ConsoleUI::Impl {
       Json r = Json::object();
       try {
         Backend backend(repository, data, prefs, keys);
-        auto path = f.row.value("srcPath", std::string());
-        if (path.empty())
-          path = f.row.value("sourcePath", std::string());
-        if (path.empty())
-          r["source"] = {
-              {"source",
-               f.row.value("disasm",
-                           std::string("No source path is published for this function."))}};
+        auto path = f.row.contains("srcPath") && f.row["srcPath"].is_string()
+                        ? f.row["srcPath"].get<std::string>()
+                        : std::string();
+        if (path.empty() && f.row.contains("sourcePath") && f.row["sourcePath"].is_string())
+          path = f.row["sourcePath"].get<std::string>();
+        auto source = backend.invoke("atlas.source", {{"id", f.id}, {"srcPath", path}});
+        if (source.is_null() && f.row.contains("disasm") && f.row["disasm"].is_string() &&
+            !f.row["disasm"].get<std::string>().empty() &&
+            blockedBlob(f.row["disasm"].get<std::string>()).empty())
+          source = sourceEnvelope(f.row["disasm"].get<std::string>(), "disasm");
+        if (source.is_null())
+          r["source"] = {{"source", "No source or disassembly is available for this function."}};
         else {
-          try {
-            r["source"] = backend.invoke("atlas.source", {{"path", path}});
-          } catch (const std::exception &) {
-            if (f.row.contains("disasm") && f.row["disasm"].is_string())
-              r["source"] = {{"source", f.row["disasm"]}};
-            else
-              throw;
+          std::string text;
+          for (size_t i = 0; i < source.at("lines").size(); ++i) {
+            if (i)
+              text += '\n';
+            text += source.at("lines")[i].get<std::string>();
           }
+          r["source"] = {
+              {"source", text}, {"kind", source.at("kind")}, {"truncated", source.at("truncated")}};
         }
         r["history"] = backend.invoke("atlas.history", f.row);
       } catch (const std::exception &e) {
@@ -2659,6 +2663,9 @@ struct ConsoleUI::Impl {
             r.contains("error")
                 ? r["error"].get<std::string>()
                 : numberedSource(r.value("source", Json::object()).value("source", std::string()));
+        if (r.value("source", Json::object()).value("truncated", false))
+          code += "\n\n[Showing the first 400 lines, matching Console. Open the source file for "
+                  "the remainder.]";
         sourceCache[inspectIndex] = code;
         if (inspectIndex == pickedFunction) {
           inspectText = code;

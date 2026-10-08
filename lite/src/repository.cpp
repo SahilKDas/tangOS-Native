@@ -1,4 +1,5 @@
 #include "repository.h"
+#include "descriptor.h"
 #include <algorithm>
 #include <sstream>
 #include <stdexcept>
@@ -147,7 +148,8 @@ std::string Repository::agentHandoff() {
                     "commit before push. Read scoped AGENTS.md before editing. Use the "
                     "repository's ownership, independent verification and handoff protocol; "
                     "do not duplicate another agent's claim.\n\n";
-  auto allFiles = split(git({"ls-files", "-z"}), '\0');
+  auto allFiles =
+      split(git({"ls-files", "--cached", "--others", "--exclude-standard", "-z"}), '\0');
   std::vector<std::string> files;
   for (const auto &path : allFiles) {
     if (fs::u8path(path).filename() == "AGENTS.md" || path == "notes/agents/README.md")
@@ -156,8 +158,24 @@ std::string Repository::agentHandoff() {
   if (fs::exists(root / "AGENTS.md") &&
       std::find(files.begin(), files.end(), "AGENTS.md") == files.end())
     files.insert(files.begin(), "AGENTS.md");
-  for (auto &p : files)
-    out += "\n--- " + p + " ---\n" + read(root / fs::u8path(p));
+  auto readSettings = settings;
+  readSettings.portOnly = false;
+  size_t instructionBytes = 0;
+  for (auto &p : files) {
+    auto path = confinedPath(root, p);
+    auto relative = path.lexically_relative(fs::weakly_canonical(root)).generic_u8string();
+    if (!blockedPath(relative, readSettings).empty())
+      continue;
+    if (!fs::is_regular_file(path) || fs::file_size(path) > 1024 * 1024)
+      throw std::runtime_error("Repository instruction file exceeds limit: " + p);
+    auto text = read(path);
+    if (!blockedBlob(text).empty())
+      throw std::runtime_error("Protected content in repository instructions: " + p);
+    instructionBytes += text.size();
+    if (instructionBytes > 4 * 1024 * 1024)
+      throw std::runtime_error("Repository instructions exceed 4 MiB total");
+    out += "\n--- " + p + " ---\n" + text;
+  }
   if (files.empty())
     out += "No AGENTS.md found. Establish coordination rules before starting "
            "multiple agents.\n";

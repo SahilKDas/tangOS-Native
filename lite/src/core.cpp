@@ -54,6 +54,8 @@ void write(const fs::path &p, const std::string &s) {
     throw std::runtime_error("Cannot write " + utf8(p.wstring()));
 }
 std::wstring quoteWindows(const std::wstring &s) {
+  if (s.find(L'\0') != s.npos)
+    throw std::runtime_error("Command argument contains NUL");
   std::wstring r = L"\"";
   size_t back = 0;
   for (auto c : s) {

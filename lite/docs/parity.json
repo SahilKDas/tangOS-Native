@@ -207,7 +207,9 @@
       "contract": "atlasSource",
       "state": "partial",
       "evidence": [
-        "Native path-confined source inspector tested; full source cap/shape not compared"
+        "lite/tests/test_source_reference.py: 20 actual original-handler comparisons for 400-line cap, newlines, Unicode, missing source and disassembly fallback",
+        "lite/tests/backend_tests.cpp: readonly public source allowed; normalized excluded-file paths refused",
+        "Local and published-row GUI response supported; live Atlas cache contract remains unverified"
       ],
       "kind": "api"
     },

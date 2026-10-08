@@ -109,6 +109,14 @@ int main() {
            "read source in port-only mode");
     reject([&] { backend.invoke("atlas.source", {{"path", "../secret"}}); },
            "source traversal denied");
+    fs::create_directories(repo / "private");
+    write(repo / "private/local.cpp", "int excluded_fixture=1;\n");
+    reject([&] { backend.invoke("atlas.source", {{"path", "src/../private/local.cpp"}}); },
+           "normalized source path preserves local exclusions");
+    expect(
+        backend.invoke("atlas.source", {{"id", "missing"}, {"srcPath", "src/../private/local.cpp"}})
+            .is_null(),
+        "protected source cannot bypass guard through id lookup");
     fs::create_directories(repo / "config");
     write(repo / "config/match_attempts.jsonl",
           "{\"name\":\"f\",\"module\":\"arm9\",\"addr\":33554432,\"attemptId\":\"a1\"}\ninvalid\n");

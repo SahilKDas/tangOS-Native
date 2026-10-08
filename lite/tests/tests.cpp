@@ -46,6 +46,11 @@ int main() {
     expect(marqueeTiles(fixtureTiles, {60, 40, -50, -30}) == std::vector<size_t>({0, 1}),
            "reverse marquee intersects tiles");
     expect(marqueeTiles(fixtureTiles, {110, 110, 5, 5}).empty(), "marquee outside world");
+    rejects([&] { quoteWindows(std::wstring(L"one\0two", 7)); },
+            "NUL command arguments cannot differ from their preview");
+    auto source = sourceEnvelope("a\r\nb\n", "src", "port/fixture.cpp");
+    expect(source.at("lines") == Json::array({"a", "b", ""}) && source.at("kind") == "src",
+           "source envelope preserves trailing lines and CRLF");
     BatchBook book;
     Json batchRows = Json::array({{{"id", "first"}}, {{"id", "second"}}});
     book.add("batch", "agent", "Fixture", batchRows, 123, "Fixture batch", "User instructions");

@@ -4,6 +4,29 @@
 #include <map>
 #include <sstream>
 namespace lite {
+Json sourceEnvelope(const std::string &source, const std::string &kind, const std::string &path) {
+  Json lines = Json::array();
+  bool truncated = false;
+  size_t begin = 0;
+  while (begin <= source.size()) {
+    if (lines.size() == 400) {
+      truncated = true;
+      break;
+    }
+    auto end = source.find('\n', begin);
+    auto line = source.substr(begin, end == source.npos ? source.size() - begin : end - begin);
+    if (end != source.npos && !line.empty() && line.back() == '\r')
+      line.pop_back();
+    lines.push_back(line);
+    if (end == source.npos)
+      break;
+    begin = end + 1;
+  }
+  Json result = {{"lines", lines}, {"truncated", truncated}, {"kind", kind}};
+  if (kind == "src")
+    result["path"] = path;
+  return result;
+}
 bool claimedTarget(const Json &row) {
   if (!row.contains("claim") || row["claim"].is_null())
     return false;
