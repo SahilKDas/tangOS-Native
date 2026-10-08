@@ -45,7 +45,8 @@ enum {
   THEME,
   CONTROLLER_TAB,
   REPOSITORY_TAB,
-  TOOLBOX
+  TOOLBOX,
+  PROJECT_MENU
 };
 bool workspaceReady = false;
 bool repositoryView = false;
@@ -229,6 +230,19 @@ void selectRepo() {
     repo = r.root;
     settings.repository = utf8(repo.wstring());
     saveSettings(config, settings);
+    Json entry{{"id", settings.repository},
+               {"repository", settings.repository},
+               {"title", utf8(repo.filename().wstring())}};
+    try {
+      entry["title"] = loadDescriptor(repo).title;
+    } catch (...) {
+      // Repositories without a descriptor can still be remembered and set up.
+    }
+    Backend registry(repo, dataDir, settings);
+    // Selecting a local repository authorizes remembering it in local settings.
+    auto preview = registry.invoke("projects.register", entry);
+    entry["confirmation"] = preview.at("confirmation");
+    registry.invoke("projects.register", entry);
     auto s = new std::string(r.status());
     PostMessageW(window, STATE, 0, (LPARAM)s);
   });
@@ -550,6 +564,36 @@ void browse() {
     d->Release();
   }
 }
+void projectMenu() {
+  if (consoleUI && consoleUI->running())
+    throw std::runtime_error("Stop agents before switching repositories");
+  auto projects = Backend(repo, dataDir, settings).invoke("projects.list");
+  HMENU menu = CreatePopupMenu();
+  std::vector<std::string> paths;
+  for (auto &entry : projects) {
+    if (!entry.contains("repository") || !entry["repository"].is_string())
+      continue;
+    auto path = entry["repository"].get<std::string>();
+    auto title = entry.value("title", path);
+    auto flags = MF_STRING | (path == settings.repository ? MF_CHECKED : 0);
+    AppendMenuW(menu, flags, 1 + paths.size(), wide(title).c_str());
+    paths.push_back(path);
+  }
+  if (!paths.empty())
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+  AppendMenuW(menu, MF_STRING, 10000, L"Open another local repository…");
+  RECT bounds;
+  GetWindowRect(projectButton, &bounds);
+  auto selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, bounds.left, bounds.bottom, 0,
+                                 window, nullptr);
+  DestroyMenu(menu);
+  if (selected == 10000)
+    browse();
+  else if (selected > 0 && selected <= paths.size()) {
+    set(repoEdit, paths[selected - 1]);
+    selectRepo();
+  }
+}
 LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   switch (m) {
   case WM_CREATE: {
@@ -561,7 +605,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     titleLabel = control(L"STATIC", L"TangOS Lite   |   native repository workbench", 0);
     repoLabel = control(L"STATIC", L"Repository", 0);
     repoEdit = control(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP);
-    projectButton = control(L"BUTTON", L"Choose a project", WS_TABSTOP, BROWSE);
+    projectButton = control(L"BUTTON", L"Choose a project", WS_TABSTOP, PROJECT_MENU);
     browseButton = control(L"BUTTON", L"Browse...", WS_TABSTOP, BROWSE);
     selectButton = control(L"BUTTON", L"Select", WS_TABSTOP, SELECT);
     refreshButton = control(L"BUTTON", L"Refresh", WS_TABSTOP, REFRESH);
@@ -812,6 +856,9 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
       try {
         switch (id) {
+        case PROJECT_MENU:
+          projectMenu();
+          break;
         case BROWSE:
           if (consoleUI && consoleUI->running())
             throw std::runtime_error("Stop fleet runs before switching repositories");
@@ -931,6 +978,19 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                        "after Git changes.");
     if (smoke) {
       if (smokePhase == 1 && !repo.empty() && !smokeExit) {
+        auto remembered = Backend(repo, dataDir, settings).invoke("projects.list");
+        bool found = false;
+        for (auto &project : remembered)
+          if (project.value("repository", std::string()) == settings.repository &&
+              project.value("title", std::string()) == "Native GUI fixture")
+            found = true;
+        if (!found && fs::exists(repo / "tangos.json")) {
+          try {
+            loadDescriptor(repo);
+            smokeExit = 1;
+          } catch (...) {
+          }
+        }
         if (consoleUI)
           consoleUI->smokeScreens(config.parent_path(), snapshot);
         snapshot(config.parent_path() / "controller.bmp");
