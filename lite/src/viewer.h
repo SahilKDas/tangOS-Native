@@ -24,5 +24,8 @@ public:
 };
 size_t atlasNeighbor(const std::vector<AtlasFunction> &rows, const std::vector<Tile> &tiles,
                      size_t selected, int dx, int dy);
+std::string atlasColor(const Json &row, bool authors, bool nearMiss,
+                       const std::map<std::string, std::string> &aliases = {},
+                       const std::map<std::string, std::string> &colors = {});
 std::string numberedSource(const std::string &source);
 } // namespace lite

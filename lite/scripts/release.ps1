@@ -24,6 +24,10 @@ python "$source/tests/test_preflight_reference.py" --exe "$out/build-a/TangOSLit
 if ($LASTEXITCODE) { throw 'Original preflight comparisons failed' }
 python "$source/tests/test_help_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original help comparisons failed' }
+python "$source/tests/test_layout_reference.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original Atlas geometry comparisons failed' }
+python "$source/tests/test_color_reference.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original Atlas color comparisons failed' }
 
 $a = "$out/build-a/TangOSLite.exe"
 $b = "$out/build-b/TangOSLite.exe"

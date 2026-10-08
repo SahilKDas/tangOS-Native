@@ -211,6 +211,7 @@ struct ConsoleUI::Impl {
   std::vector<Tile> tiles;
   std::string atlasQuery, atlasMode = "ov", atlasFilter = "all", cachedLayout;
   bool liveAtlas = false;
+  std::map<std::string, std::string> atlasAliases, atlasAuthorColors;
   std::atomic<bool> atlasPublished{false};
   std::vector<std::string> retainedCart;
   std::string retainedSelection;
@@ -1357,57 +1358,110 @@ struct ConsoleUI::Impl {
               (moduleFilter.empty() || atlas[i].module == moduleFilter))
             filtered.push_back(i);
         }
-        tiles = atlasLayout(atlas, filtered, w, h, atlasMode);
+        auto aliases = atlasExtras.value("github.credits", Json::object())
+                           .value("keyToLogin", std::map<std::string, std::string>{});
+        tiles = atlasLayout(atlas, filtered, w, h, atlasMode, aliases);
         lod.compute(atlas, tiles, w, h);
         camera.clamp(w, h);
+        atlasAliases = atlasExtras.value("github.credits", Json::object())
+                           .value("keyToLogin", std::map<std::string, std::string>{});
+        std::map<std::string, int> counts;
+        auto totals =
+            atlasExtras.value("atlas.counts", Json::object()).value("totals", Json::object());
+        if (totals.is_object() && !totals.empty()) {
+          for (auto it = totals.begin(); it != totals.end(); ++it)
+            if (it.value().is_number())
+              counts[it.key()] = it.value().get<int>();
+        } else
+          for (const auto &f : atlas)
+            if (f.state == "matched" && f.row.contains("author") && f.row["author"].is_string()) {
+              std::string who = f.row["author"];
+              if (atlasAliases.count(who))
+                who = atlasAliases.at(who);
+              ++counts[who];
+            }
+        std::vector<std::pair<std::string, int>> ranked;
+        for (auto &entry : counts) {
+          auto folded = entry.first;
+          std::transform(folded.begin(), folded.end(), folded.begin(),
+                         [](unsigned char c) { return std::tolower(c); });
+          if (entry.second >= 1 &&
+              (folded.size() < 5 || folded.substr(folded.size() - 5) != "[bot]"))
+            ranked.push_back(entry);
+        }
+        std::stable_sort(ranked.begin(), ranked.end(),
+                         [](auto a, auto b) { return a.second > b.second; });
+        const std::vector<std::string> palette = {"#38bdf8", "#f472b6", "#a78bfa", "#fb923c",
+                                                  "#facc15", "#34d399", "#f87171", "#22d3ee",
+                                                  "#c084fc", "#fbbf24", "#4ade80", "#e879f9"};
+        atlasAuthorColors.clear();
+        auto shared = atlasExtras.value("atlas.cosmetics", Json::object())
+                          .value("colors", std::map<std::string, std::string>{});
+        std::map<std::string, std::string> normalized;
+        for (auto &entry : shared) {
+          auto folded = entry.first;
+          std::transform(folded.begin(), folded.end(), folded.begin(),
+                         [](unsigned char c) { return std::tolower(c); });
+          normalized[folded] = entry.second;
+        }
+        for (size_t i = 0; i < ranked.size(); ++i) {
+          auto who = ranked[i].first;
+          std::string folded = who;
+          std::transform(folded.begin(), folded.end(), folded.begin(),
+                         [](unsigned char c) { return std::tolower(c); });
+          atlasAuthorColors[who] =
+              normalized.count(folded) ? normalized.at(folded) : palette[i % palette.size()];
+        }
         cachedLayout = key;
       }
       int band = lod.update(zoom);
       int saved = SaveDC(dc);
       IntersectClipRect(dc, left, top, left + w, top + h);
-      for (auto tile : tiles) {
+      for (const auto &tile : tiles) {
         int x = left + (int)(tile.x * zoom + panX), y = top + (int)(tile.y * zoom + panY),
             tw = std::max(1, (int)(tile.width * zoom)), th = std::max(1, (int)(tile.height * zoom));
         if (x + tw < left || y + th < top || x > left + w || y > top + h)
           continue;
         auto &f = atlas[tile.index];
-        COLORREF color = f.row.contains("noMatch") ? RGB(168, 50, 74)
-                         : f.row.contains("claim") ? RGB(228, 134, 132)
-                         : f.state == "matched"    ? RGB(63, 196, 95)
-                         : f.state == "near_miss"  ? RGB(234, 179, 8)
-                                                   : RGB(185, 202, 219);
-        if (atlasMode == "author" && f.state == "matched") {
-          uint32_t hash = 2166136261;
-          for (unsigned char c : f.row.value("author", std::string("unattributed"))) {
-            hash ^= c;
-            hash *= 16777619;
-          }
-          color = RGB(80 + (hash & 127), 80 + ((hash >> 8) & 127), 80 + ((hash >> 16) & 127));
+        auto hex = atlasColor(f.row, atlasMode == "author", policy.value("allowNearMiss", true),
+                              atlasAliases, atlasAuthorColors);
+        COLORREF color = RGB(185, 202, 219);
+        if (hex.size() == 7 && hex[0] == '#' &&
+            hex.find_first_not_of("0123456789abcdefABCDEF", 1) == std::string::npos) {
+          auto v = std::stoul(hex.substr(1), nullptr, 16);
+          color = RGB((v >> 16) & 255, (v >> 8) & 255, v & 255);
         }
-        if (atlasExtras.contains("atlas.cosmetics") && f.state == "matched" &&
-            atlasMode == "author") {
-          auto colors = atlasExtras["atlas.cosmetics"].value("colors", Json::object());
-          auto author = f.row.value("author", std::string());
-          if (colors.contains(author) && colors[author].is_string()) {
-            auto hex = colors[author].get<std::string>();
-            if (hex.size() == 7 && hex[0] == '#' &&
-                hex.find_first_not_of("0123456789abcdefABCDEF", 1) == std::string::npos) {
-              auto value = std::stoul(hex.substr(1), nullptr, 16);
-              color = RGB((value >> 16) & 255, (value >> 8) & 255, value & 255);
-            }
-          }
-        }
+        if (f.row.contains("claim") && !f.row["claim"].is_null() && f.row["claim"] != false)
+          color = RGB((int)(GetRValue(color) * .58 + 255 * .42),
+                      (int)(GetGValue(color) * .58 + 90 * .42),
+                      (int)(GetBValue(color) * .58 + 90 * .42));
         HBRUSH brush = (HBRUSH)GetStockObject(DC_BRUSH);
         SetDCBrushColor(dc, color);
         RECT bounds{x, y, x + tw - 1, y + th - 1};
         FillRect(dc, &bounds, brush);
+        if (exemptTarget(f.row)) {
+          int save = SaveDC(dc);
+          IntersectClipRect(dc, bounds.left, bounds.top, bounds.right, bounds.bottom);
+          auto old = SelectObject(dc, GetStockObject(DC_PEN));
+          SetDCPenColor(dc, RGB(216, 140, 157));
+          int vx = std::max(left, x), vy = std::max(top, y), vw = std::min(left + w, x + tw) - vx,
+              vh = std::min(top + h, y + th) - vy;
+          for (int d = -vh; d < vw; d += 8) {
+            MoveToEx(dc, vx + d, vy, nullptr);
+            LineTo(dc, vx + d + vh, vy + vh);
+          }
+          SelectObject(dc, old);
+          RestoreDC(dc, save);
+        }
+
         if (std::find(cart.begin(), cart.end(), tile.index) != cart.end() ||
             tile.index == pickedFunction) {
           SetDCBrushColor(dc, RGB(255, 214, 40));
           FrameRect(dc, &bounds, (HBRUSH)GetStockObject(DC_BRUSH));
         }
         if (tw > 90 && th > 24) {
-          skin::label(dc, wide(band == 1 ? f.module : f.name), x + 4, y + 3, tw - 8, 22, 11, true);
+          skin::label(dc, wide(band == 1 ? (tile.group.empty() ? f.module : tile.group) : f.name),
+                      x + 4, y + 3, tw - 8, 22, 11, true);
           if (atlasExtras.contains("atlas.cosmetics"))
             for (auto &star : atlasExtras["atlas.cosmetics"].value("stars", Json::array()))
               if ((star.value("function", std::string()) == f.name ||
@@ -1442,14 +1496,14 @@ struct ConsoleUI::Impl {
       FillRect(dc, &miniBounds, mb);
       DeleteObject(mb);
       double mw = miniBounds.right - miniBounds.left, mh = miniBounds.bottom - miniBounds.top;
-      for (auto t : tiles) {
+      for (const auto &t : tiles) {
         RECT r{miniBounds.left + (int)(t.x * mw / w), miniBounds.top + (int)(t.y * mh / h),
                miniBounds.left + (int)((t.x + t.width) * mw / w),
                miniBounds.top + (int)((t.y + t.height) * mh / h)};
-        mb = CreateSolidBrush(atlas[t.index].state == "matched" ? RGB(63, 196, 95)
-                                                                : RGB(130, 170, 210));
-        FillRect(dc, &r, mb);
-        DeleteObject(mb);
+        SetDCBrushColor(dc, atlas[t.index].state == "matched"  ? RGB(63, 196, 95)
+                            : exemptTarget(atlas[t.index].row) ? RGB(168, 50, 74)
+                                                               : RGB(185, 202, 219));
+        FillRect(dc, &r, (HBRUSH)GetStockObject(DC_BRUSH));
       }
       auto v = camera.visible(w, h);
       RECT vr{miniBounds.left + (int)(v.x * mw / w), miniBounds.top + (int)(v.y * mh / h),

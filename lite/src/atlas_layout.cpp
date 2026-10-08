@@ -44,7 +44,7 @@ std::vector<Tile> squarify(const std::vector<std::pair<size_t, double>> &items, 
       double rh = sum / w, cx = x;
       for (size_t i = start; i < end; i++) {
         double rw = scaled[i].second / rh;
-        out.push_back({scaled[i].first, cx, y, rw, rh});
+        out.push_back({scaled[i].first, cx, y, rw, rh, {}, -1});
         cx += rw;
       }
       y += rh;
@@ -53,7 +53,7 @@ std::vector<Tile> squarify(const std::vector<std::pair<size_t, double>> &items, 
       double rw = sum / h, cy = y;
       for (size_t i = start; i < end; i++) {
         double rh = scaled[i].second / rw;
-        out.push_back({scaled[i].first, x, cy, rw, rh});
+        out.push_back({scaled[i].first, x, cy, rw, rh, {}, -1});
         cy += rh;
       }
       x += rw;
@@ -65,32 +65,78 @@ std::vector<Tile> squarify(const std::vector<std::pair<size_t, double>> &items, 
 }
 std::vector<Tile> atlasLayout(const std::vector<AtlasFunction> &functions,
                               const std::vector<size_t> &indices, double w, double h,
-                              const std::string &mode) {
-  std::map<std::string, std::vector<std::pair<size_t, double>>> groups;
+                              const std::string &mode,
+                              const std::map<std::string, std::string> &aliases) {
+  using Items = std::vector<std::pair<size_t, double>>;
+  auto sortItems = [](Items &items) {
+    std::stable_sort(items.begin(), items.end(),
+                     [](auto a, auto b) { return a.second > b.second; });
+  };
+  if (mode == "size") {
+    Items items;
+    for (auto i : indices)
+      items.push_back({i, double(functions.at(i).size)});
+    sortItems(items);
+    auto out = squarify(items, 0, 0, w, h);
+    for (auto &tile : out)
+      tile.groupArea = 0;
+    return out;
+  }
+  struct Group {
+    std::string key;
+    double size = 0;
+    Items items;
+  };
+  std::vector<Group> groups;
   for (auto i : indices) {
-    auto &f = functions.at(i);
-    auto key = mode == "size"     ? "all"
-               : mode == "match"  ? f.state
-               : mode == "author" ? f.row.value("author", std::string("unattributed"))
-                                  : f.module;
-    groups[key].push_back({i, (double)f.size});
+    const auto &f = functions.at(i);
+    std::string key = f.module;
+    if (mode == "match") {
+      key = f.state == "matched"  ? "matched"
+            : exemptTarget(f.row) ? "no match needed"
+            : ((f.row.contains("div") && f.row["div"].is_number()) ||
+               (f.row.contains("srcPath") && f.row["srcPath"].is_string() &&
+                !f.row["srcPath"].get<std::string>().empty()))
+                ? "draft"
+                : "unmatched";
+    } else if (mode == "author") {
+      key = f.state == "matched" ? f.row.value("author", std::string()) : std::string();
+      if (key.empty())
+        key = "unmatched";
+      else if (aliases.count(key))
+        key = aliases.at(key);
+    }
+    auto g =
+        std::find_if(groups.begin(), groups.end(), [&](const Group &g) { return g.key == key; });
+    if (g == groups.end()) {
+      groups.push_back({key, 0, {}});
+      g = std::prev(groups.end());
+    }
+    g->size += f.size;
+    g->items.push_back({i, double(f.size)});
   }
-  std::vector<std::pair<size_t, double>> sizes;
-  std::vector<std::vector<std::pair<size_t, double>>> contents;
-  for (auto &g : groups) {
-    std::sort(g.second.begin(), g.second.end(),
-              [](auto &a, auto &b) { return a.second > b.second; });
-    double total = 0;
-    for (auto &f : g.second)
-      total += f.second;
-    sizes.push_back({contents.size(), total});
-    contents.push_back(g.second);
+  if (mode == "match") {
+    std::vector<std::string> order = {"unmatched", "draft", "no match needed", "matched"};
+    std::stable_sort(groups.begin(), groups.end(), [&](const Group &a, const Group &b) {
+      return std::find(order.begin(), order.end(), a.key) <
+             std::find(order.begin(), order.end(), b.key);
+    });
+  } else
+    std::stable_sort(groups.begin(), groups.end(),
+                     [](const Group &a, const Group &b) { return a.size > b.size; });
+  Items sizes;
+  for (size_t i = 0; i < groups.size(); ++i) {
+    sortItems(groups[i].items);
+    sizes.push_back({i, groups[i].size});
   }
-  std::sort(sizes.begin(), sizes.end(), [](auto &a, auto &b) { return a.second > b.second; });
   std::vector<Tile> out;
-  for (auto &group : squarify(sizes, 0, 0, w, h)) {
-    auto tiles = squarify(contents[group.index], group.x + 1, group.y + 1,
+  for (auto group : squarify(sizes, 0, 0, w, h)) {
+    auto tiles = squarify(groups[group.index].items, group.x + 1, group.y + 1,
                           std::max(0., group.width - 2), std::max(0., group.height - 2));
+    for (auto &tile : tiles) {
+      tile.group = groups[group.index].key;
+      tile.groupArea = group.width * group.height;
+    }
     out.insert(out.end(), tiles.begin(), tiles.end());
   }
   return out;

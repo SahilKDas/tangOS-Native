@@ -1,5 +1,8 @@
 #include "backend.h"
 #include "help.h"
+#include "atlas_layout.h"
+#include "viewer.h"
+#include <numeric>
 #include "repository.h"
 #include <regex>
 #include <set>
@@ -352,9 +355,10 @@ Json Backend::catalog() {
        "git.backup",        "git.discard",       "tools.list",         "tools.run",
        "stats.get",         "stats.clear",       "reports.list",       "reports.export",
        "queue.adopt",       "policy.classify",   "policy.adaptive",    "policy.pool",
-       "policy.statistics", "guide.parse",       "guide.tour",         "guide.tips",
-       "projects.get",      "github.credits",    "atlas.cosmetics",    "atlas.counts",
-       "atlas.progress",    "atlas.live",        "update.check",       "harvest.list"});
+       "policy.statistics", "policy.layout",     "policy.color",       "guide.parse",
+       "guide.tour",        "guide.tips",        "projects.get",       "github.credits",
+       "atlas.cosmetics",   "atlas.counts",      "atlas.progress",     "atlas.live",
+       "update.check",      "harvest.list"});
 }
 Json Backend::invoke(const std::string &m, Json a) {
   HANDLE lock = CreateFileW((directory / "backend.lock").c_str(),
@@ -955,6 +959,26 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto best = a.value("best", Json::object());
     return {{"entry", updateAgentStats(a.value("entry", Json::object()), a.at("rows"), best)},
             {"best", best}};
+  }
+  if (m == "policy.color")
+    return {{"color", atlasColor(a.at("row"), a.value("authors", false), a.value("nearMiss", true),
+                                 a.value("aliases", std::map<std::string, std::string>{}),
+                                 a.value("colors", std::map<std::string, std::string>{}))}};
+  if (m == "policy.layout") {
+    auto rows = parseAtlas(Json{{"functions", a.at("functions")}}.dump());
+    std::vector<size_t> indices(rows.size());
+    std::iota(indices.begin(), indices.end(), 0);
+    auto tiles = atlasLayout(rows, indices, a.at("width").get<double>(),
+                             a.at("height").get<double>(), a.value("mode", std::string("ov")),
+                             a.value("aliases", std::map<std::string, std::string>{}));
+    Json result = Json::array();
+    for (auto &tile : tiles)
+      result.push_back({{"id", rows[tile.index].id},
+                        {"x", tile.x},
+                        {"y", tile.y},
+                        {"width", tile.width},
+                        {"height", tile.height}});
+    return result;
   }
   if (m == "policy.pool") {
     auto rows = parseAtlas(Json{{"functions", a.at("functions")}}.dump());

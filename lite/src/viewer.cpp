@@ -4,6 +4,29 @@
 #include <map>
 #include <sstream>
 namespace lite {
+std::string atlasColor(const Json &row, bool authors, bool nearMiss,
+                       const std::map<std::string, std::string> &aliases,
+                       const std::map<std::string, std::string> &colors) {
+  if (exemptTarget(row))
+    return "#a8324a";
+  bool matched = row.contains("matched") && row["matched"] == true;
+  if (authors) {
+    if (!matched)
+      return "#b9cadb";
+    auto who = row.contains("author") && row["author"].is_string()
+                   ? row["author"].get<std::string>()
+                   : std::string();
+    if (aliases.count(who))
+      who = aliases.at(who);
+    return !who.empty() && colors.count(who) ? colors.at(who) : "#9aa7b5";
+  }
+  if (matched)
+    return "#3fc45f";
+  bool draft = (row.contains("div") && row["div"].is_number()) ||
+               (row.contains("srcPath") && row["srcPath"].is_string() &&
+                !row["srcPath"].get<std::string>().empty());
+  return draft && nearMiss ? "#eab308" : "#b9cadb";
+}
 void AtlasCamera::clamp(double width, double height) {
   zoom = std::isfinite(zoom) ? std::clamp(zoom, 1., 4096.) : 1.;
   x = std::isfinite(x) ? std::clamp(x, width * (1 - zoom), 0.) : 0.;
@@ -46,7 +69,10 @@ void AtlasLod::compute(const std::vector<AtlasFunction> &rows, const std::vector
   std::map<std::string, double> grouped;
   for (auto t : tiles) {
     areas.push_back(t.width * t.height);
-    grouped[rows.at(t.index).module] += t.width * t.height;
+    if (t.groupArea > 0)
+      grouped[t.group] = t.groupArea;
+    else if (t.groupArea < 0)
+      grouped[rows.at(t.index).module] += t.width * t.height;
   }
   auto median = [](std::vector<double> values) {
     if (values.empty())

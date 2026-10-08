@@ -38,3 +38,7 @@ Source checkpoint: a3b8ee2. Portable executable: 5,053,952 bytes (5.054 decimal 
 All four native suites passed. Packaged loopback and instruction-adapter tests, all 388 policy/history/statistics/preflight/help comparisons, and three packaged GUI workflows passed: normal repository/check/log/fleet/Viewer/help workflow plus missing-descriptor and invalid-descriptor recovery. The latter verify scan, editable generation, side-effect-free preview, fixture-only confirmation and validated generated tools. Native tour expression captures and tips navigation were inspected; tour completion persists. Statistics refresh uses an independent worker and retains mandatory independent-proof labeling.
 
 No real API key, paid provider, GitHub write, proprietary compiler or Nintendo data was used. Full parity remains unfinished, as the inventory explicitly reports.
+
+## Atlas geometry/color checkpoint
+
+Native Atlas geometry matches 24 original buildWorld cases covering all four layouts, both orientations, stable ties, nested padding and draft/exempt grouping. Tile colors match 44 original fnColor cases covering status/author modes, aliases, draft visibility and exemptions. Contributor colors honor canonical aliases, career totals and case-insensitive shared palette keys; palette work is cached with layout rather than repeated per frame. No-match hatching and claim tint are now distinct. Four native suites and the packaged GUI repository/status/check/log workflow passed using lite/out/TangOSLite.exe. These changes are not yet a new reproducibly packaged release.

@@ -19,5 +19,9 @@ python "$PSScriptRoot/../tests/test_preflight_reference.py" --exe "$BuildDir/Tan
 if ($LASTEXITCODE) { throw 'Original preflight comparisons failed' }
 python "$PSScriptRoot/../tests/test_help_reference.py" --exe "$BuildDir/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original help comparisons failed' }
+python "$PSScriptRoot/../tests/test_layout_reference.py" --exe "$BuildDir/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original Atlas geometry comparisons failed' }
+python "$PSScriptRoot/../tests/test_color_reference.py" --exe "$BuildDir/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original Atlas color comparisons failed' }
 python "$PSScriptRoot/../tests/audit_parity.py"
 if ($LASTEXITCODE) { throw 'Parity inventory failed' }
