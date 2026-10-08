@@ -22,3 +22,11 @@ Build/test/release scripts and the short fleet guide are included in source. Thi
 Final executable: 4,038,656 bytes (4.039 decimal MB). SHA-256: 306BA218D9ADD72AE963ED017520D42DFF5E9B5DB3ADA1AB3C1083CB63FCD203.
 
 No owner keys, paid APIs, real external claim services or real GitHub remote writes were used. Live service interoperability still requires the user's own configuration; see BACKEND.md.
+
+## 0.5.0 parity checkpoint
+
+Source checkpoint: 88603fe in the original main checkout. Two clean release builds produced identical SHA-256 FA5987D8FB112A418C8F51A6D43104156BF937701A8DA7616AA8C0DFB15634C5. Portable executable: 4,289,536 bytes (4.29 decimal MB), Windows system DLL imports only.
+
+All four native test suites passed, together with packaged loopback backend tests, instruction-adapter tests, 320 original-code policy/history comparisons and 29 incremental statistics comparisons. Additional preflight comparisons cover 15 Python/package/compiler/ROM-directory/Atlas availability results against the reference. Packaged native source inspection, module-popout cart relay, Connections/Services/Requirements/queue renders and repository → status → checks → complete logs passed. Complete logs append across repeated runs; queued targets added during a batch survive completion. Background frames move and remain deterministic for the same phase. Native screenshots were inspected to correct label backgrounds and multiline/clipped text.
+
+This checkpoint does not establish absolute full parity. Its contract inventory remains explicit, and the original TS/CSS reference is retained for further comparisons. External provider/GitHub write interoperability and copyrighted-input-dependent checks remain untested with real services/data.
