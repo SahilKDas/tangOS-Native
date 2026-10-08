@@ -99,8 +99,10 @@ std::vector<Tile> atlasLayout(const std::vector<AtlasFunction> &functions,
                 !f.row["srcPath"].get<std::string>().empty()))
                 ? "draft"
                 : "unmatched";
-    } else if (mode == "author") {
-      key = f.state == "matched" ? f.row.value("author", std::string()) : std::string();
+    } else if ((mode == "author" || mode == "contributor")) {
+      key = f.state == "matched" && f.row.contains("author") && f.row["author"].is_string()
+                ? f.row["author"].get<std::string>()
+                : std::string();
       if (key.empty())
         key = "unmatched";
       else if (aliases.count(key))

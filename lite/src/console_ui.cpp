@@ -96,6 +96,7 @@ enum {
   LAND_AGENT
 };
 constexpr int ATLAS_LAYOUT = 4200, ATLAS_FILTER = 4201, ATLAS_RESET = 4202, ATLAS_LIVE = 4203;
+constexpr int ATLAS_COLOR = 4204, ATLAS_AUTHOR = 4205, ATLAS_DRAFTS = 4206;
 constexpr int TOOL_FORM = 4300, TOOL_FORM_SAVE = 4301, TOOL_FORM_NEXT = 4302, TOOL_FORM_PREV = 4303;
 enum class Screen {
   controller,
@@ -171,7 +172,11 @@ struct ConsoleUI::Impl {
   std::map<std::string, HWND> argumentFields;
   std::vector<std::string> cardIds;
   size_t pickedFunction = SIZE_MAX;
-  HWND layoutChoice = nullptr, filterChoice = nullptr;
+  HWND layoutChoice = nullptr, filterChoice = nullptr, colorChoice = nullptr,
+       authorChoice = nullptr, draftsChoice = nullptr;
+  std::string atlasColorBy = "status", authorFilter;
+  bool atlasDrafts = true;
+  std::vector<std::pair<std::string, int>> contributorRank;
   AtlasCamera camera;
   double &zoom = camera.zoom, &panX = camera.x, &panY = camera.y;
   AtlasLod lod;
@@ -244,9 +249,18 @@ struct ConsoleUI::Impl {
     }
     auto prefsFile = data / "console-ui.json";
     if (fs::exists(prefsFile)) {
-      auto j = Json::parse(read(prefsFile));
-      advancedMode = j.value("advanced", false);
-      allowWrites = j.value("writes", false);
+      auto j = Json::parse(read(prefsFile), nullptr, false);
+      if (!j.is_object())
+        j = Json::object();
+      advancedMode = j.contains("advanced") && j["advanced"] == true;
+      allowWrites = j.contains("writes") && j["writes"] == true;
+      atlasColorBy = j.contains("atlasColorBy") && j["atlasColorBy"].is_string()
+                         ? j["atlasColorBy"].get<std::string>()
+                         : "status";
+      if (atlasColorBy != "author")
+        atlasColorBy = "status";
+      atlasDrafts = !j.contains("atlasDrafts") || !j["atlasDrafts"].is_boolean() ||
+                    j["atlasDrafts"].get<bool>();
     }
     if (descriptorError.empty()) {
       // Stable project directory shared by windows; Fleet's exclusive ownership
@@ -355,6 +369,7 @@ struct ConsoleUI::Impl {
     for (auto h : controls)
       DestroyWindow(h);
     controls.clear();
+    layoutChoice = filterChoice = colorChoice = authorChoice = draftsChoice = nullptr;
     profileFields.clear();
     argumentFields.clear();
     logBox = search = agentChoice = toolList = argsBox = body = keyChoice = keyEdit = writes =
@@ -489,14 +504,29 @@ struct ConsoleUI::Impl {
       button("Pop out module", ATLAS_MODULE, width - 180, 330, 120);
       label("Wheel: zoom; left drag: pan\nRight drag: select; WASD/arrows: travel\nSpace: cart; "
             "Esc: zoom out",
-            width - 332, 378, 310, 56);
+            width - 332, 378, 310, 80);
+      label("Color", width - 332, 477, 62);
+      colorChoice = combo({"status", "author"}, ATLAS_COLOR, width - 268, 474, 246,
+                          atlasColorBy == "author" ? 1 : 0);
+      label("Contributor", width - 332, 513, 88);
+      std::vector<std::string> contributors{"Everyone"};
+      int authorIndex = 0;
+      for (auto &entry : contributorRank) {
+        contributors.push_back(entry.first);
+        if (entry.first == authorFilter)
+          authorIndex = (int)contributors.size() - 1;
+      }
+      authorChoice = combo(contributors, ATLAS_AUTHOR, width - 238, 510, 216, authorIndex);
+      draftsChoice = control(L"BUTTON", "Show drafts and near misses", ATLAS_DRAFTS, width - 332,
+                             518, 310, 28, BS_AUTOCHECKBOX);
+      SendMessageW(draftsChoice, BM_SETCHECK, atlasDrafts ? BST_CHECKED : BST_UNCHECKED, 0);
       button("Controller", HOME, 18, height - 48, 108);
       button("Reload", ATLAS_LOAD, 134, height - 48, 90);
       button("Encyclopedia", ENCYCLOPEDIA, 232, height - 48, 126);
       button("Reset view", ATLAS_RESET, 366, height - 48, 104);
       button(liveAtlas ? "Local data" : "Live data", ATLAS_LIVE, 478, height - 48, 102);
-      body = edit("Select a function in the treemap to inspect it.\nMatched: green; near-miss: "
-                  "yellow; unmatched: blue.",
+      body = edit("Select a function in the treemap to inspect it.\nUse Color to switch between "
+                  "match status and contributor colors.",
                   0, width - 332, 90, 310, 180, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
     } else if (screen == Screen::encyclopedia) {
       search = edit("", SEARCH, 18, 52, cw - 34);
@@ -1412,6 +1442,19 @@ struct ConsoleUI::Impl {
           atlasAuthorColors[who] =
               normalized.count(folded) ? normalized.at(folded) : palette[i % palette.size()];
         }
+        contributorRank = ranked;
+        if (authorChoice) {
+          SendMessageW(authorChoice, CB_RESETCONTENT, 0, 0);
+          SendMessageW(authorChoice, CB_ADDSTRING, 0, (LPARAM)L"Everyone");
+          int index = 0;
+          for (auto &entry : ranked) {
+            auto name = wide(entry.first);
+            auto added = SendMessageW(authorChoice, CB_ADDSTRING, 0, (LPARAM)name.c_str());
+            if (entry.first == authorFilter)
+              index = (int)added;
+          }
+          SendMessageW(authorChoice, CB_SETCURSEL, index, 0);
+        }
         cachedLayout = key;
       }
       int band = lod.update(zoom);
@@ -1423,15 +1466,28 @@ struct ConsoleUI::Impl {
         if (x + tw < left || y + th < top || x > left + w || y > top + h)
           continue;
         auto &f = atlas[tile.index];
-        auto hex = atlasColor(f.row, atlasMode == "author", policy.value("allowNearMiss", true),
-                              atlasAliases, atlasAuthorColors);
+        auto hex = atlasColor(f.row, atlasColorBy == "author", atlasDrafts, atlasAliases,
+                              atlasAuthorColors);
         COLORREF color = RGB(185, 202, 219);
         if (hex.size() == 7 && hex[0] == '#' &&
             hex.find_first_not_of("0123456789abcdefABCDEF", 1) == std::string::npos) {
           auto v = std::stoul(hex.substr(1), nullptr, 16);
           color = RGB((v >> 16) & 255, (v >> 8) & 255, v & 255);
         }
-        if (f.row.contains("claim") && !f.row["claim"].is_null() && f.row["claim"] != false)
+        std::string who = f.row.contains("author") && f.row["author"].is_string()
+                              ? f.row["author"].get<std::string>()
+                              : std::string();
+        if (atlasAliases.count(who))
+          who = atlasAliases.at(who);
+        bool dimmed = !authorFilter.empty() && who != authorFilter;
+        if (dimmed) {
+          auto ground = skin::field();
+          color = RGB((int)(GetRValue(color) * .14 + GetRValue(ground) * .86),
+                      (int)(GetGValue(color) * .14 + GetGValue(ground) * .86),
+                      (int)(GetBValue(color) * .14 + GetBValue(ground) * .86));
+        }
+        if (!dimmed && f.row.contains("claim") && !f.row["claim"].is_null() &&
+            f.row["claim"] != false)
           color = RGB((int)(GetRValue(color) * .58 + 255 * .42),
                       (int)(GetGValue(color) * .58 + 90 * .42),
                       (int)(GetBValue(color) * .58 + 90 * .42));
@@ -1439,7 +1495,7 @@ struct ConsoleUI::Impl {
         SetDCBrushColor(dc, color);
         RECT bounds{x, y, x + tw - 1, y + th - 1};
         FillRect(dc, &bounds, brush);
-        if (exemptTarget(f.row)) {
+        if (!dimmed && exemptTarget(f.row)) {
           int save = SaveDC(dc);
           IntersectClipRect(dc, bounds.left, bounds.top, bounds.right, bounds.bottom);
           auto old = SelectObject(dc, GetStockObject(DC_PEN));
@@ -1460,8 +1516,8 @@ struct ConsoleUI::Impl {
           FrameRect(dc, &bounds, (HBRUSH)GetStockObject(DC_BRUSH));
         }
         if (tw > 90 && th > 24) {
-          skin::label(dc, wide(band == 1 ? (tile.group.empty() ? f.module : tile.group) : f.name),
-                      x + 4, y + 3, tw - 8, 22, 11, true);
+          if (band != 1 || tile.group.empty())
+            skin::label(dc, wide(f.name), x + 4, y + 3, tw - 8, 22, 11, true);
           if (atlasExtras.contains("atlas.cosmetics"))
             for (auto &star : atlasExtras["atlas.cosmetics"].value("stars", Json::array()))
               if ((star.value("function", std::string()) == f.name ||
@@ -1483,6 +1539,31 @@ struct ConsoleUI::Impl {
                  std::min(top + h, y + th)};
         hits.push_back({hit, (int)tile.index});
       }
+      if (band == 1) {
+        std::map<std::string, RECT> sections;
+        for (const auto &tile : tiles)
+          if (!tile.group.empty()) {
+            RECT rect{left + (int)(tile.x * zoom + panX), top + (int)(tile.y * zoom + panY),
+                      left + (int)((tile.x + tile.width) * zoom + panX),
+                      top + (int)((tile.y + tile.height) * zoom + panY)};
+            auto it = sections.find(tile.group);
+            if (it == sections.end())
+              sections[tile.group] = rect;
+            else {
+              auto &r = it->second;
+              r.left = std::min(r.left, rect.left);
+              r.top = std::min(r.top, rect.top);
+              r.right = std::max(r.right, rect.right);
+              r.bottom = std::max(r.bottom, rect.bottom);
+            }
+          }
+        for (auto &section : sections) {
+          auto &r = section.second;
+          if (r.right > left && r.bottom > top && r.left < left + w && r.top < top + h)
+            skin::label(dc, wide(section.first), r.left + 4, r.top + 3,
+                        std::max(0, (int)(r.right - r.left - 8)), 24, 11, true);
+        }
+      }
       if (marquee) {
         RECT r{std::min(dragStart.x, dragEnd.x), std::min(dragStart.y, dragEnd.y),
                std::max(dragStart.x, dragEnd.x), std::max(dragStart.y, dragEnd.y)};
@@ -1500,9 +1581,15 @@ struct ConsoleUI::Impl {
         RECT r{miniBounds.left + (int)(t.x * mw / w), miniBounds.top + (int)(t.y * mh / h),
                miniBounds.left + (int)((t.x + t.width) * mw / w),
                miniBounds.top + (int)((t.y + t.height) * mh / h)};
-        SetDCBrushColor(dc, atlas[t.index].state == "matched"  ? RGB(63, 196, 95)
-                            : exemptTarget(atlas[t.index].row) ? RGB(168, 50, 74)
-                                                               : RGB(185, 202, 219));
+        auto color = atlasColor(atlas[t.index].row, atlasColorBy == "author", atlasDrafts,
+                                atlasAliases, atlasAuthorColors);
+        COLORREF miniColor = RGB(185, 202, 219);
+        if (color.size() == 7 && color[0] == '#' &&
+            color.find_first_not_of("0123456789abcdefABCDEF", 1) == std::string::npos) {
+          auto v = std::stoul(color.substr(1), nullptr, 16);
+          miniColor = RGB((v >> 16) & 255, (v >> 8) & 255, v & 255);
+        }
+        SetDCBrushColor(dc, miniColor);
         FillRect(dc, &r, (HBRUSH)GetStockObject(DC_BRUSH));
       }
       auto v = camera.visible(w, h);
@@ -1512,6 +1599,20 @@ struct ConsoleUI::Impl {
       mb = CreateSolidBrush(RGB(255, 214, 40));
       FrameRect(dc, &vr, mb);
       DeleteObject(mb);
+      if (!authorFilter.empty()) {
+        int lifetime = 0, daily = 0;
+        for (auto &entry : contributorRank)
+          if (entry.first == authorFilter)
+            lifetime = entry.second;
+        auto days =
+            atlasExtras.value("atlas.counts", Json::object()).value("daily", Json::object());
+        if (days.contains(authorFilter) && days[authorFilter].is_number())
+          daily = days[authorFilter].get<int>();
+        skin::label(dc,
+                    wide(authorFilter + " · " + std::to_string(lifetime) + " matches · +" +
+                         std::to_string(daily) + " today"),
+                    width - 322, 584, 302, 48, 12);
+      }
       skin::label(dc,
                   wide(std::to_string(filtered.size()) + " functions · " +
                        std::to_string(cart.size()) + " in cart"),
@@ -1685,8 +1786,25 @@ struct ConsoleUI::Impl {
     }
     if ((id == ATLAS_LAYOUT || id == ATLAS_FILTER) && notification == CBN_SELCHANGE) {
       atlasMode = selected(layoutChoice);
+      if (id == ATLAS_LAYOUT && atlasMode != "ov")
+        moduleFilter.clear();
       atlasFilter = selected(filterChoice);
       cachedLayout.clear();
+      InvalidateRect(window, nullptr, FALSE);
+      return;
+    }
+    if ((id == ATLAS_COLOR || id == ATLAS_AUTHOR || id == ATLAS_DRAFTS) &&
+        (notification == CBN_SELCHANGE || notification == BN_CLICKED)) {
+      atlasColorBy = selected(colorChoice);
+      authorFilter = choice(authorChoice) <= 0 ? std::string() : selected(authorChoice);
+      atlasDrafts = SendMessageW(draftsChoice, BM_GETCHECK, 0, 0) == BST_CHECKED;
+      auto path = data / "console-ui.json";
+      auto prefs = fs::exists(path) ? Json::parse(read(path), nullptr, false) : Json::object();
+      if (!prefs.is_object())
+        prefs = Json::object();
+      prefs["atlasColorBy"] = atlasColorBy;
+      prefs["atlasDrafts"] = atlasDrafts;
+      write(path, prefs.dump(2));
       InvalidateRect(window, nullptr, FALSE);
       return;
     }
@@ -2132,7 +2250,9 @@ struct ConsoleUI::Impl {
       break;
     case TOUR_CLOSE: {
       auto path = data / "console-ui.json";
-      auto prefs = fs::exists(path) ? Json::parse(read(path)) : Json::object();
+      auto prefs = fs::exists(path) ? Json::parse(read(path), nullptr, false) : Json::object();
+      if (!prefs.is_object())
+        prefs = Json::object();
       prefs["tourSeen"] = true;
       write(path, prefs.dump(2));
       navigate(Screen::controller);
@@ -2712,6 +2832,24 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     throw std::runtime_error("Tour completion did not persist");
   if (impl->atlas.empty())
     throw std::runtime_error("GUI viewer fixture has no functions");
+  impl->navigate(Screen::atlas);
+  capture(directory / "atlas-contributors.bmp");
+  SendMessageW(impl->colorChoice, CB_SETCURSEL, 1, 0);
+  SendMessageW(impl->draftsChoice, BM_SETCHECK, BST_UNCHECKED, 0);
+  impl->action(ATLAS_COLOR, CBN_SELCHANGE);
+  if (impl->atlasColorBy != "author" || impl->atlasDrafts)
+    throw std::runtime_error("Independent Viewer color/draft controls failed");
+  auto viewerPrefs = Json::parse(read(impl->data / "console-ui.json"));
+  if (viewerPrefs.value("atlasColorBy", std::string()) != "author" ||
+      viewerPrefs.value("atlasDrafts", true))
+    throw std::runtime_error("Viewer settings did not persist");
+  if (SendMessageW(impl->authorChoice, CB_GETCOUNT, 0, 0) < 2)
+    throw std::runtime_error("Contributor legend did not include fixture author");
+  SendMessageW(impl->authorChoice, CB_SETCURSEL, 1, 0);
+  impl->action(ATLAS_AUTHOR, CBN_SELCHANGE);
+  if (impl->authorFilter != "FixtureContributor")
+    throw std::runtime_error("Contributor selection failed");
+  capture(directory / "atlas-contributor-filter.bmp");
   impl->pickedFunction = 0;
   impl->inspectFunction();
   auto waitFor = [&](const std::function<bool()> &pending) {
