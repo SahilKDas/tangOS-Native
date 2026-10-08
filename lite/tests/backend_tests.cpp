@@ -70,6 +70,33 @@ int main() {
     expect(backend.invoke("projects.list").size() == 1, "registered local project");
     confirmed("projects.register", {{"id", "remote"}, {"descriptor", desc}});
     expect(backend.invoke("projects.list").size() == 2, "remote no-clone descriptor");
+    auto remoteView = confirmed("projects.open", {{"id", "remote"}});
+    auto viewPath = fs::u8path(remoteView.at("path").get<std::string>());
+    expect(remoteView.at("cloned") == false && !fs::exists(viewPath / ".git") &&
+               loadDescriptor(viewPath).title == "Backend fixture",
+           "remote project opens a confined metadata-only view without cloning");
+    expect(requests == 0, "project registration and opening send no external requests");
+    reject(
+        [&] {
+          confirmed("projects.register", {{"id", "remote\nport_only=false"}, {"descriptor", desc}});
+        },
+        "remote identifier cannot inject local configuration");
+    auto remoteAgain = confirmed("projects.open", {{"id", "remote"}});
+    expect(remoteAgain.at("path") == remoteView.at("path"), "remote metadata view path is stable");
+    auto localOpen = confirmed("projects.open", {{"id", "fixture"}});
+    expect(localOpen.at("cloned") == true &&
+               fs::equivalent(fs::u8path(localOpen.at("path").get<std::string>()), repo),
+           "registered local project opens the actual checkout");
+    auto projectRows = backend.invoke("projects.list");
+    expect(projectRows[0]["cloned"] == true && projectRows[1]["cloned"] == false &&
+               projectRows[1]["path"].is_null(),
+           "project menu summaries distinguish local and viewer-only entries");
+    reject(
+        [&] {
+          confirmed("projects.register", {{"id", "bad-remote"}, {"descriptor", Json::object()}});
+        },
+        "invalid remote descriptor cannot become an executable project");
+
     Runner cloneRunner;
     Backend cloneBackend(repo, data, settings, {}, requestHttp, &cloneRunner);
     Json cloneArgs{{"url", utf8(repo.wstring())}};

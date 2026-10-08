@@ -53,6 +53,7 @@ foreach ($image in $images) {
   if (-not (Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -lt 100000) { throw "Missing native window render: $image" }
 }
 if (-not ($MissingDescriptor -or $InvalidDescriptor)) {
+if (-not (Get-Content -LiteralPath (Join-Path $fixture 'remote-viewer-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Remote viewer workflow failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'fleet-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Packaged fleet workflow failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'viewer-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Native viewer parity workflow failed' }
 } else {

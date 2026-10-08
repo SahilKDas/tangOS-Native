@@ -15,7 +15,7 @@ struct Command {
       : argv(std::move(argv)), cwd(std::move(cwd)), environment(std::move(environment)) {}
 };
 struct Settings {
-  std::string repository,
+  std::string repository, activeProject,
       python = "python", exclusions = "local-assets;private;extracted;baserom;roms;assets;nintendo";
   bool portOnly = true;
   int themeIndex = 0;

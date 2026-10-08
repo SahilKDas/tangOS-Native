@@ -102,12 +102,13 @@ int main() {
            "source inspection line numbers");
     Settings s;
     s.repository = "C:/unicode/日本語";
+    s.activeProject = "remote:日本語";
     s.themeIndex = 2;
     s.checks["Custom"] = {"python", "a b.py"};
     saveSettings(temp / "settings.ini", s);
     auto loaded = loadSettings(temp / "settings.ini");
     expect(loaded.repository == s.repository && loaded.checks == s.checks && loaded.portOnly &&
-               loaded.themeIndex == 2,
+               loaded.themeIndex == 2 && loaded.activeProject == s.activeProject,
            "settings round trip");
     write(temp / "bad.ini", "[settings]\nport_only=typo\n");
     rejects([&] { loadSettings(temp / "bad.ini"); }, "invalid safety configuration fails closed");

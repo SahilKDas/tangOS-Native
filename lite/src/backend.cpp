@@ -336,10 +336,11 @@ Backend::Backend(fs::path repo, fs::path data, Settings prefs,
   fs::create_directories(directory);
 }
 bool Backend::mutation(const std::string &m, const Json &) {
-  return m == "projects.register" || m == "descriptor.write" || m == "preferences.set" ||
-         m == "connections.set" || m == "git.action" || m == "tools.run" || m == "reports.export" ||
-         m == "stats.clear" || m == "network.write" || m == "queue.adopt" || m == "git.clone" ||
-         m == "git.backup" || m == "git.discard" || m == "git.sync";
+  return m == "projects.open" || m == "projects.register" || m == "descriptor.write" ||
+         m == "preferences.set" || m == "connections.set" || m == "git.action" ||
+         m == "tools.run" || m == "reports.export" || m == "stats.clear" || m == "network.write" ||
+         m == "queue.adopt" || m == "git.clone" || m == "git.backup" || m == "git.discard" ||
+         m == "git.sync";
 }
 bool enabledTool(const Json &prefs, const std::string &id) {
   auto hidden = prefs.value("disabledTools", Json::array());
@@ -348,19 +349,19 @@ bool enabledTool(const Json &prefs, const std::string &id) {
 }
 Json Backend::catalog() {
   return Json::array(
-      {"projects.list",     "projects.register", "descriptor.preview", "descriptor.write",
-       "preferences.get",   "preferences.set",   "connections.get",    "connections.set",
-       "network.read",      "network.write",     "atlas.load",         "atlas.source",
-       "atlas.history",     "claims.read",       "preflight",          "git.status",
-       "git.syncPreview",   "git.sync",          "git.action",         "git.clone",
-       "git.backup",        "git.discard",       "tools.list",         "tools.run",
-       "stats.get",         "stats.clear",       "reports.list",       "reports.export",
-       "queue.adopt",       "policy.classify",   "policy.adaptive",    "policy.pool",
-       "policy.statistics", "policy.layout",     "policy.color",       "policy.batches",
-       "policy.source",     "policy.usage",      "guide.parse",        "guide.tour",
-       "guide.tips",        "projects.get",      "github.credits",     "atlas.cosmetics",
-       "atlas.counts",      "atlas.progress",    "atlas.live",         "update.check",
-       "harvest.list"});
+      {"projects.list",    "projects.register", "projects.open",   "descriptor.preview",
+       "descriptor.write", "preferences.get",   "preferences.set", "connections.get",
+       "connections.set",  "network.read",      "network.write",   "atlas.load",
+       "atlas.source",     "atlas.history",     "claims.read",     "preflight",
+       "git.status",       "git.syncPreview",   "git.sync",        "git.action",
+       "git.clone",        "git.backup",        "git.discard",     "tools.list",
+       "tools.run",        "stats.get",         "stats.clear",     "reports.list",
+       "reports.export",   "queue.adopt",       "policy.classify", "policy.adaptive",
+       "policy.pool",      "policy.statistics", "policy.layout",   "policy.color",
+       "policy.batches",   "policy.source",     "policy.usage",    "guide.parse",
+       "guide.tour",       "guide.tips",        "projects.get",    "github.credits",
+       "atlas.cosmetics",  "atlas.counts",      "atlas.progress",  "atlas.live",
+       "update.check",     "harvest.list"});
 }
 Json Backend::invoke(const std::string &m, Json a) {
   HANDLE lock = CreateFileW((directory / "backend.lock").c_str(),
@@ -945,15 +946,61 @@ Json Backend::execute(const std::string &m, const Json &a) {
     saveJson(directory / "preferences.json", prefs);
     return prefs;
   }
-  if (m == "projects.list")
-    return fileJson(directory / "projects.json", Json::array());
+  if (m == "projects.list") {
+    auto rows = fileJson(directory / "projects.json", Json::array());
+    for (auto &entry : rows) {
+      auto path = entry.value("repository", std::string());
+      bool cloned = !path.empty() && fs::exists(fs::u8path(path) / ".git");
+      entry["cloned"] = cloned;
+      entry["path"] = cloned ? Json(path) : Json();
+      entry["active"] = settings.activeProject.empty() ? cloned && path == settings.repository
+                                                       : entry.at("id") == settings.activeProject;
+      if (!entry.contains("title"))
+        entry["title"] = entry.contains("descriptor")
+                             ? parseDescriptor(entry["descriptor"].dump()).title
+                             : entry.at("id").get<std::string>();
+    }
+    return rows;
+  }
+  if (m == "projects.open") {
+    for (auto &entry : fileJson(directory / "projects.json", Json::array())) {
+      if (entry.at("id") != a.at("id"))
+        continue;
+      auto path = entry.value("repository", std::string());
+      if (!path.empty() && fs::exists(fs::u8path(path) / ".git")) {
+        Runner runner;
+        Repository local(runner, fs::u8path(path), settings);
+        return {{"id", entry.at("id")}, {"path", utf8(local.root.wstring())}, {"cloned", true}};
+      }
+      if (!entry.contains("descriptor"))
+        throw std::runtime_error("This local project moved; choose its new folder");
+      auto descriptor = parseDescriptor(entry["descriptor"].dump());
+      uint64_t hash = 1469598103934665603ULL;
+      for (unsigned char c : entry.at("id").get<std::string>()) {
+        hash ^= c;
+        hash *= 1099511628211ULL;
+      }
+      auto view = confinedPath(directory, "project-views/" + std::to_string(hash));
+      fs::create_directories(view);
+      write(confinedPath(view, "tangos.json"), descriptor.document.dump(2));
+      write(confinedPath(view, ".tangos-lite-viewer-only"),
+            "Managed metadata cache; not a Git checkout\n");
+      return {{"id", entry.at("id")},
+              {"path", utf8(view.wstring())},
+              {"cloned", false},
+              {"title", descriptor.title},
+              {"descriptor", descriptor.document}};
+    }
+    throw std::runtime_error("Unknown registered project");
+  }
   if (m == "projects.register") {
     noCredentials(a);
     auto list = fileJson(directory / "projects.json", Json::array());
     auto entry = a;
     auto id = entry.at("id").get<std::string>();
-    if (id.empty())
-      throw std::runtime_error("Project id required");
+    if (id.empty() || id.size() > 4096 || id.find_first_of("\r\n") != std::string::npos ||
+        id.find('\0') != std::string::npos)
+      throw std::runtime_error("Project id must be a single nonempty line under 4096 bytes");
     if (entry.contains("repository")) {
       Runner r;
       Repository repo(r, fs::u8path(entry["repository"].get<std::string>()), settings);
@@ -961,6 +1008,11 @@ Json Backend::execute(const std::string &m, const Json &a) {
     } else if (!entry.contains("descriptor"))
       throw std::runtime_error("A remote project needs a local descriptor; fetching it requires "
                                "your enabled connection");
+    if (entry.contains("descriptor")) {
+      auto parsed = parseDescriptor(entry["descriptor"].dump());
+      entry["descriptor"] = parsed.document;
+      entry["title"] = parsed.title;
+    }
     bool found = false;
     for (auto &v : list)
       if (v.at("id") == id) {

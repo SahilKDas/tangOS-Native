@@ -134,6 +134,8 @@ Settings loadSettings(const fs::path &p) {
       s.checks[k] = a;
     } else if (k == "repository")
       s.repository = v;
+    else if (k == "active_project")
+      s.activeProject = v;
     else if (k == "theme") {
       if (v.size() != 1 || v[0] < '0' || v[0] > '4')
         throw std::runtime_error("Theme must be 0..4");
@@ -155,9 +157,12 @@ Settings loadSettings(const fs::path &p) {
   return s;
 }
 void saveSettings(const fs::path &p, const Settings &s) {
+  if (s.activeProject.find_first_of("\r\n") != std::string::npos ||
+      s.activeProject.find('\0') != std::string::npos)
+    throw std::runtime_error("Active project must be a single line");
   std::string t = "# TangOS Lite - local settings, no "
                   "credentials\n[settings]\nrepository=" +
-                  s.repository + "\npython=" + s.python +
+                  s.repository + "\nactive_project=" + s.activeProject + "\npython=" + s.python +
                   "\nport_only=" + (s.portOnly ? std::string("true") : "false") +
                   "\ntheme=" + std::to_string(s.themeIndex) + "\nrom_path=" + s.romPath +
                   "\nrom_sha256=" + s.romSha256 + "\nexclusions=" + s.exclusions + "\n\n[checks]\n";

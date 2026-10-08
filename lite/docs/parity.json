@@ -123,7 +123,7 @@
       "contract": "projects",
       "state": "partial",
       "evidence": [
-        "Native remembered canonical local-project registry and title menu; GUI path/title registration tested. Built-in remote registry and no-clone switching remain open."
+        "Native local/remote registry, descriptor import, remembered selection and no-clone Viewer landing. Packaged native GUI tests cover explicit published loading and read-only controls. Automatic remote registry discovery, ZIP import and automatic post-clone switching remain open."
       ],
       "kind": "state"
     },
@@ -361,7 +361,7 @@
       "contract": "listProjects",
       "state": "partial",
       "evidence": [
-        "Native remembered canonical local-project registry and title menu; GUI path/title registration tested. Built-in remote registry and no-clone switching remain open."
+        "Native local/remote registry, descriptor import, remembered selection and no-clone Viewer landing. Packaged native GUI tests cover explicit published loading and read-only controls. Automatic remote registry discovery, ZIP import and automatic post-clone switching remain open."
       ],
       "kind": "api"
     },
@@ -369,7 +369,7 @@
       "contract": "switchProject",
       "state": "partial",
       "evidence": [
-        "Native remembered canonical local-project registry and title menu; GUI path/title registration tested. Built-in remote registry and no-clone switching remain open."
+        "Native local/remote registry, descriptor import, remembered selection and no-clone Viewer landing. Packaged native GUI tests cover explicit published loading and read-only controls. Automatic remote registry discovery, ZIP import and automatic post-clone switching remain open."
       ],
       "kind": "api"
     },

@@ -46,9 +46,10 @@ enum {
   CONTROLLER_TAB,
   REPOSITORY_TAB,
   TOOLBOX,
-  PROJECT_MENU
+  PROJECT_MENU,
+  SELECT_PROJECT
 };
-bool workspaceReady = false;
+bool workspaceReady = false, workspaceRemote = false;
 bool repositoryView = false;
 bool toolboxOpen = false;
 HWND themeCombo, minimizeButton, maximizeButton, closeButton, projectButton;
@@ -180,7 +181,7 @@ std::string resourceText(int id) {
 }
 void about() {
   reviewDialog(
-      "TangOS Lite 0.14.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
+      "TangOS Lite 0.15.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
       "for checks and Git; Repository for status.\nAlways read AGENTS.md and review "
       "changes before publication.\n\n" +
           resourceText(204) + "\n\nMinGW-w64 libwinpthread\n" + resourceText(202) +
@@ -228,7 +229,9 @@ void selectRepo() {
   start([selected] {
     Repository r(runner, selected, settings);
     repo = r.root;
+    workspaceRemote = false;
     settings.repository = utf8(repo.wstring());
+    settings.activeProject = settings.repository;
     saveSettings(config, settings);
     Json entry{{"id", settings.repository},
                {"repository", settings.repository},
@@ -247,7 +250,72 @@ void selectRepo() {
     PostMessageW(window, STATE, 0, (LPARAM)s);
   });
 }
+void openProjectState(const std::string &id) {
+  Backend backend(repo, dataDir, settings);
+  Json args{{"id", id}};
+  auto preview = backend.invoke("projects.open", args);
+  args["confirmation"] = preview.at("confirmation");
+  auto opened = backend.invoke("projects.open", args);
+  repo = fs::u8path(opened.at("path").get<std::string>());
+  workspaceRemote = !opened.at("cloned").get<bool>();
+  settings.activeProject = id;
+  settings.repository = workspaceRemote ? std::string() : utf8(repo.wstring());
+  saveSettings(config, settings);
+  auto status = workspaceRemote ? "Viewer-only project: " + opened.value("title", id) +
+                                      "\nNo checkout, tools or agents are running."
+                                : Repository(runner, repo, settings).status();
+  PostMessageW(window, STATE, 0, (LPARAM) new std::string(status));
+}
+void selectProject(const std::string &id) {
+  if (consoleUI && consoleUI->running())
+    throw std::runtime_error("Stop active operations before switching projects");
+  start([id] { openProjectState(id); });
+}
+void importRemoteProject() {
+  IFileDialog *dialog = nullptr;
+  if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                              IID_PPV_ARGS(&dialog))))
+    throw std::runtime_error("Cannot open the descriptor picker");
+  dialog->SetTitle(L"Add remote project: choose its downloaded tangos.json");
+  COMDLG_FILTERSPEC filters[] = {{L"Project descriptor", L"*.json"}};
+  dialog->SetFileTypes(1, filters);
+  fs::path file;
+  if (SUCCEEDED(dialog->Show(window))) {
+    IShellItem *item = nullptr;
+    if (SUCCEEDED(dialog->GetResult(&item))) {
+      PWSTR path = nullptr;
+      if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+        file = path;
+        CoTaskMemFree(path);
+      }
+      item->Release();
+    }
+  }
+  dialog->Release();
+  if (file.empty())
+    return;
+  if (fs::file_size(file) > 1024 * 1024)
+    throw std::runtime_error("Project descriptor exceeds 1 MiB");
+  auto descriptor = parseDescriptor(read(file));
+  auto project = descriptor.document.at("project");
+  Json entry{{"id", "remote:" + project.at("name").get<std::string>()},
+             {"title", descriptor.title},
+             {"descriptor", descriptor.document},
+             {"github", project.value("github", std::string())}};
+  start([entry] {
+    Backend backend(repo, dataDir, settings);
+    auto args = entry;
+    auto preview = backend.invoke("projects.register", args);
+    args["confirmation"] = preview.at("confirmation");
+    backend.invoke("projects.register", args);
+    openProjectState(entry.at("id").get<std::string>());
+  });
+}
 void refresh() {
+  if (workspaceRemote) {
+    selectProject(settings.activeProject);
+    return;
+  }
   if (repo.empty())
     return;
   start([] {
@@ -347,7 +415,8 @@ void layout(int w, int h) {
   MoveWindow(repositoryTab, w / 2 - 4, 11, 130, 30, TRUE);
   if (!workspaceReady) {
     ShowWindow(repoEdit, SW_SHOW);
-    ShowWindow(projectButton, SW_HIDE);
+    ShowWindow(projectButton, SW_SHOW);
+    MoveWindow(projectButton, 144, 13, std::max(90, w / 2 - 308), 30, TRUE);
     int x = (w - 760) / 2, y = (h - 420) / 2;
     MoveWindow(repoEdit, x + 72, y + 174, 494, 34, TRUE);
     MoveWindow(selectButton, x + 578, y + 174, 110, 34, TRUE);
@@ -476,7 +545,7 @@ void paintChrome(HDC dc, int w, int h) {
     skin::label(dc, L"Repository status", rail + 16, 345, 308, 24, 14, true);
   skin::label(dc, L"Port-only  ·  Review before push", rail + 16, h - 139, 300, 23, 12, true, true);
   skin::mascot(dc, w - 137, h - 127, 96);
-  skin::label(dc, L"v0.14.0", w - 74, h - 27, 60, 18, 10, false, true);
+  skin::label(dc, L"v0.15.0", w - 74, h - 27, 60, 18, 10, false, true);
 }
 void snapshot(const fs::path &path) {
   RECT rect;
@@ -569,19 +638,23 @@ void projectMenu() {
     throw std::runtime_error("Stop agents before switching repositories");
   auto projects = Backend(repo, dataDir, settings).invoke("projects.list");
   HMENU menu = CreatePopupMenu();
-  std::vector<std::string> paths;
+  std::vector<std::string> ids;
   for (auto &entry : projects) {
-    if (!entry.contains("repository") || !entry["repository"].is_string())
-      continue;
-    auto path = entry["repository"].get<std::string>();
-    auto title = entry.value("title", path);
-    auto flags = MF_STRING | (path == settings.repository ? MF_CHECKED : 0);
-    AppendMenuW(menu, flags, 1 + paths.size(), wide(title).c_str());
-    paths.push_back(path);
+    auto id = entry.at("id").get<std::string>();
+    auto title = entry.value("title", id);
+    bool cloned = entry.value("cloned", false);
+    if (!cloned)
+      title += " · viewer only";
+    auto flags = MF_STRING | (entry.value("active", false) ? MF_CHECKED : 0);
+    if (!cloned && !entry.contains("descriptor"))
+      flags |= MF_GRAYED;
+    AppendMenuW(menu, flags, 1 + ids.size(), wide(title).c_str());
+    ids.push_back(id);
   }
-  if (!paths.empty())
+  if (!ids.empty())
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(menu, MF_STRING, 10000, L"Open another local repository…");
+  AppendMenuW(menu, MF_STRING, 10001, L"Add remote project (tangos.json)…");
   RECT bounds;
   GetWindowRect(projectButton, &bounds);
   auto selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, bounds.left, bounds.bottom, 0,
@@ -589,10 +662,10 @@ void projectMenu() {
   DestroyMenu(menu);
   if (selected == 10000)
     browse();
-  else if (selected > 0 && selected <= paths.size()) {
-    set(repoEdit, paths[selected - 1]);
-    selectRepo();
-  }
+  else if (selected == 10001)
+    importRemoteProject();
+  else if (selected > 0 && selected <= ids.size())
+    selectProject(ids[selected - 1]);
 }
 LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   switch (m) {
@@ -820,6 +893,10 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (HIWORD(w) == BN_CLICKED) {
       auto id = LOWORD(w);
       if (id == TOOLBOX) {
+        if (workspaceRemote) {
+          output("Choose a local checkout before opening Git tools.\n");
+          return 0;
+        }
         toolboxOpen = !toolboxOpen;
         repositoryView = false;
         RECT r;
@@ -856,6 +933,9 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
       try {
         switch (id) {
+        case SELECT_PROJECT:
+          selectProject(settings.activeProject);
+          break;
         case PROJECT_MENU:
           projectMenu();
           break;
@@ -871,9 +951,13 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           refresh();
           break;
         case RUN:
+          if (workspaceRemote)
+            throw std::runtime_error("Choose a local checkout before running checks");
           runCheck();
           break;
         case ACTION:
+          if (workspaceRemote)
+            throw std::runtime_error("Choose a local checkout before changing Git state");
           runAction();
           break;
         case LOGS: {
@@ -888,6 +972,8 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                  "no shell expansion.\n");
           break;
         case AGENTS:
+          if (workspaceRemote)
+            throw std::runtime_error("Choose a local checkout before starting agents");
           toolboxOpen = true;
           repositoryView = false;
           {
@@ -930,7 +1016,12 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     set(statusEdit, *s);
     delete s;
     set(repoEdit, settings.repository);
-    fillChecks();
+    if (!workspaceRemote)
+      fillChecks();
+    else {
+      checks.clear();
+      SendMessageW(checkCombo, CB_RESETCONTENT, 0, 0);
+    }
     workspaceReady = true;
     std::string projectTitle = utf8(repo.filename().wstring());
     try {
@@ -944,6 +1035,10 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       consoleUI = std::make_unique<ConsoleUI>(
           h, uiFont, repo, dataDir, settings,
           [] {
+            if (workspaceRemote) {
+              output("Choose a local checkout before opening Git tools.\n");
+              return;
+            }
             toolboxOpen = true;
             repositoryView = false;
             RECT r;
@@ -953,7 +1048,8 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           [](const Settings &next) {
             settings = next;
             saveSettings(config, settings);
-          });
+          },
+          false, std::string(), std::function<void(Json)>(), workspaceRemote);
     }
     RECT rect;
     GetClientRect(h, &rect);
@@ -991,8 +1087,11 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           } catch (...) {
           }
         }
-        if (consoleUI)
+        if (consoleUI) {
           consoleUI->smokeScreens(config.parent_path(), snapshot);
+          if (fs::exists(repo / "tangos.json"))
+            consoleUI->smokeRemote(config.parent_path(), snapshot);
+        }
         snapshot(config.parent_path() / "controller.bmp");
         SendMessageW(h, WM_COMMAND, REPOSITORY_TAB, 0);
         snapshot(config.parent_path() / "repository.bmp");
@@ -1128,12 +1227,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     if (argc == 4 && std::wstring(argv[1]) == L"--smoke-test") {
       smoke = true;
       settings.repository = utf8(argv[2]);
+      settings.activeProject.clear();
       config = fs::path(argv[3]);
       dataDir = config.parent_path() / "app-state";
       if (!fs::exists(fs::path(argv[2]) / ".tangos-lite-test-fixture"))
         throw std::runtime_error("Smoke test requires explicit fixture marker");
       settings = loadSettings(config);
       settings.repository = utf8(argv[2]);
+      settings.activeProject.clear();
     }
     if (!fs::exists(config))
       saveSettings(config, settings);
@@ -1156,7 +1257,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
       throw std::runtime_error("Cannot create native window");
     ShowWindow(h, show);
     UpdateWindow(h);
-    if (!smoke && !settings.repository.empty())
+    if (!smoke && !settings.activeProject.empty())
+      PostMessageW(h, WM_COMMAND, SELECT_PROJECT, 0);
+    else if (!smoke && !settings.repository.empty())
       PostMessageW(h, WM_COMMAND, SELECT, 0);
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {

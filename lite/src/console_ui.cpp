@@ -115,7 +115,8 @@ enum class Screen {
   requirements,
   descriptorGate,
   mcpConnection,
-  batches
+  batches,
+  remoteGate
 };
 constexpr int REQUIREMENTS = 4480, REQ_REFRESH = 4481, REQ_TERMINAL = 4482, REQ_GITHUB = 4483,
               REQ_COPY = 4484;
@@ -128,6 +129,7 @@ constexpr int ATLAS_INSPECT = 4400, ATLAS_MODULE = 4401, ATLAS_SOURCE = 4402, AT
 constexpr int HELP_EDIT = 4600, HELP_TIPS = 4601;
 constexpr int DESC_SCAN = 4610, DESC_PREVIEW = 4611, DESC_CONFIRM = 4612, DESC_RELOAD = 4613,
               DESC_FOLDER = 4614;
+constexpr int REMOTE_FOLDER = 4800, REMOTE_CLONE = 4801;
 constexpr int MCP_TOGGLE = 4620, MCP_CONFIG = 4621, MCP_PROMPT = 4622, MCP_COPY_CONFIG = 4623;
 constexpr int BATCHES = 4630, BATCH_LIST = 4631, BATCH_UP = 4632, BATCH_DOWN = 4633,
               BATCH_REMOVE = 4634, BATCH_CLEAR_DONE = 4635, BATCH_SAVE_DRAFT = 4636,
@@ -237,7 +239,8 @@ struct ConsoleUI::Impl {
 
   std::vector<Tile> tiles;
   std::string atlasQuery, atlasMode = "ov", atlasFilter = "all", cachedLayout;
-  bool liveAtlas = false;
+  bool liveAtlas = false, remoteOnly = false, remoteAtlasStarted = false;
+  Transport transport;
   std::map<std::string, std::string> atlasAliases, atlasAuthorColors;
   std::atomic<bool> atlasPublished{false};
   std::vector<std::string> retainedCart;
@@ -248,11 +251,13 @@ struct ConsoleUI::Impl {
 
   Impl(HWND p, HFONT f, fs::path repo, fs::path d, Settings prefs, std::function<void()> git,
        std::function<void(const Settings &)> save, bool onlyViewer, std::string module,
-       std::function<void(Json)> addDraft)
+       std::function<void(Json)> addDraft, bool remote, Transport http)
       : parent(p), font(f), repository(std::move(repo)), data(std::move(d)),
         settings(std::move(prefs)), gitTools(std::move(git)), savePreferences(std::move(save)),
         vault(data / "vault") {
     viewerOnly = onlyViewer;
+    remoteOnly = remote;
+    transport = std::move(http);
     moduleFilter = std::move(module);
     draftAdded = std::move(addDraft);
     if (viewerOnly)
@@ -300,7 +305,7 @@ struct ConsoleUI::Impl {
         hash ^= c;
         hash *= 1099511628211ULL;
       }
-      if (!viewerOnly) {
+      if (!viewerOnly && !remoteOnly) {
         auto project = data / "projects" / fs::u8path(std::to_string(hash));
         fleet = std::make_unique<Fleet>(repository, project, descriptor, settings,
                                         [this](const std::string &s) {
@@ -315,7 +320,10 @@ struct ConsoleUI::Impl {
           mcp = std::make_unique<McpServer>(*fleet, descriptor, project / "mcp-client.json");
       }
       atlasReady = true;
-      loadAtlas();
+      if (!remoteOnly)
+        loadAtlas();
+      else
+        screen = Screen::remoteGate;
     } else {
       atlasError = descriptorError;
       atlasReady = true;
@@ -423,6 +431,13 @@ struct ConsoleUI::Impl {
       selectedId = agents[0].id;
   }
   void navigate(Screen next) {
+    if (remoteOnly && next == Screen::controller)
+      next = Screen::remoteGate;
+    if (remoteOnly && next == Screen::atlas && !remoteAtlasStarted) {
+      remoteAtlasStarted = true;
+      liveAtlas = true;
+      loadAtlas();
+    }
     if (screen == Screen::batches && next != screen && batchTitle)
       storeBatchDraft();
     screen = next;
@@ -455,8 +470,22 @@ struct ConsoleUI::Impl {
     } guard(rebuilding);
     refreshAgents();
     destroyControls();
-    int cw = screen == Screen::controller ? controllerWidth() : width - 356;
-    if (screen == Screen::descriptorGate) {
+    int cw = screen == Screen::remoteGate   ? width
+             : screen == Screen::controller ? controllerWidth()
+                                            : width - 356;
+    if (screen == Screen::remoteGate) {
+      label(descriptor.title + " isn't on this machine", 50, 96, width - 100, 46);
+      label("Browse the project's published progress in Chaos Viewer. Running tools and agents "
+            "needs a local Git checkout.",
+            50, 158, width - 100, 66);
+      button("Open Chaos Viewer", ATLAS, 50, 246, 200);
+      button("Choose a local folder", REMOTE_FOLDER, 50, 292, 220);
+      button("Clone project", REMOTE_CLONE, 50, 338, 160);
+      button("Connections", CONNECTIONS, 50, 384, 160);
+      auto project = descriptor.document.value("project", Json::object());
+      label(project.value("github", std::string()) + "\n" + descriptor.tagline, 50, 446,
+            width - 100, 100);
+    } else if (screen == Screen::descriptorGate) {
       label(fs::exists(repository / "tangos.json") ? "That tangos.json has problems"
                                                    : "No tangos.json here yet",
             18, 62, cw - 36, 36);
@@ -572,9 +601,13 @@ struct ConsoleUI::Impl {
       SendMessageW(draftsChoice, BM_SETCHECK, atlasDrafts ? BST_CHECKED : BST_UNCHECKED, 0);
       button("Controller", HOME, 18, height - 48, 108);
       button("Reload", ATLAS_LOAD, 134, height - 48, 90);
-      button("Encyclopedia", ENCYCLOPEDIA, 232, height - 48, 126);
+      button(remoteOnly ? "Connections" : "Encyclopedia", remoteOnly ? CONNECTIONS : ENCYCLOPEDIA,
+             232, height - 48, 126);
       button("Reset view", ATLAS_RESET, 366, height - 48, 104);
-      button(liveAtlas ? "Local data" : "Live data", ATLAS_LIVE, 478, height - 48, 102);
+      button(remoteOnly  ? "Reload published"
+             : liveAtlas ? "Local data"
+                         : "Live data",
+             ATLAS_LIVE, 478, height - 48, 102);
       auto sortIndex =
           std::find(functionSortKeys.begin(), functionSortKeys.end(), functionSortKey) -
           functionSortKeys.begin();
@@ -911,6 +944,10 @@ struct ConsoleUI::Impl {
       EnableWindow(GetDlgItem(window, TOUR_PREVIOUS), tourStep > 0);
       EnableWindow(GetDlgItem(window, TOUR_NEXT), tourStep + 1 < (int)guideSteps.size());
     }
+    if (remoteOnly)
+      for (int id : std::vector<int>{ATLAS_CART, ADD_CART, ENCYCLOPEDIA, ATLAS_MODULE})
+        if (auto h = GetDlgItem(window, id))
+          EnableWindow(h, FALSE);
     if (viewerOnly)
       for (int id : std::vector<int>{HOME, ADD_CART, ENCYCLOPEDIA, ATLAS_MODULE}) {
         auto h = GetDlgItem(window, id);
@@ -1051,7 +1088,7 @@ struct ConsoleUI::Impl {
     bool published = liveAtlas;
     loader = std::thread([this, keys, prefs, published] {
       try {
-        Backend backend(repository, data, prefs, keys);
+        Backend backend(repository, data, prefs, keys, transport);
         auto profiles = backend.invoke("connections.get");
         auto enabled = [&](const std::string &name) {
           return profiles.contains(name) && profiles[name].value("enabled", false);
@@ -1340,6 +1377,12 @@ struct ConsoleUI::Impl {
     return out;
   }
   void serviceCall(const std::string &method, Json args) {
+    if (remoteOnly && method != "git.clone" && method != "projects.list" &&
+        method != "projects.get" && method != "connections.get" && method != "connections.set" &&
+        method != "preferences.get" && method != "preferences.set" && method != "network.read" &&
+        method.rfind("atlas.", 0) != 0 && method != "github.credits")
+      throw std::runtime_error(
+          "Clone or choose a local checkout before running repository operations");
     if (serviceBusy || serviceReady)
       throw std::runtime_error("Wait for the current service operation");
     if (serviceWorker.joinable())
@@ -1498,7 +1541,7 @@ struct ConsoleUI::Impl {
       }
       return;
     }
-    if (key == VK_SPACE && pickedFunction < atlas.size()) {
+    if (!remoteOnly && key == VK_SPACE && pickedFunction < atlas.size()) {
       auto &f = atlas[pickedFunction];
       if (f.state == "matched" || exemptTarget(f.row) || claimedTarget(f.row))
         return;
@@ -1530,11 +1573,13 @@ struct ConsoleUI::Impl {
                   (p.y - miniBounds.top) * (height - 170) / mh, width - 390, height - 170);
   }
   void paint(HDC dc) {
-    bool fullController = screen == Screen::controller && !controllerNeedsRail();
+    bool fullController =
+        screen == Screen::remoteGate || (screen == Screen::controller && !controllerNeedsRail());
     skin::panel(dc, 0, 0, fullController ? width : width - 356, height);
     if (!fullController)
       skin::panel(dc, width - 340, 0, 340, height, true);
-    std::string title = screen == Screen::controller       ? "Chaos Controller"
+    std::string title = screen == Screen::remoteGate       ? "Viewer-only project"
+                        : screen == Screen::controller     ? "Chaos Controller"
                         : screen == Screen::atlas          ? "Chaos Viewer"
                         : screen == Screen::encyclopedia   ? "Encyclopedia"
                         : screen == Screen::settings       ? "Settings"
@@ -1602,10 +1647,13 @@ struct ConsoleUI::Impl {
         return;
       }
       if (!atlasError.empty()) {
-        skin::label(dc,
-                    wide("Atlas unavailable: " + atlasError +
-                         "\nGenerate the database using the repository's tools in Encyclopedia."),
-                    18, 108, width - 390, 100, 14, false, true);
+        skin::label(
+            dc,
+            wide("Atlas unavailable: " + atlasError +
+                 (remoteOnly
+                      ? "\nSet your published database URL in Connections, then reload."
+                      : "\nGenerate the database using the repository's tools in Encyclopedia.")),
+            18, 108, width - 390, 100, 14, false, true);
         return;
       }
       auto needle = search ? text(search) : atlasQuery;
@@ -1925,6 +1973,8 @@ struct ConsoleUI::Impl {
     }
   }
   void executeTool() {
+    if (remoteOnly)
+      throw std::runtime_error("Choose a local checkout before running tools");
     if (manualBusy)
       return;
     auto &tool = descriptor.tool(toolId);
@@ -2237,6 +2287,17 @@ struct ConsoleUI::Impl {
       serviceCall(serviceMethod, args);
       break;
     }
+    case REMOTE_FOLDER:
+      PostMessageW(parent, CONSOLE_PICK_REPO, 0, 0);
+      break;
+    case REMOTE_CLONE:
+      serviceMethod = "git.clone";
+      serviceRequest = {
+          {"url",
+           descriptor.document.value("project", Json::object()).value("github", std::string())}};
+      serviceResult = Json::object();
+      navigate(Screen::services);
+      break;
     case HOME:
       navigate(Screen::controller);
       break;
@@ -2327,6 +2388,8 @@ struct ConsoleUI::Impl {
       navigate(Screen::detail);
       break;
     case SAVE_PROFILE: {
+      if (remoteOnly)
+        throw std::runtime_error("Choose a local checkout before adding agents");
       if (!fleet)
         throw std::runtime_error("A valid descriptor is required");
       AgentSpec s;
@@ -2532,6 +2595,8 @@ struct ConsoleUI::Impl {
       reviewAgent(true);
       break;
     case ATLAS_CART:
+      if (remoteOnly)
+        throw std::runtime_error("Viewer-only projects cannot assign work");
       if (pickedFunction >= atlas.size())
         throw std::runtime_error("Select a function first");
       if (atlas[pickedFunction].state == "matched" || exemptTarget(atlas[pickedFunction].row) ||
@@ -2578,6 +2643,11 @@ struct ConsoleUI::Impl {
       InvalidateRect(window, nullptr, FALSE);
       break;
     case ATLAS_LIVE:
+      if (remoteOnly) {
+        liveAtlas = true;
+        loadAtlas();
+        break;
+      }
       if (!atlasReady)
         throw std::runtime_error("Wait for the current atlas load");
       liveAtlas = !liveAtlas;
@@ -3047,6 +3117,11 @@ struct ConsoleUI::Impl {
           return 0;
         }
         if (self->marquee) {
+          if (self->remoteOnly) {
+            self->marquee = false;
+            ReleaseCapture();
+            return 0;
+          }
           auto selected =
               marqueeTiles(self->tiles, {(self->dragStart.x - 18 - self->panX) / self->zoom,
                                          (self->dragStart.y - 100 - self->panY) / self->zoom,
@@ -3074,7 +3149,7 @@ struct ConsoleUI::Impl {
               auto &f = self->atlas.at(hit.index);
               self->pickedFunction = hit.index;
               self->flyFunction(hit.index);
-              if ((GetKeyState(VK_CONTROL) & 0x8000) && f.state != "matched" &&
+              if (!self->remoteOnly && (GetKeyState(VK_CONTROL) & 0x8000) && f.state != "matched" &&
                   !exemptTarget(f.row) && !claimedTarget(f.row)) {
                 auto it = std::find(self->cart.begin(), self->cart.end(), hit.index);
                 if (it == self->cart.end())
@@ -3099,15 +3174,18 @@ struct ConsoleUI::Impl {
 };
 ConsoleUI::ConsoleUI(HWND parent, HFONT font, fs::path repo, fs::path data, Settings settings,
                      std::function<void()> git, std::function<void(const Settings &)> save,
-                     bool viewerOnly, std::string module, std::function<void(Json)> draftAdded)
+                     bool viewerOnly, std::string module, std::function<void(Json)> draftAdded,
+                     bool remoteOnly, Transport transport)
     : impl(std::make_unique<Impl>(parent, font, std::move(repo), std::move(data),
                                   std::move(settings), std::move(git), std::move(save), viewerOnly,
-                                  std::move(module), std::move(draftAdded))) {}
+                                  std::move(module), std::move(draftAdded), remoteOnly,
+                                  std::move(transport))) {}
 ConsoleUI::~ConsoleUI() = default;
 void ConsoleUI::show(bool visible, bool atlas) {
   if (visible) {
     auto screen = atlas ? Screen::atlas : Screen::controller;
-    if (impl->screen == Screen::controller || impl->screen == Screen::atlas)
+    if (impl->screen == Screen::controller || impl->screen == Screen::atlas ||
+        impl->screen == Screen::remoteGate)
       impl->navigate(screen);
   }
   ShowWindow(impl->window, visible ? SW_SHOW : SW_HIDE);
@@ -3131,6 +3209,64 @@ void ConsoleUI::stop() {
   impl->serviceRunner.cancel();
   if (impl->fleet)
     impl->fleet->stopAll();
+}
+void ConsoleUI::smokeRemote(const fs::path &directory,
+                            const std::function<void(const fs::path &)> &capture) {
+  if (!fs::exists(impl->repository / ".tangos-lite-test-fixture"))
+    throw std::runtime_error("Remote GUI smoke requires a disposable fixture");
+  auto data = directory / "remote-viewer-test";
+  Backend backend(impl->repository, data, impl->settings);
+  auto confirmed = [&](const std::string &method, Json args) {
+    auto preview = backend.invoke(method, args);
+    args["confirmation"] = preview.at("confirmation");
+    return backend.invoke(method, args);
+  };
+  confirmed("projects.register", {{"id", "remote-gui"}, {"descriptor", impl->descriptor.document}});
+  auto opened = confirmed("projects.open", {{"id", "remote-gui"}});
+  auto path = fs::u8path(opened.at("path").get<std::string>());
+  confirmed(
+      "connections.set",
+      {{"atlas.live",
+        {{"enabled", true}, {"method", "GET"}, {"url", "https://fixture.invalid/database"}}}});
+  int requests = 0;
+  auto database = read(confinedPath(impl->repository, impl->descriptor.database));
+  ShowWindow(impl->window, SW_HIDE);
+  try {
+    ConsoleUI remote(
+        impl->parent, impl->font, path, data, impl->settings, [] {}, {}, false, {}, {}, true,
+        [&](auto &, auto &, auto &, auto &) {
+          ++requests;
+          return HttpResponse{200, database};
+        });
+    remote.resize(impl->width, impl->height);
+    remote.show(true);
+    if (requests || remote.impl->fleet || remote.impl->mcp || fs::exists(path / ".git") ||
+        remote.impl->screen != Screen::remoteGate)
+      throw std::runtime_error(
+          "Remote landing unexpectedly started local execution or a connection");
+    capture(directory / "remote-project.bmp");
+    remote.show(true, true);
+    if (remote.impl->loader.joinable())
+      remote.impl->loader.join();
+    remote.impl->tick();
+    if (!requests || !remote.impl->atlasError.empty() || remote.impl->atlas.empty())
+      throw std::runtime_error("Remote published Viewer did not load: " + remote.impl->atlasError);
+    auto assign = GetDlgItem(remote.impl->window, ATLAS_CART);
+    if (assign && IsWindowEnabled(assign))
+      throw std::runtime_error("Remote Viewer enabled assignment");
+    remote.impl->pickedFunction = 0;
+    remote.impl->viewerKey(VK_SPACE);
+    if (!remote.impl->cart.empty())
+      throw std::runtime_error("Remote keyboard shortcut assigned work");
+    capture(directory / "remote-viewer.bmp");
+    write(directory / "remote-viewer-gui-report.txt",
+          "PASS: metadata-only project, no automatic network, published Viewer, no agents or Git "
+          "checkout, read-only assignment controls.");
+  } catch (...) {
+    ShowWindow(impl->window, SW_SHOW);
+    throw;
+  }
+  ShowWindow(impl->window, SW_SHOW);
 }
 void ConsoleUI::smokeScreens(const fs::path &directory,
                              const std::function<void(const fs::path &)> &capture) {

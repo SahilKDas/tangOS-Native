@@ -47,3 +47,11 @@ When tangos.json is missing or invalid, Generate descriptor scans available chec
 Tour includes ten steps and expression artwork. Tips switches to short help messages. Edit text opens tango-tour.txt or tango-tips.txt in your local configuration folder. Changes are read when reopening/navigating help; empty files fall back to embedded defaults. Tour completion is remembered. Matching/publication instructions retain mandatory review and port-only safety.
 
 Viewer color and contributor controls are independent of the grouping layout. Choose status or author colors, select a contributor to dim other authors, and toggle draft/near-miss visibility. Color and draft choices are remembered in console-ui.json. Published career/daily totals and shared colors require your enabled connections; local attribution is the offline fallback. The minimap follows the same color choice.
+
+## Remote projects and viewer-only mode
+
+Open the project title menu (or Choose a project on first launch), choose **Add remote project**, and select a downloaded `tangos.json` descriptor. The project is remembered in `projects.json`; `active_project` in `settings.ini` restores it next launch. You do not need to clone it to view published progress.
+
+The landing screen opens without a network request. Choose **Open Chaos Viewer** to load the descriptor's published database. If the project uses a different endpoint or needs credentials, configure your own `atlas.live` profile in **Connections**, enable it, and reload published data. Credentials belong in your environment or the encrypted local vault. Nobody else's API key is included.
+
+Viewer-only mode allows searching, sorting, panning, zooming and inspecting published function metadata. Work assignment, local tools, Git changes and agent execution require a local checkout. Use **Choose a local folder** when you have one. **Clone project** opens the existing previewed clone service; after cloning, select the resulting folder.

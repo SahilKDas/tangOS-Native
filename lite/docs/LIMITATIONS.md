@@ -13,3 +13,5 @@
 - Executable repository scripts are trusted code, not OS-sandboxed. Instruction delivery and post-run audits cannot prevent arbitrary code from touching other paths or networking. See SECURITY.md.
 
 Backend services and user-owned connection configuration are documented in BACKEND.md. Frontend parity remains a separate task.
+
+- Remote projects can now be imported from a downloaded descriptor and reopened as metadata-only Viewer projects. Automatic remote registry discovery, descriptor downloading, ZIP import and clone-to-project automatic switching remain unfinished. Published database availability depends on the project endpoint or the user's enabled `atlas.live` connection. Remote local-source/disassembly and module work-assignment views require a checkout. Full Console parity remains incomplete.
