@@ -42,3 +42,7 @@ No real API key, paid provider, GitHub write, proprietary compiler or Nintendo d
 ## Atlas geometry/color checkpoint
 
 Native Atlas geometry matches 24 original buildWorld cases covering all four layouts, both orientations, stable ties, nested padding and draft/exempt grouping. Tile colors match 44 original fnColor cases covering status/author modes, aliases, draft visibility and exemptions. Contributor colors honor canonical aliases, career totals and case-insensitive shared palette keys; palette work is cached with layout rather than repeated per frame. No-match hatching and claim tint are now distinct. Four native suites and the packaged GUI repository/status/check/log workflow passed using lite/out/TangOSLite.exe. These changes are not yet a new reproducibly packaged release.
+
+## 0.7.0 Viewer checkpoint
+
+Source checkpoint f6e7384. Two clean builds produced identical SHA-256 94A9052F7FABEEE8DEBA3844BC7C1A48B84C778EC05234903435785AE8D791A9. Executable size: 5,158,400 bytes (5.158 decimal MB), Windows system DLL imports only. All four native suites, packaged backend/adapter tests and 480 reference comparisons passed. Three packaged GUI workflows passed, including independent Viewer coloring, contributor selection and persistent draft/color choices. Full parity remains unfinished.
