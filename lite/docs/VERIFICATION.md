@@ -70,3 +70,7 @@ Two clean release builds produced identical Windows x64 executables: **5,323,264
 ## 0.13.0 source inspection and clone cancellation checkpoint
 
 Release source checkpoint: db3c9a9. Two clean Windows x64 builds are byte-identical: **5,351,936 bytes (5.352 decimal MB)**, SHA256 **DB49E74F536250C9E68088CCE483024FE3B367A5931EF453B0081FD021522681**. Windows system DLLs only. All four native suites, driver/backend tests, **762 original-code comparisons**, and three packaged GUI workflows passed. The packaged regression reproduces rapid function-list selection followed by source inspection and verifies the final target's numbered source, fixing dropped requests. Viewer list selection/sort persistence/control separation and native service Cancel routing also passed. Full parity remains open.
+
+## 0.14.0 partial driver ledger checkpoint
+
+Release source checkpoint: 8d9af41. Two clean Windows x64 builds are identical: **5,358,592 bytes (5.359 decimal MB)**, SHA256 **68E666333B3674FAE947F516EB96C8DC359A3F94FF6E3DF149E6D39364FD1FC9**. System DLL imports only. All four native suites, driver/backend tests, **810 actual-original-code comparisons**, and three packaged GUI workflows passed. Partial driver ledgers preserve unattempted queued targets, successfully drain later attempts, park zero-progress ledgers, and survive restart. Token aliases and null/per-landed fallback have 48 direct comparisons with the retained original ingestion block. Full parity remains open.
