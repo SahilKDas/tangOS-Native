@@ -318,6 +318,21 @@ void Fleet::stop(const std::string &id) {
     saveLocked();
   }
 }
+void Fleet::stopExternal() {
+  std::lock_guard<std::mutex> lock(mutex);
+  for (auto &item : jobs) {
+    auto &job = item.second;
+    if (job->state.spec.kind != "mcp")
+      continue;
+    job->runner.cancel();
+    job->state.spec.loop = false;
+    if (!job->externalTask && job->active) {
+      job->active = false;
+      job->state.phase = "cancelled";
+      job->state.detail = "MCP server stopped; partial work and logs retained";
+    }
+  }
+}
 void Fleet::stopAll() {
   std::lock_guard<std::mutex> lock(mutex);
   for (auto &item : jobs) {

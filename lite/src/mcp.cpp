@@ -2,6 +2,7 @@
 #include <ws2tcpip.h>
 #include "mcp.h"
 #include <algorithm>
+#include <chrono>
 #include <sstream>
 #include <stdexcept>
 namespace lite {
@@ -15,7 +16,27 @@ struct McpServer::Impl {
   unsigned short boundPort = 0;
   std::string token;
   std::mutex sessionsMutex;
-  std::map<std::string, std::string> sessions;
+  struct Session {
+    std::string agent, name;
+    int64_t connectedAt, lastSeen;
+  };
+  std::map<std::string, Session> sessions;
+  std::atomic<uint64_t> requestsSeen{0};
+  std::atomic<int64_t> lastContactAt{0};
+  static int64_t now() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+  }
+  void expireLocked() {
+    auto cutoff = now() - 30 * 60 * 1000;
+    for (auto it = sessions.begin(); it != sessions.end();) {
+      if (it->second.lastSeen < cutoff)
+        it = sessions.erase(it);
+      else
+        ++it;
+    }
+  }
   Impl(Fleet &f, Descriptor d) : fleet(f), descriptor(std::move(d)) {}
   Json rpc(const Json &request, std::string &session) {
     auto id = request.value("id", Json());
@@ -37,11 +58,14 @@ struct McpServer::Impl {
         session = uniqueId();
         {
           std::lock_guard<std::mutex> lock(sessionsMutex);
-          sessions[session] = agent;
+          expireLocked();
+          if (sessions.size() >= 128)
+            throw std::runtime_error("Too many MCP sessions; disconnect an existing client");
+          sessions[session] = {agent, name, now(), now()};
         }
         result = {{"protocolVersion", "2025-03-26"},
                   {"capabilities", {{"tools", Json::object()}}},
-                  {"serverInfo", {{"name", "TangOS Lite"}, {"version", "0.7.0"}}},
+                  {"serverInfo", {{"name", "TangOS Lite"}, {"version", "0.8.0"}}},
                   {"instructions", "Pull next_batch and follow its scoped AGENTS.md instructions. "
                                    "Work only in the assigned worktree."}};
       } else if (method == "ping")
@@ -55,7 +79,8 @@ struct McpServer::Impl {
           auto it = sessions.find(session);
           if (it == sessions.end())
             throw std::runtime_error("Initialize a session first");
-          agent = it->second;
+          it->second.lastSeen = now();
+          agent = it->second.agent;
         }
         if (method == "tools/list") {
           Json tools = Json::array();
@@ -136,6 +161,8 @@ struct McpServer::Impl {
     }
   }
   void serve(SOCKET socket) {
+    ++requestsSeen;
+    lastContactAt = now();
     DWORD timeout = 5000;
     setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
     setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
@@ -171,7 +198,8 @@ struct McpServer::Impl {
       std::istringstream lines(headers);
       std::string line;
       std::getline(lines, line);
-      if (line != "POST /mcp HTTP/1.1\r") {
+      bool deleting = line == "DELETE /mcp HTTP/1.1\r";
+      if (line != "POST /mcp HTTP/1.1\r" && !deleting) {
         reply(405, "{}", "");
         closesocket(socket);
         return;
@@ -196,6 +224,16 @@ struct McpServer::Impl {
         closesocket(socket);
         return;
       }
+      if (deleting) {
+        bool removed;
+        {
+          std::lock_guard<std::mutex> lock(sessionsMutex);
+          removed = sessions.erase(fields["mcp-session-id"]) != 0;
+        }
+        reply(removed ? 200 : 404, "{}", "");
+        closesocket(socket);
+        return;
+      }
       auto length = std::stoull(fields.at("content-length"));
       if (length > 1024 * 1024)
         throw std::runtime_error("Request exceeds 1 MiB");
@@ -207,6 +245,16 @@ struct McpServer::Impl {
         body.append(bytes, n);
       }
       auto session = fields["mcp-session-id"];
+      if (!session.empty()) {
+        std::lock_guard<std::mutex> lock(sessionsMutex);
+        expireLocked();
+        if (!sessions.count(session)) {
+          reply(404, "{}", "");
+          closesocket(socket);
+          return;
+        }
+        sessions.at(session).lastSeen = now();
+      }
       auto result = rpc(Json::parse(body.substr(0, length)), session);
       reply(result.is_null() ? 202 : 200, result.is_null() ? "" : result.dump(), session);
     } catch (const std::exception &) {
@@ -266,7 +314,7 @@ McpServer::McpServer(Fleet &fleet, Descriptor descriptor, fs::path config, unsig
 McpServer::~McpServer() {
   impl->stopping = true;
   closesocket(impl->listener);
-  impl->fleet.stopAll();
+  impl->fleet.stopExternal();
   if (impl->server.joinable())
     impl->server.join();
   for (auto &worker : impl->clients)
@@ -275,6 +323,23 @@ McpServer::~McpServer() {
   WSACleanup();
 }
 unsigned short McpServer::port() const { return impl->boundPort; }
+Json McpServer::state() const {
+  std::lock_guard<std::mutex> lock(impl->sessionsMutex);
+  impl->expireLocked();
+  Json clients = Json::array();
+  for (auto &entry : impl->sessions)
+    clients.push_back({{"id", entry.first},
+                       {"agentId", entry.second.agent},
+                       {"name", entry.second.name},
+                       {"connectedAt", entry.second.connectedAt},
+                       {"lastSeen", entry.second.lastSeen}});
+  return {{"running", true},
+          {"url", "http://127.0.0.1:" + std::to_string(impl->boundPort) + "/mcp"},
+          {"connectedClients", clients.size()},
+          {"requestsSeen", impl->requestsSeen.load()},
+          {"lastContactAt", impl->lastContactAt.load()},
+          {"clients", clients}};
+}
 std::string McpServer::configuration() const {
   return Json({{"mcpServers",
                 {{"tangos-lite",

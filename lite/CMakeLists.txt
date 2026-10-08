@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(TangOSLite VERSION 0.7.0 LANGUAGES CXX RC)
+project(TangOSLite VERSION 0.8.0 LANGUAGES CXX RC)
 if(NOT WIN32)
   message(FATAL_ERROR "TangOS Lite currently targets Windows")
 endif()

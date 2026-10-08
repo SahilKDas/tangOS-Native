@@ -15,7 +15,7 @@ $descriptor = @{
   tools = @(@{ id = 'port_reference'; label = 'Port references'; category = 'verification'; description = 'Run independent port reference verification'; readOnly = $true; command = '{python} tools/port_refcheck.py'; args = @() })
 }
 [IO.File]::WriteAllText("$repo/tangos.json", ($descriptor | ConvertTo-Json -Depth 12), [Text.UTF8Encoding]::new($false))
-[IO.File]::WriteAllText("$repo/chaos-db.json", '{"functions":[{"id":"1","name":"fixture_port_init","module":"port","size":80,"matched":true,"author":"FixtureContributor","srcPath":"port/source.cpp"},{"id":"2","name":"fixture_port_render","module":"port","size":120,"matched":false},{"id":"3","name":"fixture_port_check","module":"port","size":60,"matched":false,"div":2}]}', [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText("$repo/chaos-db.json", '{"functions":[{"id":"1","name":"fixture_port_init","module":"port","size":80,"matched":true,"author":"FixtureContributor","srcPath":"port/source.cpp"},{"id":"2","name":"fixture_port_render","module":"port","size":120,"matched":false,"claim":null},{"id":"3","name":"fixture_port_check","module":"port","size":60,"matched":false,"div":2}]}', [Text.UTF8Encoding]::new($false))
 git -C $repo init -b main
 if ($LASTEXITCODE) { throw 'Fixture git init failed' }
 git -C $repo -c user.name=Lite -c user.email=lite@example.invalid add tools/port_refcheck.py port/source.cpp tangos.json chaos-db.json

@@ -7,6 +7,7 @@
 #include <commctrl.h>
 #include <shellapi.h>
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <numeric>
 #include <stdexcept>
@@ -112,7 +113,8 @@ enum class Screen {
   services,
   queue,
   requirements,
-  descriptorGate
+  descriptorGate,
+  mcpConnection
 };
 constexpr int REQUIREMENTS = 4480, REQ_REFRESH = 4481, REQ_TERMINAL = 4482, REQ_GITHUB = 4483,
               REQ_COPY = 4484;
@@ -124,6 +126,7 @@ constexpr int ATLAS_INSPECT = 4400, ATLAS_MODULE = 4401, ATLAS_SOURCE = 4402, AT
 constexpr int HELP_EDIT = 4600, HELP_TIPS = 4601;
 constexpr int DESC_SCAN = 4610, DESC_PREVIEW = 4611, DESC_CONFIRM = 4612, DESC_RELOAD = 4613,
               DESC_FOLDER = 4614;
+constexpr int MCP_TOGGLE = 4620, MCP_CONFIG = 4621, MCP_PROMPT = 4622, MCP_COPY_CONFIG = 4623;
 struct Hit {
   RECT rect;
   int index;
@@ -139,7 +142,11 @@ struct ConsoleUI::Impl {
   Descriptor descriptor;
   std::string descriptorError;
   std::unique_ptr<Fleet> fleet;
-  std::unique_ptr<McpServer> mcp;
+  std::unique_ptr<McpServer> mcp, pendingMcp;
+  std::thread mcpWorker;
+  std::atomic<bool> mcpBusy{false}, mcpReady{false};
+  bool mcpDesired = true;
+  std::string mcpError, pendingMcpError;
   Vault vault;
   Screen screen = Screen::controller;
   std::vector<HWND> controls;
@@ -259,6 +266,7 @@ struct ConsoleUI::Impl {
                          : "status";
       if (atlasColorBy != "author")
         atlasColorBy = "status";
+      mcpDesired = !j.contains("mcpDesired") || j["mcpDesired"] != false;
       atlasDrafts = !j.contains("atlasDrafts") || !j["atlasDrafts"].is_boolean() ||
                     j["atlasDrafts"].get<bool>();
     }
@@ -284,7 +292,8 @@ struct ConsoleUI::Impl {
                                         });
         // Vault is global, whereas queues and worktrees are scoped to a checkout.
         fs::create_directories(data / "vault");
-        mcp = std::make_unique<McpServer>(*fleet, descriptor, project / "mcp-client.json");
+        if (mcpDesired)
+          mcp = std::make_unique<McpServer>(*fleet, descriptor, project / "mcp-client.json");
       }
       atlasReady = true;
       loadAtlas();
@@ -317,6 +326,9 @@ struct ConsoleUI::Impl {
     manualRunner.cancel();
     if (manualWorker.joinable())
       manualWorker.join();
+    if (mcpWorker.joinable())
+      mcpWorker.join();
+    pendingMcp.reset();
     mcp.reset();
     fleet.reset();
     if (loader.joinable())
@@ -717,6 +729,21 @@ struct ConsoleUI::Impl {
                   "\nBytes: " + std::to_string(f.size),
               width - 332, 62, 310, 180);
       }
+    } else if (screen == Screen::mcpConnection) {
+      label("MCP server", 18, 55, cw - 36, 28);
+      body = edit(mcpSummary(), 0, 18, 94, cw - 36, height - 225,
+                  ES_MULTILINE | ES_READONLY | WS_VSCROLL);
+      button(mcpBusy ? "Working…" : (mcp ? "Stop server" : "Start server"), MCP_TOGGLE, 18,
+             height - 108, 126);
+      button("Open client config", MCP_CONFIG, 152, height - 108, 164);
+      button("Copy config", MCP_COPY_CONFIG, 324, height - 108, 122);
+      button("Copy AI prompt", MCP_PROMPT, 454, height - 108, 136);
+      button("Controller", HOME, 18, height - 48, 108);
+      label("Your clients and credentials", width - 332, 62, 310, 28);
+      label("Add an MCP agent in Controller with its exact client name. Copy this local connection "
+            "configuration into your chosen client. API accounts and keys remain your own. No "
+            "external client configuration is changed automatically.",
+            width - 332, 104, 310, 170);
     } else if (screen == Screen::parameters) {
       auto &tool = descriptor.tool(toolId);
       int end = std::min((int)tool.args.size(), (argumentPage + 1) * 10), yy = 64;
@@ -1035,7 +1062,7 @@ struct ConsoleUI::Impl {
           auto id = row.value("id", std::string());
           for (size_t i = 0; i < atlas.size(); ++i)
             if (atlas[i].id == id && atlas[i].state != "matched" && !exemptTarget(atlas[i].row) &&
-                (!atlas[i].row.contains("claim") || atlas[i].row["claim"].is_null()) &&
+                !claimedTarget(atlas[i].row) &&
                 std::find(cart.begin(), cart.end(), i) == cart.end()) {
               cart.push_back(i);
               break;
@@ -1048,6 +1075,73 @@ struct ConsoleUI::Impl {
     popup->ui->show(true, true);
     popups.push_back(std::move(popup));
     ShowWindow(h, SW_SHOWNORMAL);
+  }
+  std::string mcpSummary() {
+    if (mcpBusy)
+      return "Changing MCP server state… The UI remains responsive.";
+    if (!mcp)
+      return "Server stopped.\n" + mcpError;
+    auto state = mcp->state();
+    std::string summary = "Status: running\nURL: " + state.at("url").get<std::string>() +
+                          "\nClients: " + std::to_string(state.at("connectedClients").get<int>()) +
+                          "\nTraffic: " + std::to_string(state.at("requestsSeen").get<uint64_t>()) +
+                          " requests\n";
+    for (auto &client : state.at("clients")) {
+      auto elapsed = std::max<int64_t>(0, std::chrono::duration_cast<std::chrono::milliseconds>(
+                                              std::chrono::system_clock::now().time_since_epoch())
+                                                  .count() -
+                                              client.at("lastSeen").get<int64_t>()) /
+                     1000;
+      summary += "\n" + client.at("name").get<std::string>() + " · last contact " +
+                 std::to_string(elapsed) + "s ago";
+    }
+    summary += "\n\nOnly assigned isolated worktrees are exposed. Follow AGENTS.md from "
+               "next_batch; independent checks and user review are required.\nSessions disconnect "
+               "using DELETE /mcp or expire after 30 minutes without contact.";
+    return summary;
+  }
+  std::string mcpPrompt() {
+    if (!mcp || mcpBusy)
+      throw std::runtime_error("Start the MCP server first");
+    return "Connect your MCP client to TangOS Lite using the configuration below. Add an MCP agent "
+           "in Controller with exactly the same clientInfo.name as your client. The user must "
+           "assign/start its batch. Call next_batch, follow the returned AGENTS.md instructions, "
+           "work only in its isolated worktree, and call finish_batch for independent "
+           "verification. Never commit, push, modify protected src/ in port-only mode, or include "
+           "ROMs, Nintendo assets or credentials.\n\n" +
+           mcp->configuration();
+  }
+  void toggleMcp() {
+    if (!fleet)
+      throw std::runtime_error("Load a valid repository descriptor first");
+    if (mcpBusy || mcpReady)
+      return;
+    if (mcpWorker.joinable())
+      mcpWorker.join();
+    bool starting = !mcp;
+    auto old = std::move(mcp);
+    mcpBusy = true;
+    mcpError.clear();
+    mcpWorker = std::thread([this, starting, old = std::move(old)]() mutable {
+      std::unique_ptr<McpServer> next;
+      std::string error;
+      try {
+        if (starting)
+          next = std::make_unique<McpServer>(*fleet, descriptor, data / "mcp-client.json");
+        else
+          old.reset();
+      } catch (const std::exception &e) {
+        error = e.what();
+      }
+      {
+        std::lock_guard<std::mutex> lock(outputMutex);
+        pendingMcp = std::move(next);
+        pendingMcpError = error;
+      }
+      mcpReady = true;
+    });
+    if (screen == Screen::mcpConnection)
+      build();
   }
   static void copyText(HWND owner, const std::string &value) {
     if (!OpenClipboard(owner))
@@ -1270,7 +1364,7 @@ struct ConsoleUI::Impl {
     }
     if (key == VK_SPACE && pickedFunction < atlas.size()) {
       auto &f = atlas[pickedFunction];
-      if (f.state == "matched" || exemptTarget(f.row) || f.row.contains("claim"))
+      if (f.state == "matched" || exemptTarget(f.row) || claimedTarget(f.row))
         return;
       auto at = std::find(cart.begin(), cart.end(), pickedFunction);
       if (at == cart.end()) {
@@ -1309,6 +1403,7 @@ struct ConsoleUI::Impl {
                         : screen == Screen::profile        ? "Connect AI"
                         : screen == Screen::detail         ? "AI detail"
                         : screen == Screen::descriptorGate ? "Repository setup"
+                        : screen == Screen::mcpConnection  ? "MCP connection"
                         : screen == Screen::requirements   ? "Requirements"
                         : screen == Screen::connections    ? "Connections"
                         : screen == Screen::services       ? "Project services"
@@ -1486,8 +1581,7 @@ struct ConsoleUI::Impl {
                       (int)(GetGValue(color) * .14 + GetGValue(ground) * .86),
                       (int)(GetBValue(color) * .14 + GetBValue(ground) * .86));
         }
-        if (!dimmed && f.row.contains("claim") && !f.row["claim"].is_null() &&
-            f.row["claim"] != false)
+        if (!dimmed && claimedTarget(f.row))
           color = RGB((int)(GetRValue(color) * .58 + 255 * .42),
                       (int)(GetGValue(color) * .58 + 90 * .42),
                       (int)(GetBValue(color) * .58 + 90 * .42));
@@ -2111,11 +2205,25 @@ struct ConsoleUI::Impl {
       break;
     }
     case OPEN_MCP:
-      if (mcp) {
+      navigate(Screen::mcpConnection);
+      break;
+    case MCP_TOGGLE:
+      toggleMcp();
+      break;
+    case MCP_CONFIG:
+    case MCP_COPY_CONFIG:
+      if (!mcp || mcpBusy)
+        throw std::runtime_error("Start the MCP server first");
+      if (id == MCP_COPY_CONFIG)
+        copyText(window, mcp->configuration());
+      else {
         auto path = data / "mcp-client.json";
         write(path, mcp->configuration());
         ShellExecuteW(window, L"open", L"notepad.exe", path.c_str(), nullptr, SW_SHOWNORMAL);
       }
+      break;
+    case MCP_PROMPT:
+      copyText(window, mcpPrompt());
       break;
     case OPEN_LOG: {
       auto a = activeAgent();
@@ -2177,8 +2285,7 @@ struct ConsoleUI::Impl {
       if (pickedFunction >= atlas.size())
         throw std::runtime_error("Select a function first");
       if (atlas[pickedFunction].state == "matched" || exemptTarget(atlas[pickedFunction].row) ||
-          (atlas[pickedFunction].row.contains("claim") &&
-           !atlas[pickedFunction].row["claim"].is_null()))
+          claimedTarget(atlas[pickedFunction].row))
         throw std::runtime_error(
             "This function is matched, exempt or claimed; choose available work");
       if (draftAdded && pickedFunction < atlas.size())
@@ -2261,6 +2368,31 @@ struct ConsoleUI::Impl {
     }
   }
   void tick() {
+    if (mcpReady.exchange(false)) {
+      if (mcpWorker.joinable())
+        mcpWorker.join();
+      {
+        std::lock_guard<std::mutex> lock(outputMutex);
+        mcp = std::move(pendingMcp);
+        mcpError = pendingMcpError;
+      }
+      mcpBusy = false;
+      mcpDesired = bool(mcp);
+      auto path = data / "console-ui.json";
+      auto prefs = fs::exists(path) ? Json::parse(read(path), nullptr, false) : Json::object();
+      if (!prefs.is_object())
+        prefs = Json::object();
+      prefs["mcpDesired"] = mcpDesired;
+      write(path, prefs.dump(2));
+      if (screen == Screen::mcpConnection)
+        build();
+    }
+    if (screen == Screen::mcpConnection && body) {
+      auto summary = mcpSummary();
+      if (text(body) != summary)
+        setText(body, summary);
+    }
+
     if (statsReady.exchange(false)) {
       std::lock_guard<std::mutex> lock(outputMutex);
       if (!pendingStats.contains("error"))
@@ -2648,8 +2780,7 @@ struct ConsoleUI::Impl {
             self->cart.clear();
           for (auto index : selected)
             if (self->atlas[index].state != "matched" && !exemptTarget(self->atlas[index].row) &&
-                (!self->atlas[index].row.contains("claim") ||
-                 self->atlas[index].row["claim"].is_null()) &&
+                !claimedTarget(self->atlas[index].row) &&
                 std::find(self->cart.begin(), self->cart.end(), index) == self->cart.end())
               self->cart.push_back(index);
           self->marquee = false;
@@ -2668,7 +2799,7 @@ struct ConsoleUI::Impl {
               self->pickedFunction = hit.index;
               self->flyFunction(hit.index);
               if ((GetKeyState(VK_CONTROL) & 0x8000) && f.state != "matched" &&
-                  !exemptTarget(f.row) && (!f.row.contains("claim") || f.row["claim"].is_null())) {
+                  !exemptTarget(f.row) && !claimedTarget(f.row)) {
                 auto it = std::find(self->cart.begin(), self->cart.end(), hit.index);
                 if (it == self->cart.end())
                   self->cart.push_back(hit.index);
@@ -2867,6 +2998,20 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     }
     impl->tick();
   };
+  impl->navigate(Screen::mcpConnection);
+  if (!impl->mcp || impl->mcpSummary().find("Status: running") == std::string::npos ||
+      impl->mcpPrompt().find("AGENTS.md") == std::string::npos)
+    throw std::runtime_error("MCP connection screen/prompt missing");
+  capture(directory / "mcp-connection.bmp");
+  impl->action(MCP_TOGGLE, BN_CLICKED);
+  waitFor([&] { return impl->mcpBusy.load() || impl->mcpReady.load(); });
+  if (impl->mcp || Json::parse(read(impl->data / "console-ui.json")).value("mcpDesired", true))
+    throw std::runtime_error("MCP stop state did not persist");
+  impl->action(MCP_TOGGLE, BN_CLICKED);
+  waitFor([&] { return impl->mcpBusy.load() || impl->mcpReady.load(); });
+  if (!impl->mcp)
+    throw std::runtime_error("MCP restart failed");
+  impl->navigate(Screen::functionDetail);
   waitFor([&] { return impl->inspectBusy.load() || impl->inspectReady.load(); });
   if (impl->inspectText.find("1  int fixture_source") == std::string::npos)
     throw std::runtime_error("Native source inspection did not load numbered source");

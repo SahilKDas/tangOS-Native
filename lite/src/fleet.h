@@ -70,6 +70,7 @@ public:
   void land(const std::string &id);
   void stop(const std::string &id);
   void stopAll();
+  void stopExternal();
   void setPolicy(const Settings &settings);
   bool running() const;
   std::string review(const std::string &id);

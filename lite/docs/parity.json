@@ -9,8 +9,11 @@
     },
     {
       "contract": "mcp",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/fleet_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "state"
     },
     {
@@ -51,8 +54,11 @@
     },
     {
       "contract": "clients",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/fleet_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "state"
     },
     {
@@ -211,14 +217,20 @@
     },
     {
       "contract": "viewerPrefsGet",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/fleet_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "api"
     },
     {
       "contract": "viewerPrefsSet",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/fleet_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "api"
     },
     {
@@ -417,14 +429,20 @@
     },
     {
       "contract": "startMcp",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/fleet_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "api"
     },
     {
       "contract": "stopMcp",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/fleet_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "api"
     },
     {
@@ -435,8 +453,11 @@
     },
     {
       "contract": "agentPrompt",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/fleet_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "api"
     },
     {

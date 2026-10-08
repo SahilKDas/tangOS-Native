@@ -27,5 +27,6 @@ size_t atlasNeighbor(const std::vector<AtlasFunction> &rows, const std::vector<T
 std::string atlasColor(const Json &row, bool authors, bool nearMiss,
                        const std::map<std::string, std::string> &aliases = {},
                        const std::map<std::string, std::string> &colors = {});
+bool claimedTarget(const Json &row);
 std::string numberedSource(const std::string &source);
 } // namespace lite

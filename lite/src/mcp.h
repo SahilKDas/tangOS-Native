@@ -11,5 +11,6 @@ public:
   ~McpServer();
   unsigned short port() const;
   std::string configuration() const;
+  Json state() const;
 };
 } // namespace lite

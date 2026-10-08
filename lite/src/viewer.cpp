@@ -4,6 +4,18 @@
 #include <map>
 #include <sstream>
 namespace lite {
+bool claimedTarget(const Json &row) {
+  if (!row.contains("claim") || row["claim"].is_null())
+    return false;
+  const auto &claim = row["claim"];
+  if (claim.is_boolean())
+    return claim.get<bool>();
+  if (claim.is_number())
+    return claim.get<double>() != 0;
+  if (claim.is_string())
+    return !claim.get<std::string>().empty();
+  return true;
+}
 std::string atlasColor(const Json &row, bool authors, bool nearMiss,
                        const std::map<std::string, std::string> &aliases,
                        const std::map<std::string, std::string> &colors) {

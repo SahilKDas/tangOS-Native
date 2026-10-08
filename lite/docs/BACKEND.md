@@ -1,6 +1,6 @@
 # Native backend and user-owned connections
 
-TangOS Lite 0.4 provides a native backend callable from the executable and a read-only bridge for authenticated MCP agents. It does not need the repository owner's API keys, accounts, OAuth application or hosted server. Credentials are never compiled into source or release binaries.
+TangOS Lite provides a native backend callable from the executable and a read-only bridge for authenticated MCP agents. It does not need the repository owner's API keys, accounts, OAuth application or hosted server. Credentials are never compiled into source or release binaries.
 
 ## Calling services
 

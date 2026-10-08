@@ -180,7 +180,9 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       auto first = fleet.add(a);
       a.name = "API B";
       auto second = fleet.add(a);
-      fleet.enqueue(first, Json::array({{{"id", "one"}, {"name", "one"}, {"module", "port"}, {"claim", nullptr}}}));
+      fleet.enqueue(
+          first,
+          Json::array({{{"id", "one"}, {"name", "one"}, {"module", "port"}, {"claim", nullptr}}}));
       reject(
           [&] {
             fleet.enqueue(second,
@@ -299,12 +301,20 @@ output=call('tools/call',{'name':'echo','arguments':{'value':"print('native-mcp-
 assert 'native-mcp-output' in output['content'][0]['text']
 call('tools/call',{'name':'finish_batch','arguments':{}})
 for _ in range(150):call('ping')
+with urllib.request.urlopen(urllib.request.Request(url,headers=headers,method='DELETE')) as response:assert response.status==200
+try:call('ping');raise AssertionError('terminated session remained usable')
+except urllib.error.HTTPError as error:assert error.code==404
 print('authenticated MCP protocol, tools, batch lifecycle and long polling passed')
 )PY");
       auto rpc = setup.run(
           {{"python", utf8((dir / "mcp_client.py").wstring()), utf8((data / "mcp.json").wstring())},
            dir});
       expect(rpc.code == 0, "MCP HTTP integration: " + rpc.output);
+      auto serverState = mcp.state();
+      expect(serverState["connectedClients"] == 0, "MCP DELETE disconnects client");
+      expect(serverState["requestsSeen"].get<int>() >= 155 &&
+                 serverState["lastContactAt"].get<int64_t>() > 0,
+             "MCP traffic telemetry counts requests without secrets");
       a.name = "Stopped fixture";
       a.kind = "cli";
       a.cli = "python -c \"import time; print('running',flush=True); time.sleep(20)\"";
@@ -312,6 +322,10 @@ print('authenticated MCP protocol, tools, batch lifecycle and long polling passe
       fleet.enqueue(stopped, Json::array({{{"id", "stop"}, {"name", "stop"}}}));
       fleet.start(stopped);
       std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      {
+        McpServer temporary(fleet, desc, data / "temporary-mcp.json");
+      }
+      expect(fleet.running(), "Stopping MCP preserves unrelated CLI jobs");
       fleet.stop(stopped);
       wait(fleet);
       for (auto &state : fleet.snapshot())

@@ -45,6 +45,9 @@ int main() {
     expect(marqueeTiles(fixtureTiles, {60, 40, -50, -30}) == std::vector<size_t>({0, 1}),
            "reverse marquee intersects tiles");
     expect(marqueeTiles(fixtureTiles, {110, 110, 5, 5}).empty(), "marquee outside world");
+    expect(!claimedTarget(Json{{"claim", nullptr}}) && !claimedTarget(Json{{"claim", false}}),
+           "null/false claims remain selectable");
+    expect(claimedTarget(Json{{"claim", Json::object()}}), "structured claims block selection");
     expect(marqueeTiles(fixtureTiles, {0, 0, 50, 50}) == std::vector<size_t>({0}),
            "edge contact does not select neighbor");
     AtlasLod lod;
