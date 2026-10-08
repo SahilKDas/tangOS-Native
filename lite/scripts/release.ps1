@@ -16,6 +16,8 @@ python "$source/tests/test_agent_adapter.py"
 if ($LASTEXITCODE) { throw 'Driver adapter tests failed' }
 python "$source/tests/test_backend_cli.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Packaged backend tests failed' }
+python "$source/tests/test_workflows_cli.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Packaged Git workflow tests failed' }
 python "$source/tests/test_reference_parity.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original Console comparisons failed' }
 python "$source/tests/test_statistics_reference.py" --exe "$out/build-a/TangOSLite.exe"
@@ -52,7 +54,7 @@ if ($size -ge 50000000) { throw 'Executable exceeds strict 50 MB limit' }
 $imports = & objdump -p "$out/TangOSLite.exe" | Select-String 'DLL Name:' | ForEach-Object { $_.Line.Trim() }
 $compiler = (& g++ --version | Select-Object -First 1)
 $cmake = (& cmake --version | Select-Object -First 1)
-$report = "TangOS Lite 0.15.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
+$report = "TangOS Lite 0.16.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
 Set-Content -LiteralPath "$out/SIZE.txt" -Value $report -Encoding utf8
 Copy-Item -LiteralPath "$source/README.md" -Destination "$out/README.md"
 Copy-Item -LiteralPath "$source/../LICENSE" -Destination "$out/LICENSE"

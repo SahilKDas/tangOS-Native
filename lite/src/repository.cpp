@@ -61,13 +61,13 @@ void requirePath(const std::string &p, const Settings &s) {
     throw std::runtime_error("Blocked " + p + ": " + why);
 }
 } // namespace
-std::string Repository::safetyIndex() {
+std::string Repository::safetyIndex(bool requireStaged) {
   auto conflicts = git({"ls-files", "-u"});
   if (!conflicts.empty())
     throw std::runtime_error("Unresolved conflicts: resolve files before committing.\n" +
                              conflicts);
   auto paths = split(git({"diff", "--cached", "--name-only", "--no-renames", "-z"}), '\0');
-  if (paths.empty())
+  if (requireStaged && paths.empty())
     throw std::runtime_error("Nothing staged. Stage explicit paths, then preview the commit.");
   for (auto &p : paths) {
     requirePath(p, settings);
@@ -230,7 +230,7 @@ Command Repository::action(const std::string &name, const std::string &remote,
   } else if (name == "List stashes") {
     append({"stash", "list"});
   } else if (name == "Stash selected paths") {
-    safetyIndex();
+    safetyIndex(false);
     Args paths;
     for (auto path : split(text, '\n')) {
       path = trim(path);

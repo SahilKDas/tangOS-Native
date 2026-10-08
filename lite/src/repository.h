@@ -10,7 +10,7 @@ public:
   Repository(Runner &r, const fs::path &selected, const Settings &s);
   std::string git(const Args &args);
   std::string status();
-  std::string safetyIndex();
+  std::string safetyIndex(bool requireStaged = true);
   std::string commitPreview();
   std::string pushPreview(const std::string &remote, const std::string &branch);
   std::string agentHandoff();
