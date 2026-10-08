@@ -1,0 +1,248 @@
+{
+  "getState": {
+    "repo": {
+      "path": "C:/Fixture/repository",
+      "descriptor": {
+        "tangosVersion": "1",
+        "project": {
+          "name": "native-gui-fixture",
+          "title": "Native GUI fixture",
+          "tagline": "Portable descriptor-driven Console"
+        },
+        "runtime": {
+          "python": "python"
+        },
+        "data": {
+          "dbPath": "chaos-db.json"
+        },
+        "tools": [
+          {
+            "id": "port_reference",
+            "label": "Port references",
+            "category": "verification",
+            "description": "Run independent port reference verification",
+            "readOnly": true,
+            "command": "{python} tools/port_refcheck.py",
+            "args": []
+          }
+        ]
+      },
+      "descriptorPath": "C:/Fixture/repository/tangos.json",
+      "hasDescriptor": true,
+      "validationErrors": [],
+      "isGit": true,
+      "projectId": "fixture",
+      "projectTitle": "Native GUI fixture",
+      "mode": "local"
+    },
+    "mcp": {
+      "running": false,
+      "port": null,
+      "url": null,
+      "connectedClients": 0,
+      "requestsSeen": 0,
+      "lastContactAt": null
+    },
+    "allowMutations": false,
+    "enabledToolIds": [
+      "port_reference"
+    ],
+    "batches": [],
+    "safeMode": true,
+    "reviews": [],
+    "baseBranch": "main",
+    "agents": [
+      {
+        "name": "Fixture API",
+        "kind": "api",
+        "provider": "User provider",
+        "roles": [],
+        "connected": false,
+        "stats": {
+          "totalMatches": 0,
+          "matchAttempts": 0,
+          "nearMisses": 0,
+          "hitRate": 0,
+          "bySize": {}
+        },
+        "run": {
+          "totalMatches": 0,
+          "matchAttempts": 0,
+          "hitRate": 0
+        }
+      }
+    ],
+    "reportsEnabled": false,
+    "useAgents": false,
+    "agentFanout": 1,
+    "autoLand": false,
+    "autoPush": {
+      "enabled": false,
+      "on": false,
+      "state": "idle"
+    },
+    "looping": [],
+    "projects": [
+      {
+        "id": "fixture",
+        "title": "Native GUI fixture",
+        "glyph": "FX",
+        "github": "",
+        "path": "C:/Fixture/repository",
+        "cloned": true,
+        "active": true
+      }
+    ],
+    "capabilities": {
+      "scheduler": true,
+      "driver": true
+    },
+    "switchingProject": false,
+    "tourSeen": true,
+    "updateNoteSeen": "match-logging-2026-07"
+  },
+  "activitySnapshot": [],
+  "appVersion": "3.6.0 reference",
+  "bgPrefsGet": {
+    "enabled": true
+  },
+  "matchingPrefsGet": {
+    "allowNearMiss": true,
+    "allowGhidra": false
+  },
+  "uiPrefsGet": {
+    "mode": "simple"
+  },
+  "isMaximized": false,
+  "getTips": [
+    {
+      "title": "Visual fixture",
+      "body": "Local read-only comparison data."
+    }
+  ],
+  "preflight": [
+    {
+      "id": "fixture",
+      "label": "Local fixture tools",
+      "ok": true,
+      "detail": "No external services"
+    }
+  ],
+  "repoUpdateStatus": {
+    "isGit": true,
+    "branch": "main",
+    "behind": 0,
+    "ahead": 0
+  },
+  "checkAppUpdate": {
+    "state": "dev"
+  },
+  "secretsInfo": {
+    "secrets": [],
+    "declared": []
+  },
+  "agentPrompt": "Read-only local reference fixture",
+  "atlasLoad": {
+    "functions": [
+      {
+        "id": "1",
+        "name": "fixture_port_init",
+        "module": "port",
+        "size": 80,
+        "matched": true,
+        "author": "FixtureContributor",
+        "srcPath": "port/source.cpp"
+      },
+      {
+        "id": "2",
+        "name": "fixture_port_render",
+        "module": "port",
+        "size": 120,
+        "matched": false,
+        "claim": null
+      },
+      {
+        "id": "3",
+        "name": "fixture_port_check",
+        "module": "port",
+        "size": 60,
+        "matched": false,
+        "div": 2
+      }
+    ],
+    "stats": {
+      "totalFunctions": 3,
+      "matchedFunctions": 1,
+      "totalBytes": 260,
+      "matchedBytes": 80,
+      "moduleCount": 1
+    }
+  },
+  "atlasLoadLive": {
+    "functions": [
+      {
+        "id": "1",
+        "name": "fixture_port_init",
+        "module": "port",
+        "size": 80,
+        "matched": true,
+        "author": "FixtureContributor",
+        "srcPath": "port/source.cpp"
+      },
+      {
+        "id": "2",
+        "name": "fixture_port_render",
+        "module": "port",
+        "size": 120,
+        "matched": false,
+        "claim": null
+      },
+      {
+        "id": "3",
+        "name": "fixture_port_check",
+        "module": "port",
+        "size": 60,
+        "matched": false,
+        "div": 2
+      }
+    ],
+    "stats": {
+      "totalFunctions": 3,
+      "matchedFunctions": 1,
+      "totalBytes": 260,
+      "matchedBytes": 80,
+      "moduleCount": 1
+    }
+  },
+  "githubCredits": {
+    "ready": false,
+    "contributors": []
+  },
+  "atlasCosmetics": {
+    "colors": {},
+    "stars": {}
+  },
+  "atlasCounts": {
+    "ready": false
+  },
+  "atlasProgress": {
+    "ready": false
+  },
+  "viewerPrefsGet": {
+    "contributorColors": false,
+    "theme": "classic"
+  },
+  "functionHistory": {
+    "attempts": [],
+    "tip": null
+  },
+  "atlasSource": {
+    "lines": [
+      "int fixture_source = 1;",
+      ""
+    ],
+    "truncated": false,
+    "kind": "src",
+    "path": "port/source.cpp"
+  }
+}

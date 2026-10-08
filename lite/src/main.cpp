@@ -50,7 +50,7 @@ enum {
 bool workspaceReady = false;
 bool repositoryView = false;
 bool toolboxOpen = false;
-HWND themeCombo, minimizeButton, maximizeButton, closeButton;
+HWND themeCombo, minimizeButton, maximizeButton, closeButton, projectButton;
 HWND controllerTab, repositoryTab;
 HWND toolboxButton;
 HBRUSH fieldBrush = nullptr;
@@ -178,15 +178,15 @@ std::string resourceText(int id) {
   return std::string((const char *)LockResource(loaded), SizeofResource(nullptr, r));
 }
 void about() {
-  reviewDialog("TangOS Lite 0.11.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
-               "for checks and Git; Repository for status.\nAlways read AGENTS.md and review "
-               "changes before publication.\n\n" +
-                   resourceText(204) + "\n\nMinGW-w64 libwinpthread\n" + resourceText(202) +
-                   "\n\nGCC Runtime Library Exception\n" + resourceText(203) + "\n\nGPLv3\n" +
-                   resourceText(205) + "\n\nNunito\n" + resourceText(207) +
-                   "\n\nRaster dependencies\n" + resourceText(208) + "\n\nnlohmann JSON\n" +
-                   resourceText(210),
-               true);
+  reviewDialog(
+      "TangOS Lite 0.11.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
+      "for checks and Git; Repository for status.\nAlways read AGENTS.md and review "
+      "changes before publication.\n\n" +
+          resourceText(204) + "\n\nMinGW-w64 libwinpthread\n" + resourceText(202) +
+          "\n\nGCC Runtime Library Exception\n" + resourceText(203) + "\n\nGPLv3\n" +
+          resourceText(205) + "\n\nNunito\n" + resourceText(207) + "\n\nRaster dependencies\n" +
+          resourceText(208) + "\n\nnlohmann JSON\n" + resourceText(210),
+      true);
 }
 void fillChecks() {
   checks = discoverChecks(repo, settings);
@@ -332,6 +332,8 @@ void layout(int w, int h) {
   MoveWindow(controllerTab, w / 2 - 149, 11, 142, 30, TRUE);
   MoveWindow(repositoryTab, w / 2 - 4, 11, 130, 30, TRUE);
   if (!workspaceReady) {
+    ShowWindow(repoEdit, SW_SHOW);
+    ShowWindow(projectButton, SW_HIDE);
     int x = (w - 760) / 2, y = (h - 420) / 2;
     MoveWindow(repoEdit, x + 72, y + 174, 494, 34, TRUE);
     MoveWindow(selectButton, x + 578, y + 174, 110, 34, TRUE);
@@ -341,7 +343,9 @@ void layout(int w, int h) {
     set(browseButton, "Choose repo folder");
   } else {
     int rail = w - 354, cw = w - 382;
-    MoveWindow(repoEdit, 134, 13, std::max(90, w / 2 - 294), 28, TRUE);
+    ShowWindow(repoEdit, SW_HIDE);
+    ShowWindow(projectButton, SW_SHOW);
+    MoveWindow(projectButton, 144, 13, std::max(90, w / 2 - 308), 30, TRUE);
     MoveWindow(browseButton, w - 416, 12, 124, 30, TRUE);
     ShowWindow(selectButton, SW_HIDE);
     set(browseButton, "Change repo");
@@ -557,6 +561,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     titleLabel = control(L"STATIC", L"TangOS Lite   |   native repository workbench", 0);
     repoLabel = control(L"STATIC", L"Repository", 0);
     repoEdit = control(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP);
+    projectButton = control(L"BUTTON", L"Choose a project", WS_TABSTOP, BROWSE);
     browseButton = control(L"BUTTON", L"Browse...", WS_TABSTOP, BROWSE);
     selectButton = control(L"BUTTON", L"Select", WS_TABSTOP, SELECT);
     refreshButton = control(L"BUTTON", L"Refresh", WS_TABSTOP, REFRESH);
@@ -880,6 +885,12 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     set(repoEdit, settings.repository);
     fillChecks();
     workspaceReady = true;
+    std::string projectTitle = utf8(repo.filename().wstring());
+    try {
+      projectTitle = loadDescriptor(repo).title;
+    } catch (...) {
+    }
+    set(projectButton, projectTitle + "  ▾");
     if (!consoleUI || consoleRepository != repo) {
       consoleUI.reset();
       consoleRepository = repo;

@@ -13,6 +13,7 @@ COLORREF muted();
 COLORREF field();
 void background(HDC dc, int width, int height);
 void panel(HDC dc, int x, int y, int width, int height, bool solid = false);
+void agentCard(HDC dc, int x, int y, int width, int height, COLORREF color);
 void label(HDC dc, const std::wstring &text, int x, int y, int width, int height, int size = 13,
            bool bold = false, bool secondary = false, bool accent = false);
 void button(const DRAWITEMSTRUCT &item, bool primary = false, bool danger = false);

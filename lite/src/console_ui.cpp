@@ -416,6 +416,24 @@ struct ConsoleUI::Impl {
     scroll = 0;
     build();
   }
+  bool controllerNeedsRail() const {
+    auto req = descriptor.document.value("requirements", Json::object());
+    if (!req.empty())
+      return true;
+    try {
+      return !fs::exists(confinedPath(repository, descriptor.database));
+    } catch (...) {
+      return true;
+    }
+  }
+  int controllerWidth() const { return width - (controllerNeedsRail() ? 356 : 0); }
+  RECT agentCardBounds(size_t index) const {
+    int cardWidth = std::max(60, (controllerWidth() - 60) / 3);
+    int cardHeight = advancedMode ? 272 : 210;
+    int x = 18 + int(index % 3) * (cardWidth + 12);
+    int y = 64 + int(index / 3) * (cardHeight + 12) - scroll;
+    return {x, y, x + cardWidth, y + cardHeight};
+  }
   void build() {
     struct BuildGuard {
       bool &flag;
@@ -424,7 +442,7 @@ struct ConsoleUI::Impl {
     } guard(rebuilding);
     refreshAgents();
     destroyControls();
-    int cw = width - 356;
+    int cw = screen == Screen::controller ? controllerWidth() : width - 356;
     if (screen == Screen::descriptorGate) {
       label(fs::exists(repository / "tangos.json") ? "That tangos.json has problems"
                                                    : "No tangos.json here yet",
@@ -447,18 +465,18 @@ struct ConsoleUI::Impl {
                   0, width - 332, 72, 310, height - 142, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
     } else if (screen == Screen::controller) {
       cardIds.clear();
-      int cardY = 64 - scroll;
       for (size_t i = 0; i < agents.size(); ++i) {
         auto &a = agents[i];
         cardIds.push_back(a.id);
-        int cardHeight = advancedMode ? 192 : 160;
-        if (cardY >= 62 && cardY + cardHeight <= height - 160) {
+        auto bounds = agentCardBounds(i);
+        int x = bounds.left, y = bounds.top, w = bounds.right - x, h = bounds.bottom - y;
+        if (y >= 62 && y + h <= height - 100) {
           int base = 5000 + (int)i * 16;
-          button(a.active ? "Stop" : "Go", base, 28, cardY + cardHeight - 42, 76);
-          button("Details", base + 1, 112, cardY + cardHeight - 42, 86);
+          button("Details", base + 1, x + w - 70, y + 8, 58);
           profileFields[a.id + "Count"] =
               edit(!advancedMode && a.spec.loop ? std::string() : std::to_string(a.spec.count),
-                   base + 4, cw - 94, cardY + cardHeight - 42, 62);
+                   base + 4, x + 12, y + h - 48, 54);
+          button(a.active ? "Stop" : "Go", base, x + 74, y + h - 48, w - 86);
           if (advancedMode) {
             std::vector<std::string> roles = {"Unassigned", "Hard matcher", "Drafter", "Refiner",
                                               "Random"};
@@ -466,19 +484,20 @@ struct ConsoleUI::Impl {
             for (size_t r = 0; r < roles.size(); ++r)
               if (roles[r] == a.spec.role)
                 at = (int)r;
-            profileFields[a.id + "Role"] = combo(roles, base + 2, 28, cardY + 104, 150, at);
-            profileFields[a.id + "Effort"] =
-                combo({"off", "low", "medium", "high"}, base + 3, 186, cardY + 104, 96,
-                      a.spec.effort == "off"      ? 0
-                      : a.spec.effort == "low"    ? 1
-                      : a.spec.effort == "medium" ? 2
-                                                  : 3);
-            button("Assign", base + 5, 206, cardY + cardHeight - 42, 84);
-            button("Clear queue", base + 6, 298, cardY + cardHeight - 42, 112);
-            button("Add chosen", base + 7, 418, cardY + cardHeight - 42, 112);
+            profileFields[a.id + "Role"] =
+                combo(roles, base + 2, x + 12, y + h - 126, (w - 32) / 2, at);
+            profileFields[a.id + "Effort"] = combo({"off", "low", "medium", "high"}, base + 3,
+                                                   x + 20 + (w - 32) / 2, y + h - 126, (w - 32) / 2,
+                                                   a.spec.effort == "off"      ? 0
+                                                   : a.spec.effort == "low"    ? 1
+                                                   : a.spec.effort == "medium" ? 2
+                                                                               : 3);
+            int third = (w - 40) / 3;
+            button("Assign", base + 5, x + 12, y + h - 86, third);
+            button("Clear", base + 6, x + 20 + third, y + h - 86, third);
+            button("Cart", base + 7, x + 28 + third * 2, y + h - 86, third);
           }
         }
-        cardY += cardHeight + 12;
       }
       button("Add AI", ADD_AGENT, cw - 108, 16, 92);
       if (!agents.empty()) {
@@ -487,28 +506,22 @@ struct ConsoleUI::Impl {
         for (size_t i = 0; i < agents.size(); ++i) {
           names.push_back(agents[i].spec.name);
           if (agents[i].id == selectedId)
-            sel = (int)i;
+            sel = int(i);
         }
-        agentChoice = combo(names, DETAIL, 18, height - 136, 190, sel);
-        button("Go", GO, 220, height - 136, 72);
-        button("Stop", STOP, 300, height - 136, 72);
-        button("Details", DETAIL, 380, height - 136, 86);
-        if (advancedMode) {
-          button("Assign", ASSIGN, 18, height - 98, 85);
-          button("Clear queue", CLEAR_QUEUE, 112, height - 98, 112);
-          button("Add chosen", ADD_CART, 232, height - 98, 112);
-          button("Edit", EDIT_AGENT, 352, height - 98, 72);
-        }
-        button("Review", REVIEW_AGENT, cw - 110, height - 136, 92);
+        agentChoice = combo(names, DETAIL, cw - 300, height - 48, 184, sel);
+        button("Review", REVIEW_AGENT, cw - 108, height - 48, 92);
       }
-      button("Encyclopedia", ENCYCLOPEDIA, 16, height - 48, 126);
-      button("Settings", SETTINGS, 150, height - 48, 94);
-      button("Git & reviews", GITTOOLS, 252, height - 48, 122);
-      button("Tour", GUIDE, 382, height - 48, 68);
-      button("Batches", BATCHES, 458, height - 48, 94);
-      button("MCP connection", OPEN_MCP, width - 332, height - 116, 144);
-      button("Run logs", OPEN_LOG, width - 180, height - 116, 116);
-      button("This repo needs", REQUIREMENTS, width - 332, 16, 188);
+      button("Tools", ENCYCLOPEDIA, 16, height - 48, 70);
+      button("Settings", SETTINGS, 94, height - 48, 76);
+      button("Git", GITTOOLS, 178, height - 48, 56);
+      button("Tango", GUIDE, 242, height - 48, 60);
+      button("Batches", BATCHES, 310, height - 48, 76);
+      button(mcp && mcp->state().value("running", false) ? "MCP: ON" : "MCP: OFF", OPEN_MCP,
+             cw - 240, 16, 108);
+      if (controllerNeedsRail()) {
+        button("This repo needs", REQUIREMENTS, width - 332, 16, 188);
+        button("Run logs", OPEN_LOG, width - 180, height - 116, 116);
+      }
     } else if (screen == Screen::atlas) {
       search = edit(atlasQuery, SEARCH, 18, 52, cw - 250);
       layoutChoice = combo({"ov", "size", "match", "author"}, ATLAS_LAYOUT, cw - 222, 52, 100,
@@ -1488,8 +1501,10 @@ struct ConsoleUI::Impl {
                   (p.y - miniBounds.top) * (height - 170) / mh, width - 390, height - 170);
   }
   void paint(HDC dc) {
-    skin::panel(dc, 0, 0, width - 356, height);
-    skin::panel(dc, width - 340, 0, 340, height, true);
+    bool fullController = screen == Screen::controller && !controllerNeedsRail();
+    skin::panel(dc, 0, 0, fullController ? width : width - 356, height);
+    if (!fullController)
+      skin::panel(dc, width - 340, 0, 340, height, true);
     std::string title = screen == Screen::controller       ? "Chaos Controller"
                         : screen == Screen::atlas          ? "Chaos Viewer"
                         : screen == Screen::encyclopedia   ? "Encyclopedia"
@@ -1511,43 +1526,47 @@ struct ConsoleUI::Impl {
     if (screen == Screen::controller) {
       if (agents.empty())
         skin::label(dc, L"No AIs connected yet.", width / 4 - 105, 105, 360, 28, 15, false, true);
-      int cw = width - 388, y = 64 - scroll;
-      int cardHeight = advancedMode ? 192 : 160;
       for (size_t i = 0; i < agents.size(); i++) {
         auto &a = agents[i];
-        if (y + cardHeight < 62) {
-          y += cardHeight + 12;
+        auto b = agentCardBounds(i);
+        int x = b.left, y = b.top, w = b.right - x, h = b.bottom - y;
+        if (y < 62 || b.bottom > height - 100)
           continue;
-        }
-        if (y > height - 180)
-          break;
-        skin::panel(dc, 16, y, cw, cardHeight, true);
-        skin::label(dc, wide((a.active ? "● " : "○ ") + a.spec.name), 30, y + 13, cw - 300, 26, 16,
+        static const COLORREF palette[] = {RGB(0, 153, 224),  RGB(125, 75, 216), RGB(230, 25, 75),
+                                           RGB(245, 130, 49), RGB(5, 150, 105),  RGB(219, 39, 119),
+                                           RGB(14, 165, 233), RGB(217, 119, 6),  RGB(67, 99, 216),
+                                           RGB(168, 50, 50),  RGB(0, 160, 176),  RGB(145, 30, 180)};
+        uint32_t colorHash = 0;
+        for (auto c : wide(a.spec.name))
+          colorHash = colorHash * 31 + uint16_t(c);
+        skin::agentCard(dc, x, y, w, h, palette[colorHash % 12]);
+        skin::label(dc, wide((a.active ? "● " : "○ ") + a.spec.name), x + 12, y + 9, w - 92, 26, 15,
                     true, false, true);
-        skin::label(dc, wide(a.spec.kind + " · " + a.phase), 30, y + 86, 140, 24, 12, false, true);
-        skin::label(dc, wide(a.detail.empty() ? "Ready · " + a.spec.role : a.detail), 30, y + 47,
-                    cw - 32, 40, 13, false, true);
-        skin::label(dc, wide(a.lastLine), 178, y + 86, cw - 180, 20, 12, false, true);
-        skin::label(dc,
-                    wide(std::to_string(a.completed) + " worked · " +
-                         std::to_string(a.queue.size()) + " queued · " + a.spec.effort + " effort"),
-                    cw - 260, y + 13, 225, 24, 12, true);
-        hits.push_back({{16, y, 16 + cw, y + cardHeight}, (int)i});
-        y += cardHeight + 12;
+        skin::panel(dc, x + 12, y + 46, w - 24, advancedMode ? 90 : 104);
+        skin::label(dc, wide(a.detail.empty() ? "idle · " + a.spec.role : a.detail), x + 22, y + 54,
+                    w - 44, 56, 12, false, true);
+        skin::label(dc, wide(a.lastLine), x + 22, y + 108, w - 44, 24, 11, false, true);
+        skin::label(
+            dc,
+            wide(a.spec.kind + " · " + a.phase + " · " + std::to_string(a.completed) + " worked"),
+            x + 14, y + h - (advancedMode ? 154 : 80), w - 28, 24, 11, false, true);
+        hits.push_back({b, int(i)});
       }
-      skin::label(dc, L"Repository readiness", width - 322, 58, 305, 26, 15, true);
-      int y2 = 100;
-      for (auto &check : discoverChecks(repository, settings)) {
-        if (y2 > height - 160)
-          break;
-        skin::label(dc, wide(std::string(check.available ? "✓ " : "○ ") + check.name), width - 322,
-                    y2, 302, 24, 13, check.available, !check.available);
-        y2 += 28;
+      if (controllerNeedsRail()) {
+        skin::label(dc, L"Repository readiness", width - 322, 58, 305, 26, 15, true);
+        int y2 = 100;
+        for (auto &check : discoverChecks(repository, settings)) {
+          if (y2 > height - 160)
+            break;
+          skin::label(dc, wide(std::string(check.available ? "✓ " : "○ ") + check.name),
+                      width - 322, y2, 302, 24, 13, check.available, !check.available);
+          y2 += 28;
+        }
+        if (!descriptorError.empty())
+          skin::label(dc, wide("tangos.json: " + descriptorError), width - 322, y2 + 8, 302, 90, 12,
+                      false, true);
       }
-      if (!descriptorError.empty())
-        skin::label(dc, wide("tangos.json: " + descriptorError), width - 322, y2 + 8, 302, 90, 12,
-                    false, true);
-      skin::mascot(dc, width - 128, height - 108, 90);
+      skin::mascot(dc, width - 156, height - 200, 140);
     } else if (screen == Screen::atlas) {
       if (!atlasReady) {
         skin::label(dc, L"Loading atlas…", 18, 108, width - 390, 40, 15, false, true);
@@ -3018,7 +3037,7 @@ void ConsoleUI::resize(int width, int height) {
     impl->storeBatchDraft();
   impl->width = width;
   impl->height = height;
-  MoveWindow(impl->window, 14, 66, width, height, TRUE);
+  MoveWindow(impl->window, 14, 72, width, height, TRUE);
   impl->build();
 }
 bool ConsoleUI::running() const {
@@ -3109,6 +3128,38 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     if (!state || state->phase != "review" || pumps < 3 ||
         !fs::exists(state->worktree / "port/fleet-fixture.txt"))
       throw std::runtime_error("Packaged fleet workflow failed");
+    std::vector<std::string> extraAgents;
+    for (int i = 0; i < 3; ++i) {
+      agent.name = "Grid fixture " + std::to_string(i);
+      extraAgents.push_back(impl->fleet->add(agent));
+    }
+    bool previousMode = impl->advancedMode;
+    for (bool advanced : {false, true}) {
+      impl->advancedMode = advanced;
+      impl->navigate(Screen::controller);
+      if (impl->agents.size() != 4)
+        throw std::runtime_error("Four-agent grid fixture missing");
+      for (size_t i = 0; i < impl->agents.size(); ++i) {
+        auto button = GetDlgItem(impl->window, 5000 + int(i) * 16);
+        RECT actual{};
+        if (!button || !GetWindowRect(button, &actual))
+          throw std::runtime_error("Grid card lost Go/Stop control");
+        MapWindowPoints(nullptr, impl->window, (POINT *)&actual, 2);
+        auto card = impl->agentCardBounds(i);
+        if (actual.left < card.left || actual.right > card.right || actual.top < card.top ||
+            actual.bottom > card.bottom)
+          throw std::runtime_error("Grid control escapes card");
+      }
+      auto first = impl->agentCardBounds(0), third = impl->agentCardBounds(2),
+           fourth = impl->agentCardBounds(3);
+      if (third.top != first.top || third.left <= first.left || fourth.top <= first.top ||
+          fourth.left != first.left)
+        throw std::runtime_error("Controller must render exactly three cards per row");
+      capture(directory / (advanced ? "controller-grid-advanced.bmp" : "controller-grid.bmp"));
+    }
+    impl->advancedMode = previousMode;
+    for (auto &id : extraAgents)
+      impl->fleet->remove(id);
     impl->navigate(Screen::detail);
     impl->tick();
     setText(impl->logBox, impl->fleet->review(impl->selectedId));

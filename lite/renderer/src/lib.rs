@@ -86,10 +86,45 @@ pub unsafe extern "C" fn tangos_image(data: *mut u8, w: u32, h: u32, png: *const
             p[c] = ((p[c] as u16 * p[3] as u16 + 127) / 255) as u8;
         }
     }
-    let Some(image) = Pixmap::from_vec(pixels, IntSize::from_wh(info.width, info.height).unwrap())
+    let Some(mut image) =
+        Pixmap::from_vec(pixels, IntSize::from_wh(info.width, info.height).unwrap())
     else {
         return;
     };
+    // Reduce large bundled frames in stages so small mascot outlines stay antialiased.
+    while image.width() > w * 2 && image.height() > h * 2 {
+        let nw = (image.width() / 2).max(w);
+        let nh = (image.height() / 2).max(h);
+        let Some(mut scaled) = Pixmap::new(nw, nh) else {
+            return;
+        };
+        // Average each source footprint in premultiplied RGBA. Bilinear sampling
+        // alone aliases high-frequency detail when shrinking by more than 2x.
+        let sw = image.width() as usize;
+        let sh = image.height() as usize;
+        for y in 0..nh as usize {
+            let y0 = y * sh / nh as usize;
+            let y1 = (y + 1) * sh / nh as usize;
+            for x in 0..nw as usize {
+                let x0 = x * sw / nw as usize;
+                let x1 = (x + 1) * sw / nw as usize;
+                let count = ((x1 - x0) * (y1 - y0)) as u32;
+                let mut sum = [0u32; 4];
+                for sy in y0..y1 {
+                    for sx in x0..x1 {
+                        for c in 0..4 {
+                            sum[c] += image.data()[(sy * sw + sx) * 4 + c] as u32;
+                        }
+                    }
+                }
+                for c in 0..4 {
+                    scaled.data_mut()[(y * nw as usize + x) * 4 + c] =
+                        ((sum[c] + count / 2) / count) as u8;
+                }
+            }
+        }
+        image = scaled;
+    }
     let bytes = std::slice::from_raw_parts_mut(data, w as usize * h as usize * 4);
     for p in bytes.chunks_exact_mut(4) {
         p.swap(0, 2);
@@ -100,7 +135,10 @@ pub unsafe extern "C" fn tangos_image(data: *mut u8, w: u32, h: u32, png: *const
         0,
         0,
         image.as_ref(),
-        &PixmapPaint::default(),
+        &PixmapPaint {
+            quality: FilterQuality::Bilinear,
+            ..PixmapPaint::default()
+        },
         Transform::from_scale(
             w as f32 / image.width() as f32,
             h as f32 / image.height() as f32,
@@ -207,6 +245,41 @@ mod tests {
         assert_eq!(a, b);
         assert_ne!(a, c);
         assert!(a.chunks_exact(4).all(|p| p[3] == 255));
+    }
+    #[test]
+    fn image_downsampling_preserves_dense_detail_without_aliasing() {
+        let mut source = vec![0u8; 129 * 129 * 4];
+        for y in 0..129 {
+            for x in 0..129 {
+                let i = (y * 129 + x) * 4;
+                source[i..i + 3].fill(if (x + y) % 2 == 0 { 255 } else { 0 });
+                source[i + 3] = 255;
+            }
+        }
+        let mut png_data = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png_data, 129, 129);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&source)
+                .unwrap();
+        }
+        let mut output = vec![0u8; 9 * 9 * 4];
+        unsafe {
+            tangos_image(output.as_mut_ptr(), 9, 9, png_data.as_ptr(), png_data.len());
+        }
+        for y in 2..7 {
+            for x in 2..7 {
+                let sample = output[(y * 9 + x) * 4];
+                assert!(
+                    sample > 90 && sample < 165,
+                    "aliased checkerboard sample: {sample}"
+                );
+            }
+        }
     }
     #[test]
     fn raster_is_bgra_and_replaces_old_pixels() {

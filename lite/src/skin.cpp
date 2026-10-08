@@ -203,6 +203,13 @@ void panel(HDC dc, int x, int y, int w, int h, bool solid) {
         solid ? Color(244, colors.field.GetR(), colors.field.GetG(), colors.field.GetB())
               : colors.panel);
 }
+void agentCard(HDC dc, int x, int y, int w, int h, COLORREF tint) {
+  shape(dc, x, y + 4, w, h, 14, Color(18, 0, 0, 0), Color(18, 0, 0, 0));
+  auto edge = Color(220, GetRValue(tint), GetGValue(tint), GetBValue(tint));
+  shape(dc, x, y, w, h, 14, edge, edge);
+  auto fill = Color(230, colors.field.GetR(), colors.field.GetG(), colors.field.GetB());
+  shape(dc, x + 1, y + 1, w - 2, h - 2, 13, fill, fill);
+}
 void label(HDC dc, const std::wstring &s, int x, int y, int w, int h, int size, bool bold,
            bool secondary, bool accent) {
   auto font = uiFont(size, bold);
@@ -248,9 +255,11 @@ void mascot(HDC dc, int x, int y, int size, const std::string &emotion) {
   auto r = FindResourceW(nullptr, MAKEINTRESOURCEW(id), RT_RCDATA);
   if (!r)
     return;
-  Surface s(dc, x, y, size, size);
+  int height = (size * 673 + 310) / 620; // Bundled frames share the original aspect ratio.
+  Surface s(dc, x, y, size, height);
   if (s.data)
-    tangos_image(s.data, size, size, (const unsigned char *)LockResource(LoadResource(nullptr, r)),
+    tangos_image(s.data, size, height,
+                 (const unsigned char *)LockResource(LoadResource(nullptr, r)),
                  SizeofResource(nullptr, r));
 }
 } // namespace skin
