@@ -50,3 +50,7 @@ Source checkpoint f6e7384. Two clean builds produced identical SHA-256 94A9052F7
 ## 0.8.0 MCP checkpoint
 
 Source checkpoint f668c5f. Executable: 5,186,048 bytes (5.186 decimal MB), SHA-256 74B160CED50FC2B5902B3141AB6C62CA2DEA30F94C5E37AD3928E9321E9093C6. Two clean builds were identical with Windows system DLL imports only. Four native suites, all 480 reference comparisons, packaged backend/adapter checks and three packaged GUI workflows passed. MCP integration verifies session deletion, rejected reuse, traffic telemetry and preservation of an unrelated running CLI job. GUI assertions verify start/stop/restart and persisted server preference. Null/false claims remain selectable. Full parity is still not established.
+
+## 0.9.0 batch workflow checkpoint
+
+Executable: 5,269,504 bytes (5.27 decimal MB), SHA-256 CBD933FA6C2E6D986AF2B19CC8D60EE5CBC1178F980F8BD44BBB4B6FA76CE5C7. Two clean builds were identical with Windows system DLL imports only. All four native suites, packaged backend/adapter tests, 520 original-code comparisons and three packaged GUI workflows passed. Tests cover actual driver delivery of saved batch instructions, refusal to edit an active batch, project draft persistence, legacy queue migration, partial completion and bounded completed history. Clearing history preserves complete logs; processed targets do not become byte-match claims. Full parity remains unfinished.
