@@ -30,3 +30,11 @@ Source checkpoint: 88603fe in the original main checkout. Two clean release buil
 All four native test suites passed, together with packaged loopback backend tests, instruction-adapter tests, 320 original-code policy/history comparisons and 29 incremental statistics comparisons. Additional preflight comparisons cover 15 Python/package/compiler/ROM-directory/Atlas availability results against the reference. Packaged native source inspection, module-popout cart relay, Connections/Services/Requirements/queue renders and repository → status → checks → complete logs passed. Complete logs append across repeated runs; queued targets added during a batch survive completion. Background frames move and remain deterministic for the same phase. Native screenshots were inspected to correct label backgrounds and multiline/clipped text.
 
 This checkpoint does not establish absolute full parity. Its contract inventory remains explicit, and the original TS/CSS reference is retained for further comparisons. External provider/GitHub write interoperability and copyrighted-input-dependent checks remain untested with real services/data.
+
+## 0.6.0 descriptor/help checkpoint
+
+Source checkpoint: a3b8ee2. Portable executable: 5,053,952 bytes (5.054 decimal MB), SHA-256 758854D7014FB1FAD745330B982CE1D58C5FF97E48C0D57C5E7800449AE0ED9E. Two independent clean builds were identical and import Windows system DLLs only.
+
+All four native suites passed. Packaged loopback and instruction-adapter tests, all 388 policy/history/statistics/preflight/help comparisons, and three packaged GUI workflows passed: normal repository/check/log/fleet/Viewer/help workflow plus missing-descriptor and invalid-descriptor recovery. The latter verify scan, editable generation, side-effect-free preview, fixture-only confirmation and validated generated tools. Native tour expression captures and tips navigation were inspected; tour completion persists. Statistics refresh uses an independent worker and retains mandatory independent-proof labeling.
+
+No real API key, paid provider, GitHub write, proprietary compiler or Nintendo data was used. Full parity remains unfinished, as the inventory explicitly reports.
