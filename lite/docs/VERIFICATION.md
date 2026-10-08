@@ -58,3 +58,7 @@ Executable: 5,269,504 bytes (5.27 decimal MB), SHA-256 CBD933FA6C2E6D986AF2B19CC
 ## 0.10.0 source and instruction checkpoint
 
 Source checkpoint aae51d2. Executable: 5,290,496 bytes (5.290 decimal MB), SHA-256 AEB896C23D0D614245209EBE589F834229BBC748D99C4D7366F8460EDB16D723. Two clean builds were identical with Windows system DLL imports only. All four native suites, packaged backend/adapter checks, 540 original-code comparisons and three packaged GUI workflows passed. New comparisons cover the 400-line source response, CRLF/Unicode and disassembly fallback. Regression tests cover normalized local exclusions, embedded NULs, alternate streams/device paths, local AGENTS instruction delivery and duplicate agent names. Full parity remains unfinished.
+
+## 0.11.0 execution loop checkpoint
+
+Source checkpoint 06cf95f. Executable: 5,305,856 bytes (5.306 decimal MB), SHA-256 A40A73CF0CCECCE6FCF2026A69028DBFE6BF0438B15B9662402A53A62235A129. Two clean builds were identical with Windows system DLL imports only. All four native suites, packaged backend/adapter checks, 738 original-code comparisons and three packaged GUI workflows passed. Fleet integration covers immediate streamed exhaustion, five fast-empty runs, manual restart, split numeric boundaries, one-shot queue draining and separate per-run retained files. Summary ingestion tests cover actual results[]/sources/token aliases and transcription exclusion. Full parity remains unfinished.
