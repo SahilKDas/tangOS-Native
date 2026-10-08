@@ -594,6 +594,8 @@ void Fleet::stop(const std::string &id) {
   auto job = jobs.at(id);
   batchBook.park(id, "Stopped; partial work and complete logs retained");
   job->runner.cancel();
+  if (job->requestRunner)
+    job->requestRunner->cancel();
   job->state.spec.loop = false;
   if (job->state.spec.kind == "mcp" && !job->externalTask) {
     job->active = false;
@@ -609,6 +611,8 @@ void Fleet::stopExternal() {
     if (job->state.spec.kind != "mcp")
       continue;
     job->runner.cancel();
+    if (job->requestRunner)
+      job->requestRunner->cancel();
     batchBook.park(item.first, "Stopped; partial work and complete logs retained");
     job->state.spec.loop = false;
     if (!job->externalTask && job->active) {
@@ -622,6 +626,8 @@ void Fleet::stopAll() {
   std::lock_guard<std::mutex> lock(mutex);
   for (auto &item : jobs) {
     item.second->runner.cancel();
+    if (item.second->requestRunner)
+      item.second->requestRunner->cancel();
     item.second->state.spec.loop = false;
     if (item.second->state.spec.kind == "mcp" && !item.second->externalTask) {
       item.second->active = false;
@@ -798,7 +804,9 @@ Json Fleet::schedule(const std::shared_ptr<Job> &job, const fs::path &cwd) {
   return rows;
 }
 void Fleet::audit(const std::shared_ptr<Job> &job) {
-  Repository r(job->runner, job->state.worktree, settings);
+  // Cancellation stops execution, but partial changes still need a safety audit.
+  Runner auditRunner;
+  Repository r(auditRunner, job->state.worktree, settings);
   auto changes = parseStatus(r.git({"status", "--porcelain=v1", "-z", "--untracked-files=all"}));
   for (auto &change : changes) {
     auto why = blockedPath(change.path, settings);
@@ -1233,7 +1241,7 @@ Json Fleet::takeBatch(const std::string &id) {
           {"targets", job->state.assigned.empty() ? job->state.queue : job->state.assigned},
           {"resultsPath", utf8(job->state.results.wstring())}};
 }
-void Fleet::finishBatch(const std::string &id) {
+void Fleet::finishBatch(const std::string &id, Runner *request) {
   std::shared_ptr<Job> job;
   {
     std::lock_guard<std::mutex> lock(mutex);
@@ -1242,18 +1250,27 @@ void Fleet::finishBatch(const std::string &id) {
       throw std::runtime_error("No active external batch");
   }
   std::lock_guard<std::mutex> taskLock(job->externalMutex);
-  job->externalTask = true;
+  auto &process = request ? *request : job->runner;
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (job->state.phase != "running" || job->runner.isCancelled() || process.isCancelled())
+      throw std::runtime_error("External batch stopped or request cancelled");
+    job->externalTask = true;
+    job->requestRunner = request;
+  }
   try {
     audit(job);
     int gates = 0;
     for (auto &check : discoverChecks(job->state.worktree, settings))
       if (check.available && check.name != "ROM verification") {
-        auto result = job->runner.run(check.command, events,
-                                      directory / fs::u8path(id) /
-                                          ("mcp-verify-" + std::to_string(gates++) + ".log"));
+        auto result = process.run(check.command, events,
+                                  directory / fs::u8path(id) /
+                                      ("mcp-verify-" + std::to_string(gates++) + ".log"));
         if (result.code)
           throw std::runtime_error("External verification failed: " + check.name);
       }
+    if (process.isCancelled())
+      throw std::runtime_error("External verification cancelled");
     audit(job);
     Backend(repository, directory.parent_path().parent_path(), settings)
         .recordAgent(id, job->state.results, "review", gates);
@@ -1268,9 +1285,11 @@ void Fleet::finishBatch(const std::string &id) {
     job->state.detail = gates ? "External batch independently verified; review required"
                               : "External batch unverified; no gate available";
     saveLocked();
+    job->requestRunner = nullptr;
   } catch (const std::exception &e) {
     std::lock_guard<std::mutex> lock(mutex);
-    job->state.phase = job->runner.isCancelled() ? "cancelled" : "failed";
+    job->state.phase = process.isCancelled() || job->runner.isCancelled() ? "cancelled" : "failed";
+    job->requestRunner = nullptr;
     job->state.detail = e.what();
     saveLocked();
     job->active = false;
@@ -1291,7 +1310,8 @@ bool Fleet::toolEnabled(const std::string &id) {
   auto prefs = backend("preferences.get", Json::object());
   return enabledTool(prefs, id);
 }
-Result Fleet::runTool(const std::string &id, const std::string &tool, const Json &args) {
+Result Fleet::runTool(const std::string &id, const std::string &tool, const Json &args,
+                      Runner *request) {
   std::shared_ptr<Job> job;
   {
     std::lock_guard<std::mutex> lock(mutex);
@@ -1306,14 +1326,25 @@ Result Fleet::runTool(const std::string &id, const std::string &tool, const Json
       backend("preferences.get", Json::object()).value("safeMode", false))
     throw std::runtime_error("User safe mode prohibits mutations");
   std::lock_guard<std::mutex> taskLock(job->externalMutex);
-  job->externalTask = true;
+  auto &process = request ? *request : job->runner;
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (job->state.phase != "running" || job->runner.isCancelled() || process.isCancelled())
+      throw std::runtime_error("External batch stopped or request cancelled");
+    job->externalTask = true;
+    job->requestRunner = request;
+  }
   try {
     auto c = toolCommand(descriptor, descriptor.tool(tool), args, job->state.worktree, true, false);
     for (auto &entry : vault.values())
       c.environment[entry.first] = entry.second;
-    auto result = job->runner.run(c, {}, directory / fs::u8path(id) / (uniqueId() + "-tool.log"));
+    auto result = process.run(c, {}, directory / fs::u8path(id) / (uniqueId() + "-tool.log"));
     audit(job);
     job->externalTask = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      job->requestRunner = nullptr;
+    }
     if (job->runner.isCancelled()) {
       std::lock_guard<std::mutex> lock(mutex);
       job->active = false;
@@ -1322,6 +1353,10 @@ Result Fleet::runTool(const std::string &id, const std::string &tool, const Json
     }
     return result;
   } catch (...) {
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      job->requestRunner = nullptr;
+    }
     job->externalTask = false;
     throw;
   }

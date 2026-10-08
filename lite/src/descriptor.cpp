@@ -2,8 +2,26 @@
 #include <algorithm>
 #include <cctype>
 #include <set>
+#include <regex>
 #include <stdexcept>
 namespace lite {
+std::string githubSlug(const std::string &url) {
+  auto value = trim(url);
+  std::smatch match;
+  if (!std::regex_match(
+          value, match,
+          std::regex(
+              R"(^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/|github\.com[:/]+)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$)",
+              std::regex::icase)))
+    return "";
+  auto owner = match[1].str(), repo = match[2].str();
+  if (owner == "." || owner == ".." || repo == "." || repo == "..")
+    return "";
+  auto slug = owner + "/" + repo;
+  std::transform(slug.begin(), slug.end(), slug.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  return slug;
+}
 fs::path confinedPath(const fs::path &root, const std::string &relative) {
   if (std::any_of(relative.begin(), relative.end(), [](unsigned char c) { return c < 32; }))
     throw std::runtime_error("Control character in repository path");

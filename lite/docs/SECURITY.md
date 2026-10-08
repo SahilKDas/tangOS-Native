@@ -119,3 +119,17 @@ rechecks both executable hashes and uses a same-volume Windows replacement with
 a retained rollback backup. A changed application invalidates the staged update.
 Receipts and candidates must reside in the local update store. Failed candidates
 are not executed. Updates never disable antivirus or add security exclusions.
+
+## MCP request ownership (0.16.1)
+
+Cancellation is keyed by authenticated session and typed JSON-RPC request ID.
+It never selects another session's matching ID or an unrelated CLI/API agent.
+Descriptor tools use a request-owned Runner registered under the Fleet mutex;
+UI Stop and server shutdown can still cancel it safely. Cancelled calls release
+their registration and keep durable logs. Peer cancellation suppresses the
+protocol response; UI Stop returns an actionable cancelled tool result.
+Waiting batch calls poll cancellation without claiming new work afterward.
+Deleting a session cancels its in-flight requests, including stdio EOF teardown.
+Stdio workers and output writes are bounded and synchronized. Provider reads
+retain their normal network timeout; only local MCP calls have the longer
+ten-minute receive budget needed for repository tools.

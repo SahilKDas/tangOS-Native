@@ -10,10 +10,11 @@ The ten-step tour and editable tips now use the reference parser format and Tang
 
 Remaining work includes complete reference composition for Controller and Viewer,
 helper spotlight/update/report overlays, automatic MCP client registration,
-portable update application, and independent-client/provider protocol comparisons.
+complete update-screen composition, and independent-client/provider protocol comparisons.
 Native controls, dock composition, background alignment, animation positions and
 confirmation screens still need side-by-side visual checks. Arbitrary DPI and
-large-database performance remain unverified.
+large-database sustained performance remain unverified. Portable update application
+and a 25,000-function GUI workflow have automated coverage recorded in VERIFICATION.md.
 
 Automatic pushing conflicts with the requested mandatory outgoing-commit preview. It stays disabled. Port-only protections and protected asset preservation also take precedence over unsafe reference behavior. These are explicit product constraints, not missing checks to bypass.
 

@@ -21,14 +21,35 @@ std::string text(HWND h) {
   s.resize(n);
   return utf8(s);
 }
-void setText(HWND h, const std::string &s) {
+std::string editText(const std::string &s) {
   std::string out;
   for (size_t i = 0; i < s.size(); i++) {
     if (s[i] == '\n' && (i == 0 || s[i - 1] != '\r'))
       out += '\r';
     out += s[i];
   }
-  SetWindowTextW(h, wide(out).c_str());
+  return out;
+}
+void setText(HWND h, const std::string &s) { SetWindowTextW(h, wide(editText(s)).c_str()); }
+void updateLiveText(HWND h, const std::string &s) {
+  auto normalized = editText(s);
+  if (text(h) == normalized)
+    return;
+  SCROLLINFO scroll{sizeof(SCROLLINFO), SIF_RANGE | SIF_PAGE | SIF_POS};
+  GetScrollInfo(h, SB_VERT, &scroll);
+  bool follow = scroll.nPos + static_cast<int>(scroll.nPage) >= scroll.nMax - 3;
+  auto first = SendMessageW(h, EM_GETFIRSTVISIBLELINE, 0, 0);
+  DWORD begin = 0, end = 0;
+  SendMessageW(h, EM_GETSEL, reinterpret_cast<WPARAM>(&begin), reinterpret_cast<LPARAM>(&end));
+  SetWindowTextW(h, wide(normalized).c_str());
+  if (follow) {
+    auto length = GetWindowTextLengthW(h);
+    SendMessageW(h, EM_SETSEL, length, length);
+    SendMessageW(h, EM_SCROLLCARET, 0, 0);
+  } else {
+    SendMessageW(h, EM_SETSEL, begin, end);
+    SendMessageW(h, EM_LINESCROLL, 0, first - SendMessageW(h, EM_GETFIRSTVISIBLELINE, 0, 0));
+  }
 }
 void appendText(HWND h, const std::string &s) {
   if (GetWindowTextLengthW(h) > 200000)
@@ -3410,8 +3431,7 @@ struct ConsoleUI::Impl {
         }
         if (!a->log.empty()) {
           auto tail = tailFile(a->log);
-          if (text(logBox) != tail)
-            setText(logBox, tail);
+          updateLiveText(logBox, tail);
         }
       }
     }
@@ -3861,6 +3881,37 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     impl->loader.join();
   if (!fs::exists(impl->repository / ".tangos-lite-test-fixture"))
     throw std::runtime_error("GUI fleet smoke requires an explicit disposable fixture");
+  HWND logFixture = CreateWindowExW(
+      0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY, 0, 0, 400,
+      160, impl->window, nullptr, GetModuleHandleW(nullptr), nullptr);
+  if (!logFixture)
+    throw std::runtime_error("Could not create log scrolling fixture");
+  std::string lines;
+  for (int i = 0; i < 300; ++i)
+    lines += "Log line " + std::to_string(i) + "\n";
+  setText(logFixture, lines);
+  SendMessageW(logFixture, EM_SETSEL, 10, 20);
+  SendMessageW(logFixture, EM_LINESCROLL, 0, 40);
+  auto firstLine = SendMessageW(logFixture, EM_GETFIRSTVISIBLELINE, 0, 0);
+  updateLiveText(logFixture, lines + "New output\n");
+  DWORD selectionStart = 0, selectionEnd = 0;
+  SendMessageW(logFixture, EM_GETSEL, reinterpret_cast<WPARAM>(&selectionStart),
+               reinterpret_cast<LPARAM>(&selectionEnd));
+  if (SendMessageW(logFixture, EM_GETFIRSTVISIBLELINE, 0, 0) != firstLine || selectionStart != 10 ||
+      selectionEnd != 20)
+    throw std::runtime_error("Live log refresh moved the reader or selection");
+  auto length = GetWindowTextLengthW(logFixture);
+  SendMessageW(logFixture, EM_SETSEL, length, length);
+  SendMessageW(logFixture, EM_SCROLLCARET, 0, 0);
+  SendMessageW(logFixture, EM_LINESCROLL, 0, 300);
+  updateLiveText(logFixture, lines + "New output\nNewest output\n");
+  SendMessageW(logFixture, EM_GETSEL, reinterpret_cast<WPARAM>(&selectionStart),
+               reinterpret_cast<LPARAM>(&selectionEnd));
+  if (selectionEnd != static_cast<DWORD>(GetWindowTextLengthW(logFixture)))
+    throw std::runtime_error("Live log stopped following output at the bottom");
+  DestroyWindow(logFixture);
+  write(directory / "log-scroll-report.txt",
+        "PASS: live log preserves scroll and selection; follows bottom");
   if (impl->screen == Screen::descriptorGate) {
     auto awaitService = [&] {
       auto start = GetTickCount64();

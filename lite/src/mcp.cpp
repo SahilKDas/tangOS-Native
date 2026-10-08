@@ -34,6 +34,76 @@ int runMcpStdio(const fs::path &connection, const std::string &agent) {
   headers["Accept"] = "application/json, text/event-stream";
   headers["MCP-Protocol-Version"] = "2025-03-26";
   std::string line;
+  std::mutex outputMutex;
+  struct Workers {
+    std::vector<std::pair<std::thread, std::shared_ptr<std::atomic<bool>>>> rows;
+    void reap() {
+      for (auto it = rows.begin(); it != rows.end();)
+        if (it->second->load()) {
+          it->first.join();
+          it = rows.erase(it);
+        } else
+          ++it;
+    }
+    ~Workers() {
+      for (auto &worker : rows)
+        if (worker.first.joinable())
+          worker.first.join();
+    }
+  };
+  bool hasToolCalls = false, disconnected = false;
+  auto disconnect = [&] {
+    if (session.empty() || disconnected)
+      return;
+    disconnected = true;
+    try {
+      auto finalHeaders = headers;
+      finalHeaders["Mcp-Session-Id"] = session;
+      requestHttp(url, "DELETE", "", finalHeaders);
+    } catch (...) {
+    }
+  };
+  struct DisconnectGuard {
+    std::function<void()> close;
+    ~DisconnectGuard() { close(); }
+  };
+  auto send = [&](Json request, std::map<std::string, std::string> requestHeaders,
+                  bool initialize) {
+    try {
+      auto response = requestHttp(url, "POST", request.dump(), requestHeaders);
+      if (response.status != 200 && response.status != 202)
+        throw std::runtime_error("Local MCP HTTP " + std::to_string(response.status));
+      if (initialize && !response.session.empty())
+        session = response.session;
+      if (!response.body.empty()) {
+        auto parsed = Json::parse(response.body);
+        if (initialize && parsed.contains("result"))
+          headers["MCP-Protocol-Version"] = parsed["result"].value("protocolVersion", "2025-03-26");
+        auto message = parsed.dump() + "\n";
+        std::lock_guard<std::mutex> lock(outputMutex);
+        DWORD wrote;
+        if (!WriteFile(output, message.data(), DWORD(message.size()), &wrote, nullptr) ||
+            wrote != message.size())
+          throw std::runtime_error("MCP output closed");
+      }
+    } catch (...) {
+      if (request.is_object() && request.contains("id")) {
+        auto message = Json({{"jsonrpc", "2.0"},
+                             {"id", request["id"]},
+                             {"error",
+                              {{"code", -32603},
+                               {"message", "Local MCP connection failed; keep Lite running and "
+                                           "refresh the client config"}}}})
+                           .dump() +
+                       "\n";
+        std::lock_guard<std::mutex> lock(outputMutex);
+        DWORD wrote;
+        WriteFile(output, message.data(), DWORD(message.size()), &wrote, nullptr);
+      }
+    }
+  };
+  Workers workers;
+  DisconnectGuard closeOnExit{disconnect};
   char c;
   DWORD got;
   while (ReadFile(input, &c, 1, &got, nullptr) && got) {
@@ -54,19 +124,24 @@ int runMcpStdio(const fs::path &connection, const std::string &agent) {
         request["params"]["clientInfo"]["name"] = agent;
       if (!session.empty())
         headers["Mcp-Session-Id"] = session;
-      auto response = requestHttp(url, "POST", request.dump(), headers);
-      if (response.status != 200 && response.status != 202)
-        throw std::runtime_error("Local MCP HTTP " + std::to_string(response.status));
-      if (!response.session.empty())
-        session = response.session;
-      if (!response.body.empty()) {
-        auto parsed = Json::parse(response.body);
-        if (request.value("method", std::string()) == "initialize" && parsed.contains("result"))
-          headers["MCP-Protocol-Version"] = parsed["result"].value("protocolVersion", "2025-03-26");
-        auto message = parsed.dump() + "\n";
-        DWORD wrote;
-        if (!WriteFile(output, message.data(), DWORD(message.size()), &wrote, nullptr))
-          break;
+      auto method = request.value("method", std::string());
+      if (method == "tools/call")
+        hasToolCalls = true;
+      if (method == "initialize")
+        send(request, headers, true);
+      else if (method == "notifications/cancelled")
+        send(request, headers, false);
+      else {
+        workers.reap();
+        if (workers.rows.size() >= 24)
+          throw std::runtime_error("MCP bridge pending request limit reached");
+        auto done = std::make_shared<std::atomic<bool>>(false);
+        auto requestHeaders = headers;
+        workers.rows.emplace_back(std::thread([&, request, requestHeaders, done] {
+                                    send(request, requestHeaders, false);
+                                    done->store(true);
+                                  }),
+                                  done);
       }
     } catch (const std::exception &e) {
       if (request.is_object() && request.contains("id")) {
@@ -79,18 +154,19 @@ int runMcpStdio(const fs::path &connection, const std::string &agent) {
                            .dump() +
                        "\n";
         DWORD wrote;
+        std::lock_guard<std::mutex> lock(outputMutex);
         WriteFile(output, message.data(), DWORD(message.size()), &wrote, nullptr);
       }
     }
     line.clear();
   }
-  if (!session.empty()) {
-    try {
-      headers["Mcp-Session-Id"] = session;
-      requestHttp(url, "DELETE", "", headers);
-    } catch (...) {
-    }
-  }
+  // EOF after tool calls cancels session-owned work before joining blocked HTTP calls.
+  if (hasToolCalls)
+    disconnect();
+  for (auto &worker : workers.rows)
+    if (worker.first.joinable())
+      worker.first.join();
+  disconnect();
   return 0;
 }
 struct McpServer::Impl {
@@ -108,6 +184,28 @@ struct McpServer::Impl {
     int64_t connectedAt, lastSeen;
   };
   std::map<std::string, Session> sessions;
+  std::mutex requestsMutex;
+  struct PendingRequest {
+    Runner process;
+    std::atomic<bool> cancelledByPeer{false};
+    void cancel() {
+      cancelledByPeer = true;
+      process.cancel();
+    }
+    bool isCancelled() const { return process.isCancelled(); }
+  };
+  std::map<std::string, std::shared_ptr<PendingRequest>> pendingRequests;
+  struct RequestGuard {
+    Impl *owner;
+    std::string key;
+    std::shared_ptr<PendingRequest> runner;
+    ~RequestGuard() {
+      if (!runner)
+        return;
+      std::lock_guard<std::mutex> lock(owner->requestsMutex);
+      owner->pendingRequests.erase(key);
+    }
+  };
   std::atomic<uint64_t> requestsSeen{0};
   std::atomic<int64_t> lastContactAt{0};
   static int64_t now() {
@@ -127,6 +225,7 @@ struct McpServer::Impl {
   Impl(Fleet &f, Descriptor d) : fleet(f), descriptor(std::move(d)) {}
   Json rpc(const Json &request, std::string &session) {
     auto id = request.value("id", Json());
+    RequestGuard operation{this, "", {}};
     try {
       auto method = request.at("method").get<std::string>();
       if (method != "initialize" && method != "ping" && method != "tools/list" &&
@@ -134,6 +233,19 @@ struct McpServer::Impl {
         return {{"jsonrpc", "2.0"},
                 {"id", id},
                 {"error", {{"code", -32601}, {"message", "Method not found: " + method}}}};
+      if (method == "notifications/cancelled") {
+        try {
+          auto cancelled = request.at("params").at("requestId");
+          if (!cancelled.is_string() && !cancelled.is_number_integer())
+            return nullptr;
+          std::lock_guard<std::mutex> lock(requestsMutex);
+          auto found = pendingRequests.find(session + "\n" + cancelled.dump());
+          if (found != pendingRequests.end())
+            found->second->cancel();
+        } catch (...) {
+        } // Unknown, completed and malformed notifications are ignored.
+        return nullptr;
+      }
       if (method.rfind("notifications/", 0) == 0)
         return nullptr;
       Json result;
@@ -167,7 +279,7 @@ struct McpServer::Impl {
                            : supported.front();
         result = {{"protocolVersion", version},
                   {"capabilities", {{"tools", Json::object()}}},
-                  {"serverInfo", {{"name", "TangOS Lite"}, {"version", "0.16.0"}}},
+                  {"serverInfo", {{"name", "TangOS Lite"}, {"version", "0.16.1"}}},
                   {"instructions", "Pull next_batch and follow its scoped AGENTS.md instructions. "
                                    "Work only in the assigned worktree."}};
       } else if (method == "ping")
@@ -223,6 +335,16 @@ struct McpServer::Impl {
           }
           result = {{"tools", tools}};
         } else if (method == "tools/call") {
+          if (!id.is_string() && !id.is_number_integer())
+            throw std::runtime_error("Tool requests require a string or integer request ID");
+          operation.key = session + "\n" + id.dump();
+          {
+            std::lock_guard<std::mutex> lock(requestsMutex);
+            if (pendingRequests.count(operation.key))
+              throw std::runtime_error("Duplicate in-progress request ID");
+            operation.runner = std::make_shared<PendingRequest>();
+            pendingRequests.emplace(operation.key, operation.runner);
+          }
           auto params = request.at("params");
           auto name = params.at("name").get<std::string>();
           auto args = params.value("arguments", Json::object());
@@ -234,6 +356,8 @@ struct McpServer::Impl {
             auto deadline = GetTickCount64() + std::clamp(args.value("timeoutMs", 45000), 0, 45000);
             Json batch;
             do {
+              if (operation.runner->isCancelled())
+                return nullptr;
               batch = fleet.takeBatch(agent);
               if (batch["status"] != "empty" || stopping || GetTickCount64() >= deadline)
                 break;
@@ -241,7 +365,7 @@ struct McpServer::Impl {
             } while (true);
             text = batch.dump(2);
           } else if (name == "finish_batch") {
-            fleet.finishBatch(agent);
+            fleet.finishBatch(agent, &operation.runner->process);
             text = "Batch finished. User verification/review required; do not commit or push.";
           } else if (name == "progress") {
             Json states = Json::array();
@@ -249,7 +373,7 @@ struct McpServer::Impl {
               states.push_back(agentJson(s));
             text = states.dump(2);
           } else {
-            auto res = fleet.runTool(agent, name, args);
+            auto res = fleet.runTool(agent, name, args, &operation.runner->process);
             text = res.output;
             result["isError"] = res.code != 0;
           }
@@ -257,8 +381,12 @@ struct McpServer::Impl {
         } else
           throw std::runtime_error("Unsupported JSON-RPC method: " + method);
       }
+      if (operation.runner && operation.runner->cancelledByPeer)
+        return nullptr;
       return {{"jsonrpc", "2.0"}, {"id", id}, {"result", result}};
     } catch (const std::exception &e) {
+      if (operation.runner && operation.runner->cancelledByPeer)
+        return nullptr;
       return {{"jsonrpc", "2.0"}, {"id", id}, {"error", {{"code", -32602}, {"message", e.what()}}}};
     }
   }
@@ -331,6 +459,13 @@ struct McpServer::Impl {
         {
           std::lock_guard<std::mutex> lock(sessionsMutex);
           removed = sessions.erase(fields["mcp-session-id"]) != 0;
+        }
+        if (removed) {
+          std::lock_guard<std::mutex> lock(requestsMutex);
+          auto prefix = fields["mcp-session-id"] + "\n";
+          for (auto &pending : pendingRequests)
+            if (pending.first.rfind(prefix, 0) == 0)
+              pending.second->cancel();
         }
         reply(removed ? 200 : 404, "{}", "");
         closesocket(socket);

@@ -20,6 +20,16 @@ An isolated worktree starts from committed HEAD. Untracked toolchains and local 
 
 The MCP connection panel shows server status, active client sessions and request traffic. Start/Stop runs in the background and remembers your choice. Copy config and Copy AI prompt provide setup for your own client; no external client file is modified. Stopping this server cancels external MCP jobs while preserving independent API/CLI jobs. Clients can disconnect using authenticated DELETE /mcp; idle sessions expire after 30 minutes.
 
+MCP request cancellation uses `notifications/cancelled` with the in-progress
+request ID. It cancels that session's waiting batch request or tool process and
+suppresses the cancelled response. Cancelling a tool retains its complete log
+and leaves its batch available for another tool call. Stopping the agent/server
+still revokes the batch. Unknown, completed, malformed and other-session request
+IDs are ignored. The stdio bridge accepts cancellation while tools are running;
+it has 24 concurrent request slots and reserves notification handling separately.
+External network reads retain their bounded timeout, so cancellation can suppress
+their response without interrupting an already-blocked network request.
+
 Open Batches from Controller to save a title, instructions and Viewer cart as a project draft. Choose an agent and enqueue it, then use Go in Controller to execute. The batch history keeps up to 30 completed records and preserves all log files. Stop an agent before reordering/removing its batch. Worked means attempted/processed; it does not assert byte matching. Interrupted batches and queues from earlier Lite versions are recovered.
 
 Go drains all queued execution chunks even in one-shot mode; continuous mode additionally schedules work when its queue empties. API agents stop individually on an explicit usage-exhaustion message or five consecutive runs under 20 seconds without a landed match or compiling near-miss. Slow/productive runs clear the streak, and manual Go restarts it. The stopped batch stays pending. Every execution preserves a separate instruction file, worklist and result file; complete stream logs remain appended. Actual driver results[] and source/token summaries are ingested with the transcription gate. Driver declarations remain separate from independent byte-match proof.

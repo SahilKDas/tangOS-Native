@@ -41,6 +41,7 @@ class Fleet {
     std::thread worker;
     std::atomic<bool> active{false};
     std::atomic<bool> externalTask{false};
+    Runner *requestRunner = nullptr; // Access only while holding Fleet::mutex.
     std::mutex externalMutex;
   };
   fs::path repository, directory;
@@ -87,9 +88,10 @@ public:
   std::string review(const std::string &id);
   void commitReviewed(const std::string &id, const std::string &message, const std::string &tree);
   Json takeBatch(const std::string &id);
-  void finishBatch(const std::string &id);
+  void finishBatch(const std::string &id, Runner *request = nullptr);
   Json backend(const std::string &method, const Json &args);
   bool toolEnabled(const std::string &id);
-  Result runTool(const std::string &id, const std::string &tool, const Json &args);
+  Result runTool(const std::string &id, const std::string &tool, const Json &args,
+                 Runner *request = nullptr);
 };
 } // namespace lite

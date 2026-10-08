@@ -1103,15 +1103,11 @@ Json Backend::execute(const std::string &m, const Json &a) {
         return {{"cached", true}, {"project", entry}};
       try {
         auto github = entry.value("github", std::string());
-        std::smatch match;
-        if (!std::regex_match(
-                github, match,
-                std::regex(
-                    R"(^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$)")))
+        auto slug = githubSlug(github);
+        if (slug.empty())
           throw std::runtime_error(
-              "Descriptor needs a credential-free GitHub HTTPS repository URL");
-        auto url = "https://raw.githubusercontent.com/" + match[1].str() + "/" + match[2].str() +
-                   "/HEAD/tangos.json";
+              "Descriptor needs a credential-free GitHub repository URL (HTTPS or Git SSH)");
+        auto url = "https://raw.githubusercontent.com/" + slug + "/HEAD/tangos.json";
         auto response = transport(url, "GET", "", {});
         if (response.status != 200 || response.body.size() > 1024 * 1024)
           throw std::runtime_error("Descriptor download failed or exceeds 1 MiB");
@@ -1221,7 +1217,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       args["connection"] = m;
     auto result = execute("network.read", args);
     if (m == "update.check" && result.value("ok", false))
-      result["update"] = updateStatus("0.16.0", result.at("data"));
+      result["update"] = updateStatus("0.16.1", result.at("data"));
     return result;
   }
   if (m == "git.clone") {
@@ -1318,7 +1314,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto folder = directory / "exports" / ("bug-report-" + uniqueId());
     fs::create_directories(folder);
     Json debug = {{"app", "TangOS Lite"},
-                  {"version", "0.16.0"},
+                  {"version", "0.16.1"},
                   {"portOnly", settings.portOnly},
                   {"project", settings.activeProject},
                   {"connections", Json::array()}};

@@ -35,7 +35,11 @@ HttpResponse requestHttp(const std::string &url, const std::string &method, cons
                                WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0)};
   if (!session.handle)
     throw std::runtime_error("Cannot initialize HTTPS");
-  WinHttpSetTimeouts(session.handle, 5000, 5000, 10000, 10000);
+  bool localMcp = parts.nScheme == INTERNET_SCHEME_HTTP &&
+                  std::wstring(parts.lpszHostName, parts.dwHostNameLength) == L"127.0.0.1" &&
+                  std::wstring(parts.lpszUrlPath, parts.dwUrlPathLength) == L"/mcp";
+  // Local tools and next_batch are long-running, while external services stay bounded.
+  WinHttpSetTimeouts(session.handle, 5000, 5000, 10000, localMcp ? 600000 : 10000);
   auto host = std::wstring(parts.lpszHostName, parts.dwHostNameLength);
   auto path = std::wstring(parts.lpszUrlPath, parts.dwUrlPathLength) +
               (parts.dwExtraInfoLength ? std::wstring(parts.lpszExtraInfo, parts.dwExtraInfoLength)

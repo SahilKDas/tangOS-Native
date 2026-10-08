@@ -124,6 +124,12 @@ int main() {
              "download and validate remote descriptor");
       expect(run("projects.download", target).at("cached") == true && descriptorRequests == 1,
              "24 hour fresh descriptor cache makes no network request");
+      auto registry = Json::parse(read(discoveryData / "projects.json"));
+      registry[0]["github"] = "git@github.com:Fixture/Project.git";
+      write(discoveryData / "projects.json", registry.dump(2));
+      target["force"] = true;
+      expect(!run("projects.download", target).at("cached").get<bool>() && descriptorRequests == 2,
+             "SSH GitHub project descriptors use normalized public HTTPS without credentials");
       offline = true;
       target["force"] = true;
       expect(run("projects.download", target).at("stale") == true,

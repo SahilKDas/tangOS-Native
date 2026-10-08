@@ -24,6 +24,7 @@ struct Descriptor {
 };
 Descriptor parseDescriptor(const std::string &text);
 Descriptor loadDescriptor(const fs::path &repo);
+std::string githubSlug(const std::string &url);
 Command toolCommand(const Descriptor &descriptor, const Tool &tool, const Json &values,
                     const fs::path &repo, bool allowWrites, bool allowApply = false);
 fs::path confinedPath(const fs::path &root, const std::string &relative);

@@ -32,6 +32,16 @@ int main() {
     expect(tokenize("python \"a b.py\" --flag") == Args({"python", "a b.py", "--flag"}),
            "INI tokenize");
     rejects([] { tokenize("\"unfinished"); }, "reject unclosed quote");
+    for (const auto &url :
+         {"https://github.com/Owner/Repository.git", "git@github.com:Owner/Repository.git",
+          "ssh://git@github.com/Owner/Repository", "https://GITHUB.COM/OWNER/REPOSITORY/",
+          " github.com/Owner/Repository "})
+      expect(githubSlug(url) == "owner/repository", "Normalize supported GitHub URL forms");
+    for (const auto &url :
+         {"https://attacker.test/github.com/owner/repo", "https://key@github.com/owner/repo",
+          "https://github.com/../repo", "https://github.com/owner/repo?key=value",
+          "http://github.com/owner/repo"})
+      expect(githubSlug(url).empty(), "Refuse ambiguous, credential-bearing or unsafe GitHub URLs");
     AtlasCamera camera;
     camera.zoomAt(2, 50, 40, 100, 80);
     expect(camera.zoom == 2 && camera.x == -50 && camera.y == -40, "zoom anchors cursor");

@@ -195,7 +195,7 @@ std::string resourceText(int id) {
 }
 void about() {
   reviewDialog(
-      "TangOS Lite 0.16.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
+      "TangOS Lite 0.16.1\nPortable native Windows repository workbench.\nUse Encyclopedia "
       "for checks and Git; Repository for status.\nAlways read AGENTS.md and review "
       "changes before publication.\n\n" +
           resourceText(204) + "\n\nMinGW-w64 libwinpthread\n" + resourceText(202) +
@@ -567,7 +567,7 @@ void paintChrome(HDC dc, int w, int h) {
     skin::label(dc, L"Repository status", rail + 16, 345, 308, 24, 14, true);
   skin::label(dc, L"Port-only  ·  Review before push", rail + 16, h - 139, 300, 23, 12, true, true);
   skin::mascot(dc, w - 137, h - 127, 96);
-  skin::label(dc, L"v0.16.0", w - 74, h - 27, 60, 18, 10, false, true);
+  skin::label(dc, L"v0.16.1", w - 74, h - 27, 60, 18, 10, false, true);
 }
 void snapshot(const fs::path &path) {
   RECT rect;
@@ -739,7 +739,8 @@ void projectMenu() {
     importProjectZip();
   else if (selected == 10002)
     start([] {
-      Backend backend(repo, dataDir, settings);
+      Backend backend(repo, dataDir, settings, Vault(dataDir / "vault").values(), requestHttp,
+                      &runner, output);
       auto args = Json::object();
       auto preview = backend.invoke("projects.discover", args);
       args["confirmation"] = preview.at("confirmation");
@@ -751,7 +752,8 @@ void projectMenu() {
     auto entry = Backend(repo, dataDir, settings).invoke("projects.get", {{"id", id}});
     if (!entry.contains("descriptor") && entry.value("repository", std::string()).empty())
       start([id] {
-        Backend backend(repo, dataDir, settings);
+        Backend backend(repo, dataDir, settings, Vault(dataDir / "vault").values(), requestHttp,
+                        &runner, output);
         Json args{{"id", id}};
         auto preview = backend.invoke("projects.download", args);
         args["confirmation"] = preview.at("confirmation");
@@ -779,7 +781,8 @@ void automaticUpdate() {
       !profile.value("allowUpdateDownloads", false))
     return;
   start([] {
-    Backend backend(repo, dataDir, settings, {}, requestHttp, &runner, output);
+    Backend backend(repo, dataDir, settings, Vault(dataDir / "vault").values(), requestHttp,
+                    &runner, output);
     auto args = Json::object();
     auto ticket = backend.invoke("update.stage", args);
     args["confirmation"] = ticket.at("confirmation");
@@ -804,7 +807,8 @@ void automaticDiscovery() {
   if (!profile.value("enabled", false) || !profile.value("automatic", false))
     return;
   start([profile] {
-    Backend backend(repo, dataDir, settings);
+    Backend backend(repo, dataDir, settings, Vault(dataDir / "vault").values(), requestHttp,
+                    &runner, output);
     Json args = Json::object();
     auto preview = backend.invoke("projects.discover", args);
     args["confirmation"] = preview.at("confirmation");

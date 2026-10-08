@@ -400,7 +400,8 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       fleet.enqueue(external, Json::array({{{"id", "external-http"}, {"name", "external_http"}}}));
       fleet.start(external);
       wait(fleet);
-      write(dir / "mcp_client.py", R"PY(import json,pathlib,sys,urllib.request,urllib.error
+      write(dir / "mcp_client.py",
+            R"PY(import json,pathlib,sys,time,threading,urllib.request,urllib.error
 config=json.loads(pathlib.Path(sys.argv[1]).read_text())['mcpServers']['tangos-lite']
 url=config['url'];headers=config['headers'].copy()
 def call(method,params=None,auth=True):
@@ -427,6 +428,29 @@ batch=call('tools/call',{'name':'next_batch','arguments':{}})
 assert json.loads(batch['content'][0]['text'])['status']=='assigned'
 output=call('tools/call',{'name':'echo','arguments':{'value':"print('native-mcp-output')"}})
 assert 'native-mcp-output' in output['content'][0]['text']
+def raw(payload, selected=None):
+ with urllib.request.urlopen(urllib.request.Request(url,json.dumps(payload).encode(),dict(selected or headers)),timeout=15) as response:
+  return response.status,response.read()
+def pending(request_id, name, arguments):
+ results=[]
+ thread=threading.Thread(target=lambda:results.append(raw({'jsonrpc':'2.0','id':request_id,'method':'tools/call','params':{'name':name,'arguments':arguments}})))
+ thread.start();return thread,results
+def cancel(request_id, selected=None):
+ status,body=raw({'jsonrpc':'2.0','method':'notifications/cancelled','params':{'requestId':request_id}}, selected)
+ assert status==202 and not body
+# Unknown/malformed IDs and another initialized session cannot cancel our request.
+cancel('unknown');raw({'jsonrpc':'2.0','method':'notifications/cancelled','params':{}})
+saved=headers.copy()
+call('initialize',{'clientInfo':{'name':'External fixture','version':'1'},'capabilities':{}})
+other=headers.copy();headers.clear();headers.update(saved)
+thread,responses=pending(901,'echo',{'value':"import time;print('request-cancel-fixture',flush=True);time.sleep(30);print('must-not-complete')"})
+time.sleep(.5);cancel(901,other);cancel('901');time.sleep(.3);assert thread.is_alive(),'different session or ID type cancelled our tool'
+cancel(901);thread.join(5);assert not thread.is_alive() and responses==[(202,b'')],responses
+with urllib.request.urlopen(urllib.request.Request(url,headers=other,method='DELETE')) as response:assert response.status==200
+output=call('tools/call',{'name':'echo','arguments':{'value':"print('batch-remains-usable')"}})
+assert 'batch-remains-usable' in output['content'][0]['text']
+thread,responses=pending(902,'next_batch',{'timeoutMs':30000})
+time.sleep(.2);cancel(902);thread.join(3);assert not thread.is_alive() and responses==[(202,b'')],responses
 call('tools/call',{'name':'finish_batch','arguments':{}})
 for _ in range(150):call('ping')
 with urllib.request.urlopen(urllib.request.Request(url,headers=headers,method='DELETE')) as response:assert response.status==200
@@ -446,7 +470,8 @@ assert p.returncode==0,(p.returncode,p.stderr)
 responses=[json.loads(line) for line in p.stdout.splitlines()]
 assert len(responses)==3,responses
 assert all('error' not in r for r in responses),responses
-assert any(t['name']=='next_batch' for t in responses[1]['result']['tools'])
+by_id={r['id']:r for r in responses}
+assert any(t['name']=='next_batch' for t in by_id[2]['result']['tools'])
 print('native stdio MCP initialize, notification, session, tools, ping and EOF passed')
 )PY");
       auto bridge = setup.run(
@@ -455,6 +480,122 @@ print('native stdio MCP initialize, notification, session, tools, ping and EOF p
             utf8((data / "mcp.json").wstring())},
            dir});
       expect(bridge.code == 0, "MCP stdio integration: " + bridge.output);
+      fleet.enqueue(external, Json::array({{{"id", "stdio-cancel"}, {"name", "stdio_cancel"}}}));
+      fleet.start(external);
+      wait(fleet);
+      write(dir / "stdio_cancel.py", R"PY(import subprocess,json,sys,time,threading,queue
+p=subprocess.Popen([sys.argv[1],'--mcp-stdio',sys.argv[2],'External fixture'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+messages=queue.Queue()
+def reader():
+ for line in p.stdout:messages.put(json.loads(line))
+threading.Thread(target=reader,daemon=True).start()
+def send(method,params=None,request_id=None):
+ body={'jsonrpc':'2.0','method':method,'params':params or {}}
+ if request_id is not None:body['id']=request_id
+ p.stdin.write(json.dumps(body)+'\n');p.stdin.flush()
+def receive(request_id):
+ result=messages.get(timeout=8)
+ assert result['id']==request_id and 'error' not in result,result
+ return result['result']
+try:
+ send('initialize',{'clientInfo':{'name':'client-controlled-name','version':'1'},'capabilities':{}},1);receive(1)
+ send('tools/call',{'name':'next_batch','arguments':{}},10)
+ assert json.loads(receive(10)['content'][0]['text'])['status']=='assigned'
+ send('tools/call',{'name':'echo','arguments':{'value':"import time;print('stdio-cancel-started',flush=True);time.sleep(30)"}},11)
+ time.sleep(.4)
+ send('notifications/cancelled',{'requestId':11})
+ send('ping',request_id=12);receive(12)
+ send('tools/call',{'name':'echo','arguments':{'value':"print('stdio-after-cancel')"}},13)
+ assert 'stdio-after-cancel' in receive(13)['content'][0]['text']
+ send('tools/call',{'name':'finish_batch','arguments':{}},14);receive(14)
+ p.stdin.close();assert p.wait(timeout=10)==0
+ assert messages.empty(),'Cancelled request received an unwanted response'
+finally:
+ if p.poll() is None:p.kill();p.wait()
+print('native stdio cancellation keeps input responsive, suppresses cancelled response and preserves batch')
+p=subprocess.Popen([sys.argv[1],'--mcp-stdio',sys.argv[2],'External fixture'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+p.stdin.write(json.dumps({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'clientInfo':{'name':'ignored','version':'1'},'capabilities':{}}})+'\n');p.stdin.flush()
+assert 'error' not in json.loads(p.stdout.readline())
+p.stdin.write(json.dumps({'jsonrpc':'2.0','id':20,'method':'tools/call','params':{'name':'next_batch','arguments':{'timeoutMs':30000}}})+'\n');p.stdin.flush()
+time.sleep(.3);p.stdin.close()
+assert p.wait(timeout=5)==0,'EOF failed to cancel a pending batch request'
+print('native stdio EOF cancels pending session work before joining')
+p=subprocess.Popen([sys.argv[1],'--mcp-stdio',sys.argv[2],'External fixture'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+p.stdin.write(json.dumps({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'clientInfo':{'name':'ignored','version':'1'},'capabilities':{}}})+'\n');p.stdin.flush()
+assert 'error' not in json.loads(p.stdout.readline())
+p.stdin.write(json.dumps({'jsonrpc':'2.0','id':21,'method':'tools/call','params':{'name':'next_batch','arguments':{'timeoutMs':30000}}})+'\n');p.stdin.flush()
+time.sleep(.2)
+try:p.stdin.write('x'*(1024*1024+2));p.stdin.flush()
+except BrokenPipeError:pass
+assert p.wait(timeout=5)==1,'Oversized request did not close cleanly while workers were active'
+print('native stdio malformed-input teardown preserves worker lifetimes')
+)PY");
+      auto stdioCancelled = setup.run(
+          {{"python", utf8((dir / "stdio_cancel.py").wstring()),
+            utf8((fs::u8path(selfExecutable()).parent_path() / "TangOSLite.exe").wstring()),
+            utf8((data / "mcp.json").wstring())},
+           dir});
+      expect(stdioCancelled.code == 0, "MCP stdio cancellation: " + stdioCancelled.output);
+      fleet.enqueue(external, Json::array({{{"id", "request-stop"}, {"name", "request_stop"}}}));
+      fleet.start(external);
+      wait(fleet);
+      expect(fleet.takeBatch(external)["status"] == "assigned", "UI-stop fixture assigned");
+      Runner requestRunner;
+      Result cancelledResult{};
+      std::exception_ptr toolError;
+      std::thread activeTool([&] {
+        try {
+          cancelledResult = fleet.runTool(
+              external, "echo",
+              {{"value", "import time;print('ui-stop-started',flush=True);time.sleep(30)"}},
+              &requestRunner);
+        } catch (...) {
+          toolError = std::current_exception();
+        }
+      });
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      fleet.stop(external);
+      activeTool.join();
+      if (toolError)
+        std::rethrow_exception(toolError);
+      expect(requestRunner.isCancelled() && cancelledResult.code == ERROR_CANCELLED,
+             "UI Stop reaches caller-owned MCP process runner");
+      fleet.enqueue(external, Json::array({{{"id", "http-ui-stop"}, {"name", "http_ui_stop"}}}));
+      fleet.start(external);
+      wait(fleet);
+      write(dir / "http_ui_stop.py", R"PY(import json,pathlib,sys,urllib.request
+config=json.loads(pathlib.Path(sys.argv[1]).read_text())['mcpServers']['tangos-lite']
+headers=config['headers'].copy();headers['Content-Type']='application/json'
+def call(method,params):
+ body=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params}).encode()
+ with urllib.request.urlopen(urllib.request.Request(config['url'],body,dict(headers)),timeout=8) as response:
+  if response.headers.get('Mcp-Session-Id'):headers['Mcp-Session-Id']=response.headers['Mcp-Session-Id']
+  result=json.load(response);assert 'error' not in result,result
+  return result['result']
+call('initialize',{'clientInfo':{'name':'External fixture','version':'1'},'capabilities':{}})
+call('tools/call',{'name':'next_batch','arguments':{}})
+pathlib.Path(sys.argv[2]).write_text('client-ready')
+result=call('tools/call',{'name':'echo','arguments':{'value':"import time;print('http-ui-stop',flush=True);time.sleep(30)"}})
+assert result['isError'] and '[CANCELLED]' in result['content'][0]['text'],result
+with urllib.request.urlopen(urllib.request.Request(config['url'],headers=headers,method='DELETE')) as response:assert response.status==200
+print('UI Stop returns a tool error to the client instead of silently dropping its response')
+)PY");
+      auto marker = dir / "http-ui-stop-ready";
+      Runner stopClient;
+      Result stoppedReply{};
+      std::thread stopRequest([&] {
+        stoppedReply =
+            stopClient.run({{"python", utf8((dir / "http_ui_stop.py").wstring()),
+                             utf8((data / "mcp.json").wstring()), utf8(marker.wstring())},
+                            dir});
+      });
+      auto deadline = GetTickCount64() + 5000;
+      while (!fs::exists(marker) && GetTickCount64() < deadline)
+        Sleep(10);
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      fleet.stop(external);
+      stopRequest.join();
+      expect(stoppedReply.code == 0, "UI Stop MCP response: " + stoppedReply.output);
       auto inspector = GetEnvironmentVariableW(L"TANGOS_MCP_INSPECTOR", nullptr, 0);
       if (inspector) {
         std::wstring inspectorPath(inspector, 0);
