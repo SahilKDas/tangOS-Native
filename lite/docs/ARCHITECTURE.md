@@ -74,4 +74,14 @@ Backend policies and statistics are shared across manual execution, fleet and MC
 
 BatchBook isolates pure draft/batch lifecycle and retention from UI and Git. Fleet persists it atomically alongside agent queues, synchronizes queue edits, parks interrupted work and incorporates saved batch instructions into repository-scoped prompts. Native controls edit drafts and display history; worker completion updates the model without destroying editor contents.
 
+`archive` validates bounded stored/DEFLATE project imports before extraction,
+including Windows ordinal case aliases, path conflicts, protected content and
+the project descriptor. `updater` separates trusted download staging from the
+post-exit helper transaction; it validates publisher checksums and executable
+headers, rechecks the installation baseline and retains a rollback executable.
+UI code owns confirmation and restart scheduling, while replacement remains in
+the isolated native service. Project discovery, automatic downloads and provider
+traffic require separate local opt-ins. Dev-only MCP Inspector and reference
+browser dependencies stay outside the portable executable.
+
 Remote project selection resolves through `projects.open` in the backend. A validated descriptor becomes a confined metadata cache; the main window stores its registry ID separately from the local repository path. ConsoleUI receives a remote-mode flag and does not instantiate execution services. Published reads use the existing connection layer; injected read-only transport makes the native GUI regression independent of external credentials and services.

@@ -123,7 +123,7 @@
       "contract": "projects",
       "state": "partial",
       "evidence": [
-        "Native local/remote registry, descriptor import, remembered selection and no-clone Viewer landing. Packaged native GUI tests cover explicit published loading and read-only controls. Automatic remote registry discovery, ZIP import and automatic post-clone switching remain open."
+        "Native local/remote registry, opt-in automatic discovery, validated descriptor downloads/offline cache, safe ZIP import and remembered selection. Native GUI tests cover clone-and-open and read-only remote Viewer. Exact original project envelopes and visual composition remain unverified."
       ],
       "kind": "state"
     },
@@ -361,7 +361,7 @@
       "contract": "listProjects",
       "state": "partial",
       "evidence": [
-        "Native local/remote registry, descriptor import, remembered selection and no-clone Viewer landing. Packaged native GUI tests cover explicit published loading and read-only controls. Automatic remote registry discovery, ZIP import and automatic post-clone switching remain open."
+        "Native registry discovery, descriptor caching and safe ZIP import are tested in backend_tests.cpp and test_project_import_cli.py. Exact original listProjects response comparisons remain unfinished."
       ],
       "kind": "api"
     },
@@ -369,7 +369,7 @@
       "contract": "switchProject",
       "state": "partial",
       "evidence": [
-        "Native local/remote registry, descriptor import, remembered selection and no-clone Viewer landing. Packaged native GUI tests cover explicit published loading and read-only controls. Automatic remote registry discovery, ZIP import and automatic post-clone switching remain open."
+        "Native remembered local/remote switching and automatic post-clone opening have actual GUI coverage. Exact original switching states and overlays remain unverified."
       ],
       "kind": "api"
     },
@@ -770,7 +770,7 @@
       "contract": "cloneAndOpen",
       "state": "partial",
       "evidence": [
-        "Native clone service cancellation/restart and durable log tested using disposable local Git repositories. Dedicated clone-and-open/no-clone frontend remains open."
+        "Native destination picker, command preview, confirmation, progress/cancellation, durable log and clone-and-open frontend tested with disposable Git repositories. Exact original frontend and result envelope comparisons remain unfinished."
       ],
       "kind": "api"
     },

@@ -117,4 +117,22 @@ that data is committed or packaged. The selected checkout's tracked source
 remained unchanged. Byte matching is failed, not verified. These failures are
 recorded without changing baselines, waiving checks or repairing `src/`.
 
-Reproducible 0.16.0 packaging and remaining screen parity are still pending.
+Remaining screen parity is still pending.
+
+## 0.16.0 verified portable package
+
+Release source checkpoint: `13e1475`. Two clean builds in
+`lite/release-0.16.0-verified` produced identical Windows x64 executables:
+**5,764,096 bytes (5.764 decimal MB)**, SHA256
+`03102C14C1D7D2FF6D31CC1DDEA95BE8B586E87ABD0F5A79966465ED895D21F8`.
+Imports are Windows system DLLs only. All five native suites, packaged backend,
+driver adapter, disposable Git/ZIP workflows and **858 original-code comparisons**
+passed. Official MCP Inspector ran during the Fleet suite.
+
+All three packaged GUI workflows passed: valid, missing and invalid descriptors.
+The valid workflow also covered Viewer full-map toggle/F11 restore and a
+25,000-function database with a 500-row roster (3,250 ms for fixture creation and
+capture/layout combined on this machine). This is not a sustained frame-rate or
+arbitrary-DPI benchmark. The default artifact is `lite/release/TangOSLite.exe`.
+Full UI/protocol parity remains unverified; real SM64DS failures above remain
+failures, and no real provider calls or GitHub writes were made.

@@ -48,7 +48,8 @@ per-agent durable logs. Viewer includes a contributor strip and metadata hover.
 Draft generation uses isolated worktrees. MCP client templates and the native
 stdio bridge have transport integration tests. These additions supersede earlier
 unfinished feature notes, but do not establish exact full-screen parity or real
-provider/client interoperability. Reproducible 0.16.0 packaging remains pending.
+provider/client interoperability. Reproducible 0.16.0 packaging passed as recorded
+in VERIFICATION.md.
 
 The Viewer now implements the original full-map state: statistics and rosters
 hide while the map expands beneath the header. Its toggle and F11 restore retain
