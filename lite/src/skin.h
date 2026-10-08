@@ -5,6 +5,9 @@ namespace skin {
 void initialize();
 void shutdown();
 void theme(int index);
+void animate(bool enabled);
+bool animationEnabled();
+void advance(bool visible);
 COLORREF text();
 COLORREF muted();
 COLORREF field();

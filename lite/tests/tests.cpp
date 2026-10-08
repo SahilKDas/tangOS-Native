@@ -1,4 +1,5 @@
 #include "repository.h"
+#include "viewer.h"
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
@@ -29,6 +30,37 @@ int main() {
     expect(tokenize("python \"a b.py\" --flag") == Args({"python", "a b.py", "--flag"}),
            "INI tokenize");
     rejects([] { tokenize("\"unfinished"); }, "reject unclosed quote");
+    AtlasCamera camera;
+    camera.zoomAt(2, 50, 40, 100, 80);
+    expect(camera.zoom == 2 && camera.x == -50 && camera.y == -40, "zoom anchors cursor");
+    auto view = camera.visible(100, 80);
+    expect(view.x == 25 && view.y == 20 && view.width == 50, "minimap world viewport");
+    camera.center(100, 80, 100, 80);
+    expect(camera.x == -100 && camera.y == -80, "minimap center clamped");
+    camera.zoomAt(.01, 50, 40, 100, 80);
+    expect(camera.zoom == 1 && camera.x == 0 && camera.y == 0,
+           "fit zoom cannot pan into empty space");
+    std::vector<Tile> fixtureTiles = {{0, 0, 0, 50, 50}, {1, 50, 0, 50, 50}, {2, 0, 50, 100, 50}};
+    expect(marqueeTiles(fixtureTiles, {60, 40, -50, -30}) == std::vector<size_t>({0, 1}),
+           "reverse marquee intersects tiles");
+    expect(marqueeTiles(fixtureTiles, {110, 110, 5, 5}).empty(), "marquee outside world");
+    expect(marqueeTiles(fixtureTiles, {0, 0, 50, 50}) == std::vector<size_t>({0}),
+           "edge contact does not select neighbor");
+    AtlasLod lod;
+    auto fixtureRows = parseAtlas(
+        R"({"functions":[{"id":"a","module":"arm9","size":50},{"id":"b","module":"arm9","size":50},{"id":"c","module":"overlay","size":100}]})");
+    lod.compute(fixtureRows, fixtureTiles, 100, 100);
+    expect(atlasNeighbor(fixtureRows, fixtureTiles, 0, 1, 0) == 1,
+           "directional travel prefers same-module neighbor");
+    expect(atlasNeighbor(fixtureRows, fixtureTiles, 0, 0, 1) == 2,
+           "directional travel crosses module edge");
+    expect(atlasNeighbor(fixtureRows, fixtureTiles, 0, -1, 0) == 0,
+           "directional travel stays when no forward neighbor");
+    expect(lod.update(1) == 1 && lod.update(2) == 2 && lod.update(4) == 3,
+           "derived atlas LOD bands");
+    expect(lod.update(2.7) == 3 && lod.update(2.4) == 2, "LOD hysteresis prevents thrashing");
+    expect(numberedSource("int a;\nint b;\n") == "1  int a;\n2  int b;\n",
+           "source inspection line numbers");
     Settings s;
     s.repository = "C:/unicode/日本語";
     s.themeIndex = 2;

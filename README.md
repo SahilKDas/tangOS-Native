@@ -11,14 +11,14 @@ it knows the repo's tools, compiler, data source, and rules.
 | App | What it is | Status |
 |---|---|---|
 | **tangOS Console** | Downloadable desktop app. Exposes a repo's tools as an **MCP server** an AI connects to, with a **live viewer** to watch the AI drive them in real time. | in progress (`console/`) |
-| **TangOS Lite** | Portable Windows C++ workbench: repository status, cancellable checks/logs, reviewed Git operations and GitHub CLI integration. No browser runtime. | usable first release (`lite/`) |
+| **TangOS Lite** | Portable Windows C++ workbench: repository status, cancellable checks/logs, reviewed Git operations and GitHub CLI integration. No browser runtime. | native implementation; parity audit underway (`lite/`) |
 | **tangOS Docs** | Browsable catalog of a repo's tools, generated from `tangos.json`. | planned (`docs/`) |
 | **tangOS Atlas** | Progress atlas / treemap (formerly Chaos Viewer). | planned rebrand |
 
-## Download
+## Portable native app
 
-**tangOS Console Native** ships as a desktop app that auto-updates from this repo's [Releases](https://github.com/SahilKDas/tangOS-Native/)
+Build and run **TangOS Lite** from [`lite/`](lite/README.md). The Windows app is one portable executable with C++/Win32, TinySkia and embedded Nunito; it does not bundle Electron or a browser runtime. No installer is required. External tools and account credentials belong to each user.
 
-- **Windows** - download and run the installer; it self-updates from here. Not code-signed yet, so Windows warns once: click *More info*, then *Run anyway*.
+The original TypeScript/CSS Console under `console/` and related packages remains as the parity reference and development test oracle. It is not packaged in the native executable. GitHub's language chart counts this retained source.
 
-Upstream was built with Claude Code. I'm doing shit with GPT-6.1 and 5.6
+Full parity is still being audited: see [`lite/docs/UI-PARITY.md`](lite/docs/UI-PARITY.md) and [`lite/docs/LIMITATIONS.md`](lite/docs/LIMITATIONS.md). Build, tests, release reproduction and security review are documented under `lite/`. Do not treat a passing native build as proof that every reference feature is complete.

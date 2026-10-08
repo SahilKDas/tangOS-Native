@@ -3,9 +3,10 @@ $ErrorActionPreference = 'Stop'
 $fixture = [IO.Path]::GetFullPath($FixtureDir)
 if (Test-Path -LiteralPath $fixture) { throw "Use a fresh fixture directory: $fixture" }
 $repo = Join-Path $fixture 'repository with spaces'
-New-Item -ItemType Directory -Force "$repo/tools" | Out-Null
+New-Item -ItemType Directory -Force "$repo/tools", "$repo/port" | Out-Null
 Set-Content -LiteralPath "$repo/.tangos-lite-test-fixture" -Value 'Explicit disposable GUI fixture'
 Set-Content -LiteralPath "$repo/tools/port_refcheck.py" -Value "import time`nprint('port/fixture.cpp:42: actionable fixture diagnostic', flush=True)`ntime.sleep(2)`nprint('fixture checks passed', flush=True)"
+[IO.File]::WriteAllText("$repo/port/source.cpp", "int fixture_source() { return 42; }", [Text.UTF8Encoding]::new($false))
 $descriptor = @{
   tangosVersion = '1'
   project = @{ name = 'native-gui-fixture'; title = 'Native GUI fixture'; tagline = 'Portable descriptor-driven Console' }
@@ -14,10 +15,10 @@ $descriptor = @{
   tools = @(@{ id = 'port_reference'; label = 'Port references'; category = 'verification'; description = 'Run independent port reference verification'; readOnly = $true; command = '{python} tools/port_refcheck.py'; args = @() })
 }
 [IO.File]::WriteAllText("$repo/tangos.json", ($descriptor | ConvertTo-Json -Depth 12), [Text.UTF8Encoding]::new($false))
-[IO.File]::WriteAllText("$repo/chaos-db.json", '{"functions":[{"id":"1","name":"fixture_port_init","module":"port","size":80,"matched":true},{"id":"2","name":"fixture_port_render","module":"port","size":120,"matched":false},{"id":"3","name":"fixture_port_check","module":"port","size":60,"matched":false,"div":2}]}', [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText("$repo/chaos-db.json", '{"functions":[{"id":"1","name":"fixture_port_init","module":"port","size":80,"matched":true,"srcPath":"port/source.cpp"},{"id":"2","name":"fixture_port_render","module":"port","size":120,"matched":false},{"id":"3","name":"fixture_port_check","module":"port","size":60,"matched":false,"div":2}]}', [Text.UTF8Encoding]::new($false))
 git -C $repo init -b main
 if ($LASTEXITCODE) { throw 'Fixture git init failed' }
-git -C $repo -c user.name=Lite -c user.email=lite@example.invalid add tools/port_refcheck.py tangos.json chaos-db.json
+git -C $repo -c user.name=Lite -c user.email=lite@example.invalid add tools/port_refcheck.py port/source.cpp tangos.json chaos-db.json
 git -C $repo -c user.name=Lite -c user.email=lite@example.invalid commit -m 'GUI fixture'
 if ($LASTEXITCODE) { throw 'Fixture commit failed' }
 $exe = (Resolve-Path -LiteralPath $Executable).Path
@@ -41,11 +42,12 @@ $report = Join-Path $fixture 'gui-smoke-report.txt'
 if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $report)) { throw "GUI workflow failed: exit $($process.ExitCode)" }
 $result = Get-Content -LiteralPath $report -Raw
 if (-not $result.StartsWith('PASS')) { throw $result }
-foreach ($image in @('landing', 'controller', 'repository', 'workspace', 'theme-0', 'theme-1', 'theme-2', 'theme-3', 'theme-4', 'console-0', 'console-1', 'console-2', 'console-3', 'console-4', 'console-5', 'console-6')) {
+foreach ($image in @('landing', 'controller', 'repository', 'workspace', 'theme-0', 'theme-1', 'theme-2', 'theme-3', 'theme-4', 'console-0', 'console-1', 'console-2', 'console-3', 'console-4', 'console-5', 'console-6', 'console-8', 'console-9', 'console-10', 'console-11', 'console-12')) {
   $path = Join-Path $fixture "$image.bmp"
   if (-not (Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -lt 100000) { throw "Missing native window render: $image" }
 }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'fleet-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Packaged fleet workflow failed' }
+if (-not (Get-Content -LiteralPath (Join-Path $fixture 'viewer-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Native viewer parity workflow failed' }
 Write-Output $result
 # This repository was created by this script. Resolve and confine cleanup before removal.
 $resolvedRepo = (Resolve-Path -LiteralPath $repo).Path

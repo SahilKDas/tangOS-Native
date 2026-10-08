@@ -8,7 +8,7 @@
 - Independent checks run only when discoverable/available. No gate means unverified work, never proof of byte matching. Full asset/compiler-dependent SM64DS verification was not run with copyrighted inputs.
 - GitHub readiness uses the user's gh setup with manual refresh. Real remote push/PR creation was not performed in this test run. Authentication uses existing Git/gh credentials.
 - Conflict resolution, stash, rebase continuation/abort, tags, force operations and arbitrary branch/worktree management use external Git. Agent worktree creation is native fleet functionality.
-- Native controls/dialogs and static gradients differ from Console. Published atlas updates are manual. Arbitrary DPI configurations require more testing.
+- Native controls/dialogs and screen composition differ from Console. Animated backgrounds, source inspection, minimap, marquee and module popouts are implemented; full side-by-side pixel/interaction parity remains unverified. Published atlas updates are opt-in through user-enabled connections. Arbitrary DPI configurations require more testing.
 - Global INI check settings apply to the selected repository. Logs/worktrees are retained manually. UI output retains a bounded tail; complete logs remain on disk.
 - Executable repository scripts are trusted code, not OS-sandboxed. Instruction delivery and post-run audits cannot prevent arbitrary code from touching other paths or networking. See SECURITY.md.
 

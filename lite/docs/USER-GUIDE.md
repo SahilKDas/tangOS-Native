@@ -31,3 +31,11 @@ in staging/commit/push. Keep all proprietary assets excluded.
 Click Tango or choose **Alt+Space → About** for embedded notices. The full
 README describes field meanings and check overrides; LIMITATIONS.md lists the
 unfinished Console screens and fleet functionality.
+
+## New native screens
+
+In Chaos Viewer, left-drag pans, right-drag selects eligible functions, the wheel zooms and WASD/arrows travel. Space adds/removes the selection from the cart. Inspect source opens numbered source and prior tries; Pop out module opens an independent Viewer that sends draft additions back to the main cart. It does not start a second agent controller.
+
+Settings provides matching, delegation, animation and live-refresh controls. Connections stores user-owned endpoint profiles with credentials referenced by local environment/vault names; nothing is enabled by default. Project services shows request results and exact mutation previews, followed by a separate confirmation. This repo needs checks the selected repository's tools and inputs asynchronously and offers setup commands you control. Agent Details → Manage queue lets you reorder/remove pending targets after stopping the agent; additions made during an active batch survive that batch's completion.
+
+Explicit Git sync is destructive: review its exact target, local changes and listed deletions before confirming. It backs up allowed changed files and pins the prior commit under refs/tangos/backups. Protected assets stay local; protected tracked/source changes block the reset.

@@ -1,8 +1,13 @@
 #include "skin.h"
 #include <algorithm>
 #include <cstdint>
+#include <chrono>
+#include <map>
+#include <memory>
+#include <vector>
 extern "C" void tangos_shape(unsigned char *, unsigned, unsigned, float, uint32_t, uint32_t);
 extern "C" void tangos_image(unsigned char *, unsigned, unsigned, const unsigned char *, size_t);
+extern "C" void tangos_mesh(unsigned char *, unsigned, unsigned, float, unsigned);
 namespace skin {
 namespace {
 struct Color {
@@ -19,7 +24,22 @@ struct Palette {
 Palette colors{Color(143, 208, 248),      Color(126, 200, 240), Color(142, 200, 65),
                Color(0, 153, 224),        Color(13, 58, 92),    Color(72, 116, 156),
                Color(200, 234, 244, 253), Color(234, 244, 253)};
+std::map<std::pair<int, bool>, HFONT> fonts;
+HFONT uiFont(int size, bool bold) {
+  auto key = std::make_pair(size, bold);
+  auto found = fonts.find(key);
+  if (found != fonts.end())
+    return found->second;
+  auto font = CreateFontW(-size, 0, 0, 0, bold ? FW_BOLD : FW_NORMAL, FALSE, FALSE, FALSE,
+                          DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Nunito");
+  fonts[key] = font;
+  return font;
+}
 HANDLE fontResource = nullptr;
+bool motionEnabled = true, systemMotion = true;
+unsigned paletteIndex = 0;
+float phase = 0;
+ULONGLONG lastMotion = 0;
 COLORREF rgb(Color c) { return RGB(c.GetR(), c.GetG(), c.GetB()); }
 struct Surface {
   HDC target, dc;
@@ -56,6 +76,9 @@ void shape(HDC dc, int x, int y, int w, int h, float radius, Color top, Color bo
 }
 } // namespace
 void initialize() {
+  BOOL enabled = TRUE;
+  SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
+  systemMotion = enabled;
   auto r = FindResourceW(nullptr, MAKEINTRESOURCEW(206), RT_RCDATA);
   if (r) {
     DWORD count = 0;
@@ -63,11 +86,17 @@ void initialize() {
                                         SizeofResource(nullptr, r), nullptr, &count);
   }
 }
+void clearBackgroundFrames();
 void shutdown() {
+  clearBackgroundFrames();
+  for (auto &font : fonts)
+    DeleteObject(font.second);
+  fonts.clear();
   if (fontResource)
     RemoveFontMemResourceEx(fontResource);
 }
 void theme(int i) {
+  paletteIndex = std::clamp(i, 0, 4);
   switch (i) {
   case 1:
     colors = {Color(255, 217, 160),      Color(243, 128, 143), Color(168, 107, 201),
@@ -98,11 +127,74 @@ void theme(int i) {
 COLORREF text() { return rgb(colors.ink); }
 COLORREF muted() { return rgb(colors.muted); }
 COLORREF field() { return rgb(colors.field); }
-void background(HDC dc, int w, int h) {
+void animate(bool enabled) { motionEnabled = enabled; }
+bool animationEnabled() { return motionEnabled && systemMotion; }
+void advance(bool visible) {
+  auto now = GetTickCount64();
+  if (visible && animationEnabled() && lastMotion)
+    phase += std::min<ULONGLONG>(now - lastMotion, 250) / 1000.f;
+  lastMotion = now;
+}
+static void drawBackground(HDC dc, int w, int h) {
+  if (animationEnabled() && w > 0 && h > 0) {
+    Surface surface(dc, 0, 0, w, h);
+    if (surface.data)
+      tangos_mesh(surface.data, w, h, phase, paletteIndex);
+    return;
+  }
   int split = h * 58 / 100;
   shape(dc, 0, 0, w, split, 0, colors.top, colors.middle);
   shape(dc, 0, split, w, h - split, 0, colors.middle, colors.bottom);
   shape(dc, 0, 0, w, 52, 0, Color(42, 234, 244, 253), Color(42, 234, 244, 253));
+}
+namespace {
+struct BackgroundFrame {
+  HDC dc;
+  HBITMAP bitmap;
+  HGDIOBJ previous;
+  int w, h;
+  unsigned palette;
+  float time;
+  bool animated;
+  BackgroundFrame(HDC target, int width, int height)
+      : w(width), h(height), palette(~0u), time(-1), animated(false) {
+    dc = CreateCompatibleDC(target);
+    bitmap = CreateCompatibleBitmap(target, w, h);
+    previous = SelectObject(dc, bitmap);
+  }
+  ~BackgroundFrame() {
+    SelectObject(dc, previous);
+    DeleteObject(bitmap);
+    DeleteDC(dc);
+  }
+};
+std::vector<std::unique_ptr<BackgroundFrame>> backgroundFrames;
+} // namespace
+void clearBackgroundFrames() { backgroundFrames.clear(); }
+void background(HDC dc, int w, int h) {
+  if (w <= 0 || h <= 0)
+    return;
+  BackgroundFrame *frame = nullptr;
+  for (auto &item : backgroundFrames)
+    if (item->w == w && item->h == h) {
+      frame = item.get();
+      break;
+    }
+  if (!frame) {
+    if (backgroundFrames.size() >= 4)
+      backgroundFrames.erase(backgroundFrames.begin());
+    backgroundFrames.push_back(std::make_unique<BackgroundFrame>(dc, w, h));
+    frame = backgroundFrames.back().get();
+  }
+  bool motion = animationEnabled();
+  if (frame->palette != paletteIndex || frame->animated != motion ||
+      (motion && frame->time != phase)) {
+    drawBackground(frame->dc, w, h);
+    frame->palette = paletteIndex;
+    frame->animated = motion;
+    frame->time = phase;
+  }
+  BitBlt(dc, 0, 0, w, h, frame->dc, 0, 0, SRCCOPY);
 }
 void panel(HDC dc, int x, int y, int w, int h, bool solid) {
   shape(dc, x, y + 4, w, h, 14, Color(20, 0, 0, 0), Color(20, 0, 0, 0));
@@ -113,15 +205,13 @@ void panel(HDC dc, int x, int y, int w, int h, bool solid) {
 }
 void label(HDC dc, const std::wstring &s, int x, int y, int w, int h, int size, bool bold,
            bool secondary, bool accent) {
-  auto font = CreateFontW(-size, 0, 0, 0, bold ? FW_BOLD : FW_NORMAL, FALSE, FALSE, FALSE,
-                          DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Nunito");
+  auto font = uiFont(size, bold);
   auto prev = SelectObject(dc, font);
   SetTextColor(dc, rgb(accent ? colors.primary : secondary ? colors.muted : colors.ink));
   SetBkMode(dc, TRANSPARENT);
   RECT r{x, y, x + w, y + h};
   DrawTextW(dc, s.c_str(), (int)s.size(), &r, DT_NOPREFIX | DT_END_ELLIPSIS);
   SelectObject(dc, prev);
-  DeleteObject(font);
 }
 void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
   int x = i.rcItem.left + 1, y = i.rcItem.top + 1, w = i.rcItem.right - i.rcItem.left - 2,
@@ -133,8 +223,7 @@ void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
         base);
   wchar_t title[256];
   GetWindowTextW(i.hwndItem, title, 256);
-  auto font = CreateFontW(-13, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, 0, 0,
-                          CLEARTYPE_QUALITY, 0, L"Nunito");
+  auto font = uiFont(13, true);
   auto prev = SelectObject(i.hDC, font);
   SetTextColor(i.hDC, (i.itemState & ODS_DISABLED) ? rgb(colors.muted)
                       : (primary || danger)        ? RGB(255, 255, 255)
@@ -148,7 +237,6 @@ void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
     DrawFocusRect(i.hDC, &r);
   }
   SelectObject(i.hDC, prev);
-  DeleteObject(font);
 }
 void mascot(HDC dc, int x, int y, int size) {
   auto r = FindResourceW(nullptr, MAKEINTRESOURCEW(201), RT_RCDATA);

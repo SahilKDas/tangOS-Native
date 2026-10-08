@@ -54,6 +54,16 @@ int main() {
       args["confirmation"] = preview.at("confirmation");
       return backend.invoke(method, args);
     };
+    expect(!enabledTool({{"allowNearMiss", false}}, "nearmiss_stats"),
+           "near-miss tool policy denied");
+    expect(enabledTool({{"allowNearMiss", false}}, "check"),
+           "ordinary tools unaffected by near-miss policy");
+    expect(!enabledTool({{"disabledTools", Json::array({"check"})}}, "check"),
+           "explicit tool disable");
+    reject([&] { confirmed("preferences.set", {{"allowNearMiss", "false"}}); },
+           "matching policy type validation");
+    reject([&] { confirmed("preferences.set", {{"disabledTools", Json::array({42})}}); },
+           "disabled tool type validation");
     expect(backend.invoke("projects.list").empty(), "empty registry");
     confirmed("projects.register", {{"id", "fixture"}, {"repository", utf8(repo.wstring())}});
     expect(backend.invoke("projects.list").size() == 1, "registered local project");
@@ -106,6 +116,22 @@ int main() {
                           {{"name", "f"}, {"module", "arm9"}, {"addr", 33554432}})["attempts"]
                    .size() == 1,
            "attempt filtering tolerant corrupt row");
+    write(
+        repo / "config/match_attempts.jsonl",
+        R"({"functionId":"arm9:0x2000000","attemptId":"b","parentAttemptId":"a","model":"fixture","c_source":"PRIVATE BODY","loggedAt":"private time","divergences":"5"}
+{"name":"f","module":"arm9","addr":33554432,"attemptId":"a","parentAttemptId":null,"base":{"kind":"clean"},"matchProvenance":{"model":"reference"}}
+)");
+    auto history =
+        backend.invoke("atlas.history", {{"name", "f"}, {"module", "arm9"}, {"addr", 33554432}});
+    expect(history["attempts"].size() == 2 && history["attempts"][0]["attemptId"] == "a" &&
+               history["attempts"][1]["depth"] == 1,
+           "history id aliases and parent ordering");
+    expect(history.dump().find("PRIVATE BODY") == std::string::npos &&
+               history.dump().find("private time") == std::string::npos,
+           "history excludes C bodies and private timestamps");
+    expect(history["attempts"][0]["model"] == "reference" &&
+               history["attempts"][1]["divergences"] == 5,
+           "provenance and numeric string normalization");
     expect(classifySource("dcd 0x11223344") == "transcribed", "transcription rejected");
     expect(classifySource("dcd 0x11223344\nNONMATCHING") == "ok", "declared draft accepted");
     expect(adaptiveRole("Hard matcher", 8, 0, {{"score", 1}, {"refinerSupply", 1}}) == "Random",
@@ -173,6 +199,30 @@ int main() {
     expect(backend.invoke("stats.get")["fixture"]["declaredMatches"] == 1,
            "transcriptions never receive match credit");
     expect(backend.invoke("harvest.list").size() == 1, "harvest recovery record");
+    backend.recordAgent("fixture", results, "review", 1);
+    auto uniqueStats = backend.invoke("stats.get")["fixture"];
+    expect(uniqueStats["declaredMatches"] == 1 && uniqueStats["attempts"] == 2,
+           "repeated verification counts unique functions once");
+    backend.resetRecent("fixture");
+    expect(backend.invoke("stats.get")["fixture"]["recent"].empty(),
+           "adaptive demotion resets old-rung misses");
+    Json best = Json::object();
+    auto statsFixture = updateAgentStats(
+        Json::object(),
+        Json::array({{{"name", "late"}, {"matched", false}, {"size", 64}, {"divergences", 8}},
+                     {{"name", "late"}, {"matched", false}, {"size", 64}, {"divergences", 4}},
+                     {{"name", "late"}, {"matched", true}, {"size", 64}, {"divergences", 0}},
+                     {{"name", "far"}, {"matched", false}, {"size", 64}, {"divergences", 14}},
+                     {{"name", "tokens"}, {"matched", true}, {"tokensIn", 25}, {"tokensOut", 10}}}),
+        best);
+    expect(statsFixture["attempts"] == 3 && statsFixture["declaredMatches"] == 2,
+           "late first win deduplicated attempts");
+    expect(statsFixture["nearMisses"] == 1 && statsFixture["recent"].size() == 4,
+           "near-miss closeness and late-win recent form");
+    expect(statsFixture["bySize"]["<=0x40"]["attempts"] == 2 &&
+               statsFixture["tokensPerMatch"] == 18,
+           "reference size buckets and rounded token cost");
+
     auto profiles = backend.invoke("connections.get");
     for (auto kind : {"acquire", "heartbeat", "release"})
       profiles["claims." + std::string(kind)] = {
@@ -210,6 +260,35 @@ int main() {
                           [] {});
         },
         "atomic reservation refusal stops work");
+    // Destructive synchronization is tested only in this disposable repository.
+    Repository fixtureGit(git, repo, settings);
+    auto base = trim(fixtureGit.git({"rev-parse", "HEAD"}));
+    expect(git.run({{"git", "update-ref", "refs/remotes/origin/main", base}, repo}).code == 0,
+           "fixture upstream ref");
+    fs::create_directories(repo / "port");
+    write(repo / "port/change.txt", "local commit");
+    git.run({{"git", "add", "port/change.txt"}, repo});
+    expect(git.run({{"git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                     "commit", "-m", "local port work"},
+                    repo})
+                   .code == 0,
+           "fixture local work");
+    write(repo / "port/change.txt", "local edit");
+    write(repo / "scratch.txt", "temporary work");
+    write(repo / "local-assets/keep.bin", "user-owned local fixture");
+    auto syncPreview = backend.invoke("git.syncPreview", {{"ref", "origin/main"}});
+    expect(syncPreview["target"] == base && !syncPreview["remove"].empty(),
+           "sync concrete commit and deletion preview");
+    auto sync = confirmed("git.sync", {{"ref", "origin/main"}});
+    expect(sync["exit"] == 0 && trim(fixtureGit.git({"rev-parse", "HEAD"})) == base,
+           "confirmed sync resets to reviewed target");
+    expect(fs::exists(repo / "local-assets/keep.bin") && !fs::exists(repo / "scratch.txt"),
+           "sync preserves protected assets and deletes only previewed allowed files");
+    expect(fs::exists(fs::u8path(sync["backup"]["backup"].get<std::string>()) / "port/change.txt"),
+           "sync local edits backed up before reset");
+    expect(trim(fixtureGit.git({"rev-parse", sync["backup"]["recoveryRef"].get<std::string>()})) !=
+               base,
+           "unpushed history pinned for recovery");
     std::cout << count << " backend assertions passed; fixture=" << utf8(dir.wstring()) << "\n";
     return 0;
   } catch (const std::exception &e) {

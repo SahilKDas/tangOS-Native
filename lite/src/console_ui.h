@@ -10,7 +10,8 @@ class ConsoleUI {
 public:
   ConsoleUI(HWND parent, HFONT font, fs::path repository, fs::path data, Settings settings,
             std::function<void()> gitTools,
-            std::function<void(const Settings &)> savePreferences = {});
+            std::function<void(const Settings &)> savePreferences = {}, bool viewerOnly = false,
+            std::string module = {}, std::function<void(Json)> draftAdded = {});
   ~ConsoleUI();
   void show(bool visible, bool atlas = false);
   void resize(int width, int height);

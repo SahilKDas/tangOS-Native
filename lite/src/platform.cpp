@@ -86,7 +86,7 @@ Result Runner::run(const Command &c, const Sink &sink, const fs::path &log) {
   std::ofstream f;
   if (!log.empty()) {
     fs::create_directories(log.parent_path());
-    f.open(log, std::ios::binary);
+    f.open(log, std::ios::binary | std::ios::app);
     if (!f)
       throw std::runtime_error("Cannot create durable log");
   }
@@ -281,8 +281,14 @@ Result Runner::run(const Command &c, const Sink &sink, const fs::path &log) {
       JOBOBJECT_BASIC_ACCOUNTING_INFORMATION info{};
       QueryInformationJobObject(job.h, JobObjectBasicAccountingInformation, &info, sizeof(info),
                                 nullptr);
-      if (info.ActiveProcesses == 0)
+      if (info.ActiveProcesses == 0) {
+        // The previous Peek can precede the child's last write. All writers have
+        // exited now, so drain through EOF before emitting the result footer.
+        DWORD got = 0;
+        while (ReadFile(rd.h, buf, sizeof(buf), &got, nullptr) && got)
+          emit(std::string(buf, got));
         break;
+      }
     }
   }
   WaitForSingleObject(proc.h, INFINITE);

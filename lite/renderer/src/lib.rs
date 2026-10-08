@@ -112,9 +112,102 @@ pub unsafe extern "C" fn tangos_image(data: *mut u8, w: u32, h: u32, png: *const
     }
 }
 
+// Animated mesh and glass bubbles. Caller supplies a monotonic, visibility-paused phase.
+#[no_mangle]
+pub unsafe extern "C" fn tangos_mesh(data: *mut u8, w: u32, h: u32, seconds: f32, theme: u32) {
+    if data.is_null() || w == 0 || h == 0 || w > 16384 || h > 16384 {
+        return;
+    }
+    let palettes = [
+        [0xff5cb2ec, 0xff9bd6fb, 0xff7fc400, 0xffb7e372, 0xff66bff2],
+        [0xfff58a17, 0xfffcb995, 0xfff44881, 0xfff2cf49, 0xfff0564c],
+        [0xff04101d, 0xff06213f, 0xff02060f, 0xff0a3357, 0xff04182f],
+        [0xffff7ad5, 0xffe73c83, 0xffd6aea8, 0xffd3cfc7, 0xffcb2f41],
+        [0xff00ffe1, 0xfffff700, 0xff44ff00, 0xffffea00, 0xff00ffe1],
+    ];
+    let palette = palettes[(theme as usize).min(4)];
+    let bytes = std::slice::from_raw_parts_mut(data, w as usize * h as usize * 4);
+    for p in bytes.chunks_exact_mut(4) {
+        p.swap(0, 2);
+        p[3] = 255;
+    }
+    let mut dst = PixmapMut::from_bytes(bytes, w, h).unwrap();
+    dst.fill(color(palette[0]));
+    let rect = Rect::from_xywh(0., 0., w as f32, h as f32).unwrap();
+    let homes = [(0.76, 0.26), (0.24, 0.74), (0.58, 0.84), (0.32, 0.42)];
+    for (i, (x, y)) in homes.iter().enumerate() {
+        let t = seconds * 0.035 * (0.65 + i as f32 * 0.17);
+        let px = ((*x + 0.2 + t).rem_euclid(1.4) - 0.2) * w as f32;
+        let py = (*y + 0.05 * (t * 3. + i as f32).sin()) * h as f32;
+        let center = Point::from_xy(px, py);
+        let mut paint = Paint::default();
+        let c = palette[i + 1];
+        paint.shader = RadialGradient::new(
+            center,
+            0.,
+            center,
+            w.max(h) as f32 * 0.8,
+            vec![
+                GradientStop::new(0., color(c)),
+                GradientStop::new(1., color(c & 0x00ffffff)),
+            ],
+            SpreadMode::Pad,
+            Transform::identity(),
+        )
+        .unwrap();
+        dst.fill_rect(rect, &paint, Transform::identity(), None);
+    }
+    for i in 0..3 {
+        let phase = i as f32 * 1.7;
+        let px = (0.2 + i as f32 * 0.27 + 0.04 * (seconds * 0.07 + phase).sin()) * w as f32;
+        let py = (1.15 - (seconds * 0.024 + i as f32 * 0.33).rem_euclid(1.4)) * h as f32;
+        let radius = w.min(h) as f32 * (0.045 + i as f32 * 0.012);
+        let mut path = PathBuilder::new();
+        path.push_circle(px, py, radius);
+        let path = path.finish().unwrap();
+        let mut paint = Paint::default();
+        paint.set_color_rgba8(255, 255, 255, 22);
+        dst.fill_path(
+            &path,
+            &paint,
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
+        paint.set_color_rgba8(255, 255, 255, 90);
+        dst.stroke_path(
+            &path,
+            &paint,
+            &Stroke {
+                width: 1.2,
+                ..Stroke::default()
+            },
+            Transform::identity(),
+            None,
+        );
+    }
+    for p in bytes.chunks_exact_mut(4) {
+        p.swap(0, 2);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn mesh_is_deterministic_and_moves() {
+        let mut a = vec![0u8; 64 * 48 * 4];
+        let mut b = a.clone();
+        let mut c = a.clone();
+        unsafe {
+            tangos_mesh(a.as_mut_ptr(), 64, 48, 0., 0);
+            tangos_mesh(b.as_mut_ptr(), 64, 48, 0., 0);
+            tangos_mesh(c.as_mut_ptr(), 64, 48, 5., 0);
+        }
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert!(a.chunks_exact(4).all(|p| p[3] == 255));
+    }
     #[test]
     fn raster_is_bgra_and_replaces_old_pixels() {
         let mut pixels = vec![0u8; 16 * 16 * 4];

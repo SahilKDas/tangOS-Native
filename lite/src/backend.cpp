@@ -73,6 +73,51 @@ Json jsonLines(const fs::path &p) {
   }
   return result;
 }
+Json historyString(const Json &row, const std::string &key) {
+  if (row.contains(key) && row[key].is_string() && !trim(row[key].get<std::string>()).empty())
+    return trim(row[key].get<std::string>());
+  return nullptr;
+}
+Json historyNumber(const Json &row, const std::string &key) {
+  if (!row.contains(key))
+    return nullptr;
+  if (row[key].is_number())
+    return row[key];
+  if (row[key].is_string())
+    try {
+      size_t used = 0;
+      auto value = std::stod(row[key].get<std::string>(), &used);
+      if (used == row[key].get<std::string>().size() && std::isfinite(value))
+        return value;
+    } catch (...) {
+    }
+  return nullptr;
+}
+Json historySummary(const Json &row, size_t index) {
+  Json r = Json::object();
+  r["attemptId"] = historyString(row, "attemptId");
+  if (r["attemptId"].is_null())
+    r["attemptId"] = historyString(row, "id");
+  if (r["attemptId"].is_null())
+    r["attemptId"] = "anon-" + std::to_string(index);
+  for (auto key : {"parentAttemptId", "model", "harness", "reasoning", "note", "baseKind"})
+    r[key] = historyString(row, key);
+  for (auto key : {"model", "harness", "reasoning"})
+    if (r[key].is_null() && row.contains("matchProvenance") && row["matchProvenance"].is_object())
+      r[key] = historyString(row["matchProvenance"], key);
+  if (row.contains("base") && row["base"].is_object())
+    r["baseKind"] = historyString(row["base"], "kind");
+  r["status"] = historyString(row, "status");
+  if (r["status"].is_null())
+    r["status"] = "unknown";
+  r["divergences"] = historyNumber(row, "divergences");
+  r["improvedNearMiss"] = row.contains("improvedNearMiss") &&
+                          row["improvedNearMiss"].is_boolean() &&
+                          row["improvedNearMiss"].get<bool>();
+  for (auto key : {"usedNearMissDraft", "usedGhidraDraft"})
+    r[key] = row.contains(key) && row[key].is_boolean() ? row[key] : Json(nullptr);
+  return r;
+}
 Json orderHistory(const Json &rows) {
   std::map<std::string, Json> nodes;
   std::map<std::string, std::vector<std::string>> children;
@@ -86,7 +131,10 @@ Json orderHistory(const Json &rows) {
   }
   std::vector<std::string> roots;
   for (auto &pair : nodes) {
-    auto parent = pair.second.value("parentAttemptId", std::string());
+    auto parent =
+        pair.second.contains("parentAttemptId") && pair.second["parentAttemptId"].is_string()
+            ? pair.second["parentAttemptId"].get<std::string>()
+            : std::string();
     if (parent != pair.first && nodes.count(parent))
       children[parent].push_back(pair.first);
     else
@@ -125,16 +173,31 @@ uint64_t number(const Json &j) {
   throw std::runtime_error("Invalid address");
 }
 bool sameFunction(const Json &r, const Json &q) {
-  if (!q.value("functionId", std::string()).empty() &&
-      (r.value("functionId", r.value("id", std::string())) == q["functionId"]))
+  auto fid = historyString(q, "functionId");
+  if (fid.is_null())
+    fid = historyString(q, "id");
+  auto rid = historyString(r, "functionId");
+  if (rid.is_null())
+    rid = historyString(r, "id");
+  if (!fid.is_null() && fid == rid)
     return true;
-  if (r.contains("addr") && q.contains("addr") &&
-      r.value("module", std::string()) == q.value("module", std::string()) &&
-      number(r["addr"]) == number(q["addr"]))
-    return true;
-  return !q.value("name", std::string()).empty() && r.value("name", std::string()) == q["name"] &&
-         (!r.contains("module") ||
-          r.value("module", std::string()) == q.value("module", std::string()));
+  auto mod = historyString(q, "module");
+  auto rm = historyString(r, "module");
+  if (q.contains("addr"))
+    try {
+      auto addr = number(q["addr"]);
+      std::ostringstream hex;
+      hex << std::hex << addr;
+      if (!mod.is_null() && rid.is_string() &&
+          (rid == mod.get<std::string>() + ":" + hex.str() ||
+           rid == mod.get<std::string>() + ":0x" + hex.str()))
+        return true;
+      if (r.contains("addr") && rm == mod && number(r["addr"]) == addr)
+        return true;
+    } catch (...) {
+    }
+  auto name = historyString(q, "name");
+  return !name.is_null() && historyString(r, "name") == name && (rm.is_null() || rm == mod);
 }
 std::string encode(const std::string &s) {
   static const char hex[] = "0123456789ABCDEF";
@@ -236,7 +299,7 @@ std::string classifySource(const std::string &s) {
 Json poolDifficulty(const std::vector<AtlasFunction> &fns) {
   int pending = 0, easy = 0, refiners = 0;
   for (auto &f : fns) {
-    if (f.state == "matched" || f.state == "no_match" || f.row.value("noMatch", false))
+    if (f.state == "matched" || f.state == "no_match" || exemptTarget(f.row))
       continue;
     ++pending;
     bool isNear = f.row.contains("div") && f.row["div"].is_number() &&
@@ -271,20 +334,26 @@ bool Backend::mutation(const std::string &m, const Json &) {
   return m == "projects.register" || m == "descriptor.write" || m == "preferences.set" ||
          m == "connections.set" || m == "git.action" || m == "tools.run" || m == "reports.export" ||
          m == "stats.clear" || m == "network.write" || m == "queue.adopt" || m == "git.clone" ||
-         m == "git.backup" || m == "git.discard";
+         m == "git.backup" || m == "git.discard" || m == "git.sync";
+}
+bool enabledTool(const Json &prefs, const std::string &id) {
+  auto hidden = prefs.value("disabledTools", Json::array());
+  return std::find(hidden.begin(), hidden.end(), id) == hidden.end() &&
+         (prefs.value("allowNearMiss", true) || id.rfind("nearmiss_", 0) != 0);
 }
 Json Backend::catalog() {
   return Json::array(
-      {"projects.list",   "projects.register", "descriptor.preview", "descriptor.write",
-       "preferences.get", "preferences.set",   "connections.get",    "connections.set",
-       "network.read",    "network.write",     "atlas.load",         "atlas.source",
-       "atlas.history",   "claims.read",       "preflight",          "git.status",
-       "git.syncPreview", "git.action",        "git.clone",          "git.backup",
-       "git.discard",     "tools.list",        "tools.run",          "stats.get",
-       "stats.clear",     "reports.list",      "reports.export",     "queue.adopt",
-       "policy.classify", "policy.adaptive",   "projects.get",       "github.credits",
-       "atlas.cosmetics", "atlas.counts",      "atlas.progress",     "atlas.live",
-       "update.check",    "harvest.list"});
+      {"projects.list",     "projects.register", "descriptor.preview", "descriptor.write",
+       "preferences.get",   "preferences.set",   "connections.get",    "connections.set",
+       "network.read",      "network.write",     "atlas.load",         "atlas.source",
+       "atlas.history",     "claims.read",       "preflight",          "git.status",
+       "git.syncPreview",   "git.sync",          "git.action",         "git.clone",
+       "git.backup",        "git.discard",       "tools.list",         "tools.run",
+       "stats.get",         "stats.clear",       "reports.list",       "reports.export",
+       "queue.adopt",       "policy.classify",   "policy.adaptive",    "policy.pool",
+       "policy.statistics", "projects.get",      "github.credits",     "atlas.cosmetics",
+       "atlas.counts",      "atlas.progress",    "atlas.live",         "update.check",
+       "harvest.list"});
 }
 Json Backend::invoke(const std::string &m, Json a) {
   HANDLE lock = CreateFileW((directory / "backend.lock").c_str(),
@@ -307,13 +376,13 @@ Json Backend::invoke(const std::string &m, Json a) {
     if (!repository.empty() && fs::exists(repository / ".git")) {
       Runner r;
       Repository repo(r, repository, settings);
-      baseline = repo.git({"rev-parse", "HEAD"}) +
+      baseline = repo.git({"show-ref"}) + repo.git({"rev-parse", "HEAD"}) +
                  repo.git({"status", "--porcelain=v1", "-z", "--untracked-files=all"}) +
                  repo.git({"diff", "--binary", "HEAD"});
       for (auto &change :
            parseStatus(repo.git({"status", "--porcelain=v1", "-z", "--untracked-files=all"}))) {
         auto path = confinedPath(repository, change.path);
-        if (fs::is_regular_file(path))
+        if (fs::is_regular_file(path) && blockedPath(change.path, settings).empty())
           baseline += utf8(path.wstring()) + sha256File(path);
       }
     }
@@ -332,6 +401,8 @@ Json Backend::invoke(const std::string &m, Json a) {
         if (action == "Push reviewed")
           details["commits"] = repo.pushPreview(a.at("remote"), a.at("ref"));
       }
+      if (m == "git.sync")
+        details = execute("git.syncPreview", a);
       if (m == "network.write") {
         auto c = fileJson(directory / "connections.json").at(a.at("connection").get<std::string>());
         details = {{"url", c.at("url")},
@@ -503,6 +574,126 @@ std::unique_ptr<RemoteLease> Backend::reserve(const Json &targets, const std::st
     return {};
   return std::make_unique<RemoteLease>(*this, targets, agent, std::move(cancel));
 }
+
+Json updateAgentStats(Json entry, const Json &rows, Json &best) {
+  if (!entry.contains("attemptedFuncs")) {
+    entry["attempts"] = 0;
+    entry["declaredMatches"] = 0;
+    entry["nearMisses"] = 0;
+    entry["recent"] = Json::array();
+    entry["bySize"] = Json::object();
+  }
+  for (auto field : {"attemptedFuncs", "matchedFuncs", "nearMissFuncs", "recent"})
+    if (!entry.contains(field) || !entry[field].is_array())
+      entry[field] = Json::array();
+  auto seen = [](const Json &set, const std::string &key) {
+    return !key.empty() && std::find(set.begin(), set.end(), Json(key)) != set.end();
+  };
+  for (const auto &row : rows) {
+    if (!row.is_object())
+      continue;
+    std::string key;
+    for (auto field : {"functionId", "name", "id"})
+      if (row.contains(field) && row[field].is_string()) {
+        key = row[field];
+        break;
+      }
+    auto source = row.contains("c_source") && row["c_source"].is_string()
+                      ? row["c_source"].get<std::string>()
+                      : "";
+    bool matched = row.contains("matched") && row["matched"] == true &&
+                   classifySource(source) != "transcribed";
+    double div = -1;
+    if (row.contains("divergences")) {
+      if (row["divergences"].is_number())
+        div = row["divergences"].get<double>();
+      else if (row["divergences"].is_string()) {
+        try {
+          auto text = row["divergences"].get<std::string>();
+          size_t end = 0;
+          div = std::stod(text, &end);
+          if (end != text.size())
+            div = -1;
+        } catch (...) {
+        }
+      }
+    }
+    if (div > 0)
+      matched = false;
+    bool firstAttempt = !seen(entry["attemptedFuncs"], key),
+         firstMatch = matched && !seen(entry["matchedFuncs"], key);
+    if (firstAttempt) {
+      entry["attempts"] = entry.value("attempts", 0) + 1;
+      if (!key.empty())
+        entry["attemptedFuncs"].push_back(key);
+    }
+    if (firstMatch) {
+      entry["declaredMatches"] = entry.value("declaredMatches", 0) + 1;
+      if (!key.empty())
+        entry["matchedFuncs"].push_back(key);
+    }
+    double size = row.contains("size") && row["size"].is_number() ? row["size"].get<double>() : -1;
+    if (row.contains("size") && row["size"].is_number() && (firstAttempt || firstMatch)) {
+      std::string bucket = size <= 64     ? "<=0x40"
+                           : size <= 512  ? "0x40-0x200"
+                           : size <= 2048 ? "0x200-0x800"
+                                          : ">0x800";
+      if (!entry.contains("bySize"))
+        entry["bySize"] = Json::object();
+      auto &b = entry["bySize"][bucket];
+      if (!b.is_object())
+        b = Json::object();
+      b["attempts"] = b.value("attempts", 0) + (firstAttempt ? 1 : 0);
+      b["matches"] = b.value("matches", 0) + (firstMatch ? 1 : 0);
+    }
+    if (firstAttempt || firstMatch) {
+      entry["recent"].push_back(firstMatch);
+      while (entry["recent"].size() > 16)
+        entry["recent"].erase(entry["recent"].begin());
+    }
+    if (matched && !key.empty())
+      best[key] = 0;
+    if (!key.empty() && div >= 1 && div < 999 &&
+        (!best.contains(key) || div < best[key].get<double>())) {
+      best[key] = div;
+      if ((size <= 0 || div / (size / 4) < 0.34) && !seen(entry["nearMissFuncs"], key)) {
+        entry["nearMissFuncs"].push_back(key);
+        entry["nearMisses"] = entry.value("nearMisses", 0) + 1;
+      }
+    }
+    for (auto field : {"tokensIn", "tokensOut"})
+      if (row.contains(field) && row[field].is_number_integer() && row[field].get<long long>() >= 0)
+        entry[field] = entry.value(field, 0LL) + row[field].get<long long>();
+  }
+  entry["hitRate"] = entry.value("attempts", 0)
+                         ? double(entry.value("declaredMatches", 0)) / entry["attempts"].get<int>()
+                         : 0.0;
+  auto tokens = entry.value("tokensIn", 0LL) + entry.value("tokensOut", 0LL);
+  if (tokens && entry.value("declaredMatches", 0))
+    entry["tokensPerMatch"] = static_cast<long long>(
+        std::floor(double(tokens) / entry["declaredMatches"].get<int>() + 0.5));
+  return entry;
+}
+void Backend::resetRecent(const std::string &id) {
+  HANDLE lock = INVALID_HANDLE_VALUE;
+  for (int attempt = 0; attempt < 100 && lock == INVALID_HANDLE_VALUE; ++attempt) {
+    lock = CreateFileW((directory / "backend.lock").c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                       nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (lock == INVALID_HANDLE_VALUE)
+      Sleep(10);
+  }
+  if (lock == INVALID_HANDLE_VALUE)
+    throw std::runtime_error("Statistics store busy; adaptive role unchanged");
+  struct Guard {
+    HANDLE h;
+    ~Guard() { CloseHandle(h); }
+  } guard{lock};
+  auto stats = fileJson(directory / "stats.json");
+  if (stats.contains(id)) {
+    stats[id]["recent"] = Json::array();
+    saveJson(directory / "stats.json", stats);
+  }
+}
 void Backend::recordAgent(const std::string &id, const fs::path &results, const std::string &phase,
                           int gates, const std::string &adaptive) {
   HANDLE lock = INVALID_HANDLE_VALUE;
@@ -534,8 +725,12 @@ void Backend::recordAgent(const std::string &id, const fs::path &results, const 
     } else
       rows = jsonLines(results);
   }
-  int attempts = 0, claims = 0, nearMisses = 0;
-  Json recent = entry.value("recent", Json::array()), harvest = Json::array();
+  auto best = fileJson(directory / "stats-best.json");
+  auto updated = updateAgentStats(entry, rows, best);
+  int attempts = updated.value("attempts", 0) - entry.value("attempts", 0);
+  int claims = updated.value("declaredMatches", 0) - entry.value("declaredMatches", 0);
+  entry = updated;
+  Json harvest = Json::array();
   for (auto &row : rows) {
     if (!row.is_object())
       continue;
@@ -548,17 +743,6 @@ void Backend::recordAgent(const std::string &id, const fs::path &results, const 
     if (row.contains("divergences") && row["divergences"].is_number() &&
         row["divergences"].get<double>() != 0)
       matched = false;
-    attempts += row.contains("attempts") && row["attempts"].is_number_integer()
-                    ? std::max(1, row["attempts"].get<int>())
-                    : 1;
-    if (matched)
-      ++claims;
-    if (row.contains("divergences") && row["divergences"].is_number() &&
-        row["divergences"].get<double>() > 0 && row["divergences"].get<double>() < 999)
-      ++nearMisses;
-    recent.push_back(matched);
-    while (recent.size() > 16)
-      recent.erase(recent.begin());
     if (matched)
       harvest.push_back({{"name", row.value("name", std::string())},
                          {"sourceClassification", transcribed ? "transcribed" : "ok"},
@@ -567,15 +751,12 @@ void Backend::recordAgent(const std::string &id, const fs::path &results, const 
   }
   if (!adaptive.empty())
     entry["adaptiveRole"] = adaptive;
-  entry["attempts"] = entry.value("attempts", 0) + attempts;
-  entry["declaredMatches"] = entry.value("declaredMatches", 0) + claims;
-  entry["nearMisses"] = entry.value("nearMisses", 0) + nearMisses;
-  entry["recent"] = recent;
   entry["phase"] = phase;
   entry["updated"] = std::time(nullptr);
   entry["verifiedGates"] = gates;
   stats[id] = entry;
   saveJson(directory / "stats.json", stats);
+  saveJson(directory / "stats-best.json", best);
   auto prefs = fileJson(directory / "preferences.json");
   if (prefs.value("reports", false)) {
     auto report = directory / "activity.jsonl";
@@ -613,13 +794,21 @@ Json Backend::execute(const std::string &m, const Json &a) {
     if (a.value("autoPush", false))
       throw std::runtime_error("Automatic push is disabled: every push requires its own complete "
                                "outgoing-commit preview");
-    for (auto key : {"reports", "safeMode", "useAgents", "autoLand"})
+    for (auto key : {"reports", "safeMode", "useAgents", "autoLand", "allowNearMiss", "allowGhidra",
+                     "animateBackground", "liveRefresh"})
       if (a.contains(key) && !a[key].is_boolean())
         throw std::runtime_error("Policy must be boolean: " + std::string(key));
     if (a.contains("agentFanout") &&
         (!a["agentFanout"].is_number_integer() || a["agentFanout"].get<int>() < 1 ||
          a["agentFanout"].get<int>() > 200))
       throw std::runtime_error("Agent fanout must be 1..200");
+    if (a.contains("disabledTools")) {
+      if (!a["disabledTools"].is_array())
+        throw std::runtime_error("disabledTools must be an array");
+      for (auto &id : a["disabledTools"])
+        if (!id.is_string())
+          throw std::runtime_error("Disabled tool identifiers must be strings");
+    }
     auto prefs = fileJson(directory / "preferences.json");
     prefs.merge_patch(a);
     saveJson(directory / "preferences.json", prefs);
@@ -737,6 +926,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
     return fileJson(directory / "stats.json");
   if (m == "stats.clear") {
     saveJson(directory / "stats.json", Json::object());
+    saveJson(directory / "stats-best.json", Json::object());
     return {{"cleared", true}};
   }
   if (m == "reports.list") {
@@ -756,6 +946,19 @@ Json Backend::execute(const std::string &m, const Json &a) {
   }
   if (m == "policy.classify")
     return {{"classification", classifySource(a.at("source").get<std::string>())}};
+  if (m == "policy.statistics") {
+    auto best = a.value("best", Json::object());
+    return {{"entry", updateAgentStats(a.value("entry", Json::object()), a.at("rows"), best)},
+            {"best", best}};
+  }
+  if (m == "policy.pool") {
+    auto rows = parseAtlas(Json{{"functions", a.at("functions")}}.dump());
+    auto live = a.value("liveMatched", Json::array());
+    for (auto &row : rows)
+      if (std::find(live.begin(), live.end(), row.name) != live.end())
+        row.state = "matched";
+    return poolDifficulty(rows);
+  }
   if (m == "policy.adaptive")
     return {{"role", adaptiveRole(a.at("role"), a.at("attempts"), a.at("matches"), a.at("pool"))}};
   Descriptor descriptor;
@@ -805,20 +1008,46 @@ Json Backend::execute(const std::string &m, const Json &a) {
              repository,
              conventions.value("attemptsPath", std::string("config/match_attempts.jsonl")))))
       if (sameFunction(r, a))
-        attempts.push_back(r);
+        attempts.push_back(historySummary(r, attempts.size()));
     for (auto &r : jsonLines(confinedPath(
              repository, conventions.value("nearMissDb", std::string("nearmiss/db.jsonl")))))
       if (sameFunction(r, a))
         tips.push_back(r);
     Json best = nullptr;
     double score = 1e100;
-    for (auto &tip : tips)
-      if (tip.contains("divergences") && tip["divergences"].is_number() &&
-          tip["divergences"].get<double>() < score) {
-        best = tip;
-        score = tip["divergences"].get<double>();
+    for (auto &tip : tips) {
+      auto div = historyNumber(tip, "divergences");
+      double candidate = div.is_null() ? 9999. : div.get<double>();
+      if (candidate < score) {
+        score = candidate;
+        best = {{"divergences", div},
+                {"source", historyString(tip, "source")},
+                {"srcPath", historyString(tip, "srcPath")},
+                {"hasCSource", tip.contains("c_source") && tip["c_source"].is_string() &&
+                                   !tip["c_source"].get<std::string>().empty()}};
+        if (best["source"].is_null())
+          best["source"] = historyString(tip, "label");
       }
-    return {{"attempts", orderHistory(attempts)}, {"tips", tips}, {"tip", best}};
+    }
+    auto attemptsPath =
+        conventions.value("attemptsPath", std::string("config/match_attempts.jsonl"));
+    auto nearMissPath = conventions.value("nearMissDb", std::string("nearmiss/db.jsonl"));
+    Json note = nullptr;
+    if (!fs::exists(confinedPath(repository, attemptsPath)) &&
+        !fs::exists(confinedPath(repository, nearMissPath)))
+      note = "No attempt log or near-miss DB in this repo yet.";
+    else if (attempts.empty() && best.is_null())
+      note = "Nothing logged for this function yet — open field for a first try.";
+    std::ostringstream generatedId;
+    generatedId << a.value("module", std::string()) << ":0x" << std::hex
+                << (a.contains("addr") ? number(a["addr"]) : 0);
+    return {{"functionId", a.value("functionId", a.value("id", generatedId.str()))},
+            {"name", a.value("name", std::string())},
+            {"attempts", orderHistory(attempts)},
+            {"tip", best},
+            {"attemptsPath", utf8(confinedPath(repository, attemptsPath).wstring())},
+            {"nearMissPath", utf8(confinedPath(repository, nearMissPath).wstring())},
+            {"note", note}};
   }
   if (m == "claims.read") {
     Json claims = fs::exists(repository / "CLAIMS.md")
@@ -843,7 +1072,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       auto id = row.value("id", row.value("module", std::string()) + ":" +
                                     row.value("name", std::string()));
       if (id.empty() || !ids.insert(id).second || heldTarget(row, claims) ||
-          row.value("matched", false) || row.value("noMatch", false))
+          row.value("matched", false) || exemptTarget(row))
         continue;
       ready.push_back(row);
     }
@@ -852,17 +1081,19 @@ Json Backend::execute(const std::string &m, const Json &a) {
     return {{"targets", ready}, {"path", utf8((directory / "queues" / name).wstring())}};
   }
   if (m == "tools.list") {
-    auto hidden = fileJson(directory / "preferences.json").value("disabledTools", Json::array());
+    auto prefs = fileJson(directory / "preferences.json");
     Json out = Json::array();
     for (auto &t : descriptor.tools)
       out.push_back({{"id", t.id},
                      {"label", t.label},
                      {"readOnly", t.readOnly},
-                     {"enabled", std::find(hidden.begin(), hidden.end(), t.id) == hidden.end()}});
+                     {"enabled", enabledTool(prefs, t.id)}});
     return out;
   }
   if (m == "tools.run") {
     auto &tool = descriptor.tool(a.at("tool"));
+    if (!enabledTool(fileJson(directory / "preferences.json"), tool.id))
+      throw std::runtime_error("Tool disabled by user policy");
     if (!tool.readOnly && settings.portOnly)
       throw std::runtime_error("Mutating primary-checkout tools blocked in port-only mode");
     if (!tool.readOnly && fileJson(directory / "preferences.json").value("safeMode", false))
@@ -879,11 +1110,69 @@ Json Backend::execute(const std::string &m, const Json &a) {
   Repository repo(runner, repository, settings);
   if (m == "git.status")
     return {{"status", repo.status()}};
-  if (m == "git.syncPreview")
-    return {{"status", repo.status()},
-            {"log", repo.git({"log", "--oneline", "--decorate", "-20"})},
-            {"diff", repo.git({"diff", "--stat"})},
-            {"notice", "Review local changes and make a backup before switching or synchronizing"}};
+  if (m == "git.syncPreview" || m == "git.sync") {
+    auto ref = a.value("ref", std::string());
+    if (ref.empty())
+      ref = trim(repo.git({"rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"}));
+    if (!validRef(ref))
+      throw std::runtime_error("Choose a valid existing upstream ref; fetch it before previewing");
+    auto target = trim(repo.git({"rev-parse", "--verify", ref + "^{commit}"}));
+    if (!std::regex_match(target, std::regex("[0-9a-f]{40,64}")))
+      throw std::runtime_error("Cannot resolve synchronization target");
+    Json remove = Json::array(), kept = Json::array(), blocked = Json::array();
+    for (auto &path : split(repo.git({"diff", "--name-only", "-z", "HEAD", target}), '\0'))
+      if (!path.empty() && !blockedPath(path, settings).empty())
+        blocked.push_back(path);
+    for (auto &change :
+         parseStatus(repo.git({"status", "--porcelain=v1", "-z", "--untracked-files=all"}))) {
+      auto reason = blockedPath(change.path, settings);
+      if (change.xy == "??") {
+        if (!reason.empty())
+          kept.push_back(change.path);
+        else {
+          confinedPath(repository, change.path);
+          remove.push_back(change.path);
+        }
+      } else if (!reason.empty())
+        blocked.push_back(change.path);
+    }
+    auto preview =
+        Json{{"ref", ref},
+             {"target", target},
+             {"status", repo.status()},
+             {"diff", repo.git({"diff", "--binary", "HEAD", target})},
+             {"unpushed", repo.git({"log", "--oneline", target + "..HEAD"})},
+             {"remove", remove},
+             {"preserved", kept},
+             {"blocked", blocked},
+             {"notice", "Confirmed sync backs up allowed local changes, pins current history for "
+                        "recovery, resets to this exact commit, and removes only listed allowed "
+                        "untracked files. Ignored/protected assets are preserved."}};
+    if (m == "git.syncPreview")
+      return preview;
+    if (!blocked.empty())
+      throw std::runtime_error(
+          "Synchronization would modify protected paths; inspect git.syncPreview blocked list");
+    auto backup = execute("git.backup", Json::object());
+    auto log = directory / (uniqueId() + "-sync.log");
+    auto result = runner.run({{"git", "reset", "--hard", target}, repository}, {}, log);
+    if (result.code != 0)
+      return {{"exit", result.code},
+              {"output", result.output},
+              {"backup", backup},
+              {"log", utf8(log.wstring())}};
+    for (auto &name : remove) {
+      auto path = confinedPath(repository, name.get<std::string>());
+      // Only remove the concrete files shown in the preview, never recursively clean a directory.
+      if (fs::is_regular_file(path) && !fs::is_symlink(fs::symlink_status(path)))
+        fs::remove(path);
+    }
+    return {{"exit", 0},
+            {"target", target},
+            {"output", result.output},
+            {"backup", backup},
+            {"log", utf8(log.wstring())}};
+  }
   if (m == "git.backup") {
     auto dest = directory / "backups" / uniqueId();
     fs::create_directories(dest);
@@ -911,9 +1200,16 @@ Json Backend::execute(const std::string &m, const Json &a) {
       files.push_back(
           {{"path", change.path}, {"status", change.xy}, {"deleted", !fs::exists(path)}});
     }
-    saveJson(dest / "manifest.json",
-             {{"head", repo.git({"rev-parse", "HEAD"})}, {"files", files}, {"excluded", skipped}});
-    return {{"backup", utf8(dest.wstring())}, {"files", files}, {"excluded", skipped}};
+    auto recoveryRef = "refs/tangos/backups/" + utf8(dest.filename().wstring());
+    repo.git({"update-ref", recoveryRef, "HEAD"});
+    saveJson(dest / "manifest.json", {{"recoveryRef", recoveryRef},
+                                      {"head", repo.git({"rev-parse", "HEAD"})},
+                                      {"files", files},
+                                      {"excluded", skipped}});
+    return {{"backup", utf8(dest.wstring())},
+            {"recoveryRef", recoveryRef},
+            {"files", files},
+            {"excluded", skipped}};
   }
   if (m == "git.discard") {
     Args args = {"git", "restore", "--source=HEAD", "--staged", "--worktree", "--"};
@@ -965,14 +1261,59 @@ Json Backend::execute(const std::string &m, const Json &a) {
                         {"available", check.available},
                         {"command", preview(check.command)}});
     auto requirements = descriptor.document.value("requirements", Json::object());
+
     auto packages = Json::array();
+    if (requirements.contains("compiler") && requirements["compiler"].is_string()) {
+      auto name = requirements["compiler"].get<std::string>();
+      bool found = false;
+      std::string detail;
+      for (auto candidate : {"tools/" + name, "tools/" + name + ".exe", name, name + ".exe"}) {
+        auto path = confinedPath(repository, candidate);
+        if (fs::exists(path)) {
+          found = true;
+          detail = candidate;
+          break;
+        }
+      }
+      if (!found) {
+        auto result = runner.run({{"where.exe", name}, repository});
+        found = result.code == 0;
+        if (found)
+          detail = result.output;
+      }
+      checks.push_back(
+          {{"name", "Compiler (" + name + ")"},
+           {"available", found},
+           {"detail", detail},
+           {"fix", "Put your own compiler and any required license in tools/" + name +
+                       ". Follow the repository setup notes; no compiler is downloaded."}});
+    }
+    if (requirements.value("rom", false)) {
+      bool found = false;
+      std::string detail;
+      for (auto relative : {"extracted", "orig", "baserom", "build/extracted", "expected"}) {
+        if (fs::exists(confinedPath(repository, relative))) {
+          found = true;
+          detail = relative;
+          break;
+        }
+      }
+      checks.push_back({{"name", "Extracted ROM"},
+                        {"available", found},
+                        {"detail", detail},
+                        {"fix", "Extract your own locally dumped ROM using the repository setup "
+                                "instructions. Keep its output excluded from Git."}});
+    }
+
     for (auto &pkg : requirements.value("pythonPackages", Json::array())) {
-      auto name = pkg.get<std::string>(), module = name;
-      if (name == "pyelftools" || name == "py-elftools")
+      auto name = pkg.get<std::string>(), module = name, folded = name;
+      std::transform(folded.begin(), folded.end(), folded.begin(),
+                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      if (folded == "pyelftools" || folded == "py-elftools")
         module = "elftools";
-      else if (name == "pillow")
+      else if (folded == "pillow")
         module = "PIL";
-      else if (name == "pyyaml")
+      else if (folded == "pyyaml")
         module = "yaml";
       else
         std::replace(module.begin(), module.end(), '-', '_');

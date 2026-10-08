@@ -72,6 +72,7 @@ Json agentJson(const AgentState &s) {
           {"prompt", utf8(s.prompt.wstring())},
           {"worklist", utf8(s.worklist.wstring())},
           {"queue", s.queue},
+          {"assigned", s.assigned},
           {"completed", s.completed},
           {"total", s.total}};
 }
@@ -101,9 +102,10 @@ AgentState parseAgent(const Json &j) {
   s.prompt = fs::u8path(j.value("prompt", std::string()));
   s.worklist = fs::u8path(j.value("worklist", std::string()));
   s.queue = j.value("queue", Json::array());
+  s.assigned = j.value("assigned", Json::array());
   s.completed = j.value("completed", 0);
   s.total = j.value("total", 0);
-  if (!s.queue.is_array() || s.id.empty() ||
+  if (!s.queue.is_array() || !s.assigned.is_array() || s.id.empty() ||
       s.id.find_first_not_of("0123456789abcdef-") != s.id.npos)
     throw std::runtime_error("Invalid fleet state");
   if (s.spec.count < 1 || s.spec.count > 200 || s.spec.attempts < 1 || s.spec.attempts > 20 ||
@@ -235,8 +237,8 @@ void Fleet::enqueue(const std::string &id, const Json &rows) {
       taken.insert(target(row));
   Json fresh = Json::array();
   for (auto &row : rows) {
-    if (heldTarget(row, claims) || row.value("matched", false) || row.value("noMatch", false) ||
-        row.contains("claim"))
+    if (heldTarget(row, claims) || row.value("matched", false) || exemptTarget(row) ||
+        (row.contains("claim") && !row["claim"].is_null() && row["claim"] != false))
       throw std::runtime_error("Target is already matched, exempt or externally claimed");
     auto ref = target(row);
     if (ref.empty() || ref == ":")
@@ -247,7 +249,7 @@ void Fleet::enqueue(const std::string &id, const Json &rows) {
   }
   for (auto &row : fresh)
     job->state.queue.push_back(row);
-  job->state.total = (int)job->state.queue.size();
+  job->state.total = job->state.completed + (int)job->state.queue.size();
   saveLocked();
 }
 void Fleet::clear(const std::string &id) {
@@ -256,8 +258,46 @@ void Fleet::clear(const std::string &id) {
   if (job->active)
     throw std::runtime_error("Stop agent before clearing its queue");
   job->state.queue = Json::array();
-  job->state.total = 0;
+  job->state.assigned = Json::array();
+  if (job->state.phase == "queued")
+    job->state.phase = "idle";
+  job->state.total = job->state.completed;
   saveLocked();
+}
+void Fleet::editQueue(const std::string &id, size_t index, int direction, bool remove) {
+  std::lock_guard<std::mutex> lock(mutex);
+  auto job = jobs.at(id);
+  if (job->active)
+    throw std::runtime_error("Stop the agent before editing its queue");
+  if (index >= job->state.queue.size())
+    throw std::runtime_error("Select a queued target");
+  if (remove)
+    job->state.queue.erase(index);
+  else {
+    if (direction != -1 && direction != 1)
+      throw std::runtime_error("Queue direction must be up or down");
+    auto next = (int64_t)index + direction;
+    if (next >= 0 && next < (int64_t)job->state.queue.size())
+      std::swap(job->state.queue[index], job->state.queue[(size_t)next]);
+  }
+  job->state.assigned = Json::array();
+  if (job->state.phase == "queued")
+    job->state.phase = "idle";
+  job->state.total = job->state.completed + (int)job->state.queue.size();
+  saveLocked();
+}
+static void consumeBatch(AgentState &state) {
+  std::set<std::string> finished;
+  for (auto &row : state.assigned)
+    finished.insert(target(row));
+  Json remaining = Json::array();
+  for (auto &row : state.queue)
+    if (!finished.count(target(row)))
+      remaining.push_back(row);
+  state.completed += (int)state.assigned.size();
+  state.queue = std::move(remaining);
+  state.assigned = Json::array();
+  state.total = state.completed + (int)state.queue.size();
 }
 bool Fleet::running() const {
   std::lock_guard<std::mutex> lock(mutex);
@@ -406,6 +446,9 @@ Json Fleet::schedule(const std::shared_ptr<Job> &job, const fs::path &cwd) {
     auto rung = stats.value("adaptiveRole", role);
     if (fs::exists(db))
       role = adaptiveRole(rung, (int)recent.size(), hits, poolDifficulty(parseAtlas(read(db))));
+    if (role != rung && rung != "Refiner")
+      Backend(repository, directory.parent_path().parent_path(), settings)
+          .resetRecent(job->state.id);
     job->runtimeRole = rung == "Refiner" ? rung : role;
   } else
     job->runtimeRole = role;
@@ -520,10 +563,17 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       Json rows;
       {
         std::lock_guard<std::mutex> lock(mutex);
-        rows = job->state.queue;
+        rows = Json::array();
+        for (auto &row : job->state.queue) {
+          if (rows.size() >= (size_t)job->state.spec.count)
+            break;
+          rows.push_back(row);
+        }
       }
       if (rows.empty())
         rows = schedule(job, job->state.worktree);
+      for (auto &row : rows)
+        row["ref"] = target(row);
       if (auto enrich = descriptor.role("enrich")) {
         for (auto &row : rows)
           if (!row.contains("disasm") && row.contains("addr")) {
@@ -554,6 +604,7 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
                 auto full = Json::parse(value);
                 if (row.contains("id"))
                   full["id"] = row["id"];
+                full["ref"] = row["ref"];
                 row = full;
                 found = true;
                 break;
@@ -590,12 +641,14 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
                       "process exit is not proof of byte matching.\nTargets:\n" +
                       rows.dump(2);
       write(prompt, instructions);
+      write(out, "");
       std::string list;
       for (auto &row : rows)
         list += row.dump() + "\n";
       write(wl, list);
       {
         std::lock_guard<std::mutex> lock(mutex);
+        job->state.assigned = rows;
         job->state.prompt = prompt;
         job->state.worklist = wl;
         job->state.log = dir / "driver.log";
@@ -665,6 +718,15 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
                      ? std::string("Delegation enabled; maximum ") +
                            std::to_string(policy.value("agentFanout", 1)) + " cooperating agents."
                      : std::string("Do not spawn or delegate to additional agents.")));
+      c.environment["TANGOS_ALLOW_NEAR_MISS"] = policy.value("allowNearMiss", true) ? "1" : "0";
+      c.environment["TANGOS_ALLOW_GHIDRA"] = policy.value("allowGhidra", false) ? "1" : "0";
+      write(prompt,
+            read(prompt) + "\nMatching policy: " +
+                (policy.value("allowNearMiss", true)
+                     ? std::string("Near-miss tips allowed. ")
+                     : std::string("Do not use near-miss tips or nearmiss_* tools. ")) +
+                (policy.value("allowGhidra", false) ? std::string("Ghidra drafts allowed. ")
+                                                    : std::string("Do not use Ghidra drafts. ")));
       c.environment["TANGOS_EFFORT"] = job->state.spec.effort;
       c.environment["TANGOS_AGENT_INSTRUCTIONS"] = utf8(prompt.wstring());
       c.environment["TANGOS_PORT_ONLY"] = settings.portOnly ? "1" : "0";
@@ -735,8 +797,7 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
                        job->state.spec.role == "Unassigned" ? job->runtimeRole : std::string());
       {
         std::lock_guard<std::mutex> lock(mutex);
-        job->state.completed += (int)rows.size();
-        job->state.queue = Json::array();
+        consumeBatch(job->state);
         saveLocked();
       }
       update("review", gates ? "Repository checks passed; review diff before commit"
@@ -809,7 +870,7 @@ Json Fleet::takeBatch(const std::string &id) {
   return {{"status", "assigned"},
           {"worktree", utf8(job->state.worktree.wstring())},
           {"instructions", read(job->state.prompt)},
-          {"targets", job->state.queue},
+          {"targets", job->state.assigned.empty() ? job->state.queue : job->state.assigned},
           {"resultsPath", utf8((directory / fs::u8path(id) / "results.output").wstring())}};
 }
 void Fleet::finishBatch(const std::string &id) {
@@ -837,8 +898,9 @@ void Fleet::finishBatch(const std::string &id) {
     Backend(repository, directory.parent_path().parent_path(), settings)
         .recordAgent(id, directory / fs::u8path(id) / "results.output", "review", gates);
     std::lock_guard<std::mutex> lock(mutex);
-    job->state.completed += (int)job->state.queue.size();
-    job->state.queue = Json::array();
+    if (job->state.assigned.empty())
+      job->state.assigned = job->state.queue;
+    consumeBatch(job->state);
     job->state.phase = "review";
     job->state.detail = gates ? "External batch independently verified; review required"
                               : "External batch unverified; no gate available";
@@ -864,8 +926,7 @@ Json Fleet::backend(const std::string &method, const Json &args) {
 }
 bool Fleet::toolEnabled(const std::string &id) {
   auto prefs = backend("preferences.get", Json::object());
-  auto disabled = prefs.value("disabledTools", Json::array());
-  return std::find(disabled.begin(), disabled.end(), id) == disabled.end();
+  return enabledTool(prefs, id);
 }
 Result Fleet::runTool(const std::string &id, const std::string &tool, const Json &args) {
   std::shared_ptr<Job> job;

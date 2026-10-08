@@ -1,0 +1,843 @@
+{
+  "reference": "console/src/preload/index.ts",
+  "features": [
+    {
+      "contract": "repo",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "mcp",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "allowMutations",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "enabledToolIds",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "batches",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "safeMode",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "baseBranch",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "reviews",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "clients",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "agents",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "reportsEnabled",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "tourSeen",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "updateNoteSeen",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "useAgents",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "agentFanout",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "autoLand",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "autoPush",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "looping",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "projects",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "switchingProject",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "capabilities",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "state"
+    },
+    {
+      "contract": "getState",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "activitySnapshot",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "preflight",
+      "state": "partial",
+      "evidence": [
+        "Native compiler/ROM/Python/tool/auth checks implemented; full repair workflow missing"
+      ],
+      "kind": "api"
+    },
+    {
+      "contract": "preflightFix",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "pickFixFile",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "atlasLoad",
+      "state": "partial",
+      "evidence": [
+        "Native local reload and retained cart tested; full original DB envelope not compared"
+      ],
+      "kind": "api"
+    },
+    {
+      "contract": "atlasLoadLive",
+      "state": "partial",
+      "evidence": [
+        "User-enabled profiles implemented; original feed protocol needs exact mock fixtures"
+      ],
+      "kind": "api"
+    },
+    {
+      "contract": "atlasCurrent",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "atlasGenerate",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "recentAdds",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "atlasSource",
+      "state": "partial",
+      "evidence": [
+        "Native path-confined source inspector tested; full source cap/shape not compared"
+      ],
+      "kind": "api"
+    },
+    {
+      "contract": "functionHistory",
+      "state": "verified",
+      "evidence": [
+        "lite/tests/test_reference_parity.py: normalized parent/child history and best tip"
+      ],
+      "kind": "api"
+    },
+    {
+      "contract": "viewerPrefsGet",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "viewerPrefsSet",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "bgPrefsGet",
+      "state": "partial",
+      "evidence": [
+        "lite/renderer/src/lib.rs: deterministic animated frames",
+        "Native behavior tested; exact original API envelope not yet compared"
+      ],
+      "kind": "api"
+    },
+    {
+      "contract": "bgPrefsSet",
+      "state": "partial",
+      "evidence": [
+        "lite/renderer/src/lib.rs: animated-frame pixel test",
+        "Native behavior tested; exact original API envelope not yet compared"
+      ],
+      "kind": "api"
+    },
+    {
+      "contract": "matchingPrefsGet",
+      "state": "partial",
+      "evidence": [
+        "lite/tests/backend_tests.cpp: preferences and near-miss policy",
+        "Native behavior tested; exact original API envelope not yet compared"
+      ],
+      "kind": "api"
+    },
+    {
+      "contract": "matchingPrefsSet",
+      "state": "partial",
+      "evidence": [
+        "lite/tests/backend_tests.cpp: typed/content-bound preference mutation",
+        "Native behavior tested; exact original API envelope not yet compared"
+      ],
+      "kind": "api"
+    },
+    {
+      "contract": "uiPrefsGet",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "uiPrefsSet",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "openModulePopout",
+      "state": "partial",
+      "evidence": [
+        "Packaged module window/cart relay tested; visual equivalence not established"
+      ],
+      "kind": "api"
+    },
+    {
+      "contract": "addDraftItem",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "onDraftAdd",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "onAtlasRefreshed",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "githubCredits",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "atlasCosmetics",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "atlasCounts",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "atlasProgress",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "onAtlasLive",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "pickRepo",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "setRepo",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "listProjects",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "switchProject",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "generatePreview",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "writeDescriptor",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "reloadDescriptor",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "onDescriptorReloaded",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "onDebugDumped",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "secretsInfo",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "setSecret",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "deleteSecret",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "githubSignin",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "onGithubSignedin",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "startMcp",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "stopMcp",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "connect",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "agentPrompt",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "setMutations",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "setEnabledTools",
+      "state": "partial",
+      "evidence": [
+        "Native visibility enforced in manual/Fleet/MCP paths"
+      ],
+      "kind": "api"
+    },
+    {
+      "contract": "setSafeMode",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "setReports",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "openReports",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "getTips",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "openTips",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "appVersion",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "clearAllStats",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "checkAppUpdate",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "quitAndInstall",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "onAppUpdate",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "dumpDebug",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "openDebug",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "getTour",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "openTour",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "markTourSeen",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "markUpdateNoteSeen",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "replayTour",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "mergeReview",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "discardReview",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "setClientRoles",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "setClientEffort",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "setClientAttempts",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "generateBatch",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "enqueueBatch",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "assignBatch",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "driveAi",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "assignAi",
+      "state": "partial",
+      "evidence": [
+        "CLI/API/MCP isolated execution tested; complete provider/client interoperability remains"
+      ],
+      "kind": "api"
+    },
+    {
+      "contract": "stopAi",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "setUseAgents",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "setAgentFanout",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "setAutoLand",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "setAutoPush",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "removeBatch",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "clearQueue",
+      "state": "partial",
+      "evidence": [
+        "Concurrent batch/queue preservation tested; original global Batch contract differs"
+      ],
+      "kind": "api"
+    },
+    {
+      "contract": "cancelGen",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "onGenOutput",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "reorderBatch",
+      "state": "partial",
+      "evidence": [
+        "Native target reorder persists; original batch grouping not implemented"
+      ],
+      "kind": "api"
+    },
+    {
+      "contract": "clearDoneBatches",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "runTool",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "cloneRepo",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "cloneAndOpen",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "repoUpdateStatus",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "repoPull",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "onRepoPullProgress",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "repoPushWorkPr",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "repoSyncPreview",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "repoBackup",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "repoSync",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "onRepoSyncProgress",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "minimizeWin",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "maximizeToggle",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "closeWin",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "isMaximized",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "onMaximizeChange",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "openExternal",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "openPath",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "revealPath",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "pickBugScreenshots",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "saveBugImage",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "submitBug",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "copy",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "onActivity",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    },
+    {
+      "contract": "onState",
+      "state": "unverified",
+      "evidence": [],
+      "kind": "api"
+    }
+  ],
+  "referenceSha256": "5c9e13588dda892690578ddd3aeec0c8adbd228c8944a83aaa23fa4423474536",
+  "fullParity": false,
+  "constraints": [
+    "Every push requires outgoing commit preview",
+    "Port-only changes must not modify src/",
+    "Preserve excluded assets and credentials",
+    "Each user configures external connections and authentication"
+  ]
+}

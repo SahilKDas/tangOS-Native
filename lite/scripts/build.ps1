@@ -10,3 +10,10 @@ python "$PSScriptRoot/../tests/test_agent_adapter.py"
 if ($LASTEXITCODE) { throw 'Driver adapter tests failed' }
 python "$PSScriptRoot/../tests/test_backend_cli.py" --exe "$BuildDir/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Packaged backend tests failed' }
+
+python "$PSScriptRoot/../tests/test_reference_parity.py" --exe "$BuildDir/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original Console comparisons failed' }
+python "$PSScriptRoot/../tests/test_statistics_reference.py" --exe "$BuildDir/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original statistics comparisons failed' }
+python "$PSScriptRoot/../tests/audit_parity.py"
+if ($LASTEXITCODE) { throw 'Parity inventory failed' }

@@ -180,7 +180,7 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       auto first = fleet.add(a);
       a.name = "API B";
       auto second = fleet.add(a);
-      fleet.enqueue(first, Json::array({{{"id", "one"}, {"name", "one"}, {"module", "port"}}}));
+      fleet.enqueue(first, Json::array({{{"id", "one"}, {"name", "one"}, {"module", "port"}, {"claim", nullptr}}}));
       reject(
           [&] {
             fleet.enqueue(second,
@@ -190,7 +190,19 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       fleet.enqueue(second, Json::array({{{"id", "two"}, {"name", "two"}, {"module", "port"}}}));
       fleet.start(first);
       fleet.start(second);
+      fleet.enqueue(first, Json::array({{{"id", "later"}, {"name", "later"}, {"module", "port"}}}));
       wait(fleet);
+      for (auto &state : fleet.snapshot())
+        if (state.id == first)
+          expect(state.completed == 1 && state.queue.size() == 1,
+                 "queued-during-run target is retained");
+      fleet.enqueue(first, Json::array({{{"id", "last"}, {"name", "last"}, {"module", "port"}}}));
+      fleet.editQueue(first, 1, -1);
+      for (auto &state : fleet.snapshot())
+        if (state.id == first)
+          expect(state.queue[0]["id"] == "last", "queue reordered persistently");
+      fleet.editQueue(first, 0, 0, true);
+      fleet.clear(first);
       auto states = fleet.snapshot();
       for (auto &state : states) {
         expect(state.phase == "review",
@@ -247,10 +259,19 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       fleet.enqueue(external, Json::array({{{"id", "external"}, {"name", "external"}}}));
       fleet.start(external);
       wait(fleet);
+      fleet.enqueue(external,
+                    Json::array({{{"id", "external-later"}, {"name", "external_later"}}}));
       auto batch = fleet.takeBatch(external);
+      expect(batch["targets"].size() == 1 && batch["targets"][0]["id"] == "external",
+             "MCP receives only prepared targets");
       expect(batch["status"] == "assigned", "MCP batch delivered");
       expect(fleet.takeBatch(external)["status"] == "empty", "MCP batch not assigned twice");
       fleet.finishBatch(external);
+      for (auto &state : fleet.snapshot())
+        if (state.id == external)
+          expect(state.queue.size() == 1 && state.queue[0]["id"] == "external-later",
+                 "MCP finish retains later queue additions");
+      fleet.clear(external);
       McpServer mcp(fleet, desc, data / "mcp.json");
       expect(mcp.port() != 0 && mcp.configuration().find("127.0.0.1") != std::string::npos,
              "authenticated loopback MCP config");

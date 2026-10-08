@@ -32,6 +32,7 @@ struct AtlasFunction {
   uint64_t size = 1;
   Json row;
 };
+bool exemptTarget(const Json &row);
 std::vector<AtlasFunction> parseAtlas(const std::string &text);
 std::string redact(std::string text, const std::map<std::string, std::string> &secrets);
 } // namespace lite

@@ -148,6 +148,10 @@ Command toolCommand(const Descriptor &d, const Tool &t, const Json &input, const
     throw std::runtime_error("Empty tool command");
   return c;
 }
+bool exemptTarget(const Json &row) {
+  return row.contains("noMatch") && !row["noMatch"].is_null() &&
+         (!row["noMatch"].is_boolean() || row["noMatch"].get<bool>());
+}
 std::vector<AtlasFunction> parseAtlas(const std::string &text) {
   if (text.size() > 128 * 1024 * 1024)
     throw std::runtime_error("Atlas exceeds 128 MiB");

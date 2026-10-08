@@ -1,5 +1,7 @@
 #include "console_ui.h"
 #include "atlas_layout.h"
+#include "viewer.h"
+#include "backend.h"
 #include "network.h"
 #include <commctrl.h>
 #include <shellapi.h>
@@ -37,7 +39,7 @@ int choice(HWND h) { return (int)SendMessageW(h, CB_GETCURSEL, 0, 0); }
 std::string selected(HWND h) {
   int i = choice(h);
   if (i < 0)
-    return {};
+    return text(h);
   int n = (int)SendMessageW(h, CB_GETLBTEXTLEN, i, 0);
   std::wstring s(n + 1, 0);
   SendMessageW(h, CB_GETLBTEXT, i, (LPARAM)s.data());
@@ -94,7 +96,28 @@ enum {
 };
 constexpr int ATLAS_LAYOUT = 4200, ATLAS_FILTER = 4201, ATLAS_RESET = 4202, ATLAS_LIVE = 4203;
 constexpr int TOOL_FORM = 4300, TOOL_FORM_SAVE = 4301, TOOL_FORM_NEXT = 4302, TOOL_FORM_PREV = 4303;
-enum class Screen { controller, atlas, encyclopedia, settings, detail, profile, tour, parameters };
+enum class Screen {
+  controller,
+  atlas,
+  encyclopedia,
+  settings,
+  detail,
+  profile,
+  tour,
+  parameters,
+  functionDetail,
+  connections,
+  services,
+  queue,
+  requirements
+};
+constexpr int REQUIREMENTS = 4480, REQ_REFRESH = 4481, REQ_TERMINAL = 4482, REQ_GITHUB = 4483,
+              REQ_COPY = 4484;
+constexpr int QUEUE = 4470, QUEUE_UP = 4471, QUEUE_DOWN = 4472, QUEUE_REMOVE = 4473,
+              TOOL_ENABLE = 4474;
+constexpr int CONNECTIONS = 4450, CONNECTION_LIST = 4451, CONNECTION_SAVE = 4452, SERVICES = 4453,
+              SERVICE_RUN = 4454, SERVICE_CONFIRM = 4455;
+constexpr int ATLAS_INSPECT = 4400, ATLAS_MODULE = 4401, ATLAS_SOURCE = 4402, ATLAS_HISTORY = 4403;
 struct Hit {
   RECT rect;
   int index;
@@ -140,20 +163,70 @@ struct ConsoleUI::Impl {
   std::vector<std::string> cardIds;
   size_t pickedFunction = SIZE_MAX;
   HWND layoutChoice = nullptr, filterChoice = nullptr;
-  double zoom = 1, panX = 0, panY = 0;
+  AtlasCamera camera;
+  double &zoom = camera.zoom, &panX = camera.x, &panY = camera.y;
+  AtlasLod lod;
+  bool panning = false, marquee = false, miniDragging = false, historyTab = false;
+  POINT dragStart{}, dragLast{}, dragEnd{};
+  bool leftDown = false, dragged = false, additiveMarquee = false, flying = false;
+  AtlasCamera flightFrom, flightTo;
+  ULONGLONG flightAt = 0, lastTravel = 0;
+
+  RECT miniBounds{};
+  std::string moduleFilter, inspectText, historyText;
+  std::map<size_t, std::string> sourceCache;
+  std::thread inspector;
+  std::atomic<bool> inspectBusy{false}, inspectReady{false};
+  size_t inspectIndex = SIZE_MAX;
+  unsigned atlasGeneration = 1, inspectGeneration = 0;
+  Json inspectResult;
+  struct Popup {
+    HWND window = nullptr;
+    std::unique_ptr<ConsoleUI> ui;
+  };
+  std::vector<std::unique_ptr<Popup>> popups;
+  bool viewerOnly = false;
+  std::function<void(Json)> draftAdded;
+  Json policy = Json::object(), connectionProfiles = Json::object(), serviceResult = Json::object(),
+       pendingServiceResult, serviceRequest = Json::object();
+  std::vector<std::string> connectionNames;
+  std::string serviceMethod = "preflight";
+  std::thread serviceWorker;
+  std::atomic<bool> serviceBusy{false}, serviceReady{false};
+  HWND serviceChoice = nullptr, serviceArguments = nullptr;
+
   std::vector<Tile> tiles;
   std::string atlasQuery, atlasMode = "ov", atlasFilter = "all", cachedLayout;
   bool liveAtlas = false;
+  std::atomic<bool> atlasPublished{false};
+  std::vector<std::string> retainedCart;
+  std::string retainedSelection;
+  Json atlasExtras = Json::object();
+  fs::file_time_type atlasModified{};
+  ULONGLONG atlasPoll = 0;
+
   Impl(HWND p, HFONT f, fs::path repo, fs::path d, Settings prefs, std::function<void()> git,
-       std::function<void(const Settings &)> save)
+       std::function<void(const Settings &)> save, bool onlyViewer, std::string module,
+       std::function<void(Json)> addDraft)
       : parent(p), font(f), repository(std::move(repo)), data(std::move(d)),
         settings(std::move(prefs)), gitTools(std::move(git)), savePreferences(std::move(save)),
         vault(data / "vault") {
+    viewerOnly = onlyViewer;
+    moduleFilter = std::move(module);
+    draftAdded = std::move(addDraft);
+    if (viewerOnly)
+      screen = Screen::atlas;
     try {
       descriptor = loadDescriptor(repository);
     } catch (const std::exception &e) {
       descriptorError = e.what();
       descriptor.title = utf8(repository.filename().wstring());
+    }
+    try {
+      policy = Backend(repository, data, settings, vault.values()).invoke("preferences.get");
+      skin::animate(policy.value("animateBackground", true));
+    } catch (const std::exception &e) {
+      descriptorError += std::string("\nPreferences: ") + e.what();
     }
     auto prefsFile = data / "console-ui.json";
     if (fs::exists(prefsFile)) {
@@ -172,28 +245,24 @@ struct ConsoleUI::Impl {
         hash ^= c;
         hash *= 1099511628211ULL;
       }
-      auto project = data / "projects" / fs::u8path(std::to_string(hash));
-      fleet = std::make_unique<Fleet>(repository, project, descriptor, settings,
-                                      [this](const std::string &s) {
-                                        std::lock_guard<std::mutex> lock(outputMutex);
-                                        pending += s;
-                                        if (pending.size() > 1000000)
-                                          pending.erase(0, pending.size() - 1000000);
-                                      });
-      // Vault is global, whereas queues and worktrees are scoped to a checkout.
-      fs::create_directories(data / "vault");
-      mcp = std::make_unique<McpServer>(*fleet, descriptor, project / "mcp-client.json");
-      loader = std::thread([this] {
-        try {
-          atlas =
-              parseAtlas(liveAtlas ? fetchHttps(descriptor.document.value("data", Json::object())
-                                                    .value("committedDbUrl", std::string()))
-                                   : read(confinedPath(repository, descriptor.database)));
-        } catch (const std::exception &e) {
-          atlasError = e.what();
-        }
-        atlasReady = true;
-      });
+      if (!viewerOnly) {
+        auto project = data / "projects" / fs::u8path(std::to_string(hash));
+        fleet = std::make_unique<Fleet>(repository, project, descriptor, settings,
+                                        [this](const std::string &s) {
+                                          std::lock_guard<std::mutex> lock(outputMutex);
+                                          pending += s;
+                                          if (pending.size() > 1000000)
+                                            pending.erase(0, pending.size() - 1000000);
+                                        });
+        // Vault is global, whereas queues and worktrees are scoped to a checkout.
+        fs::create_directories(data / "vault");
+        mcp = std::make_unique<McpServer>(*fleet, descriptor, project / "mcp-client.json");
+      }
+      atlasReady = true;
+      loadAtlas();
+    } else {
+      atlasError = descriptorError;
+      atlasReady = true;
     }
     WNDCLASSW wc{};
     wc.lpfnWndProc = proc;
@@ -205,10 +274,15 @@ struct ConsoleUI::Impl {
     window = CreateWindowExW(WS_EX_CONTROLPARENT, wc.lpszClassName, L"", WS_CHILD | WS_CLIPCHILDREN,
                              14, 66, 800, 720, parent, nullptr, wc.hInstance, this);
     fieldBrush = CreateSolidBrush(skin::field());
-    SetTimer(window, 1, 200, nullptr);
+    SetTimer(window, 1, 50, nullptr);
     build();
   }
   ~Impl() {
+    for (auto &popup : popups) {
+      popup->ui.reset();
+      if (popup->window)
+        DestroyWindow(popup->window);
+    }
     KillTimer(window, 1);
     manualRunner.cancel();
     if (manualWorker.joinable())
@@ -217,6 +291,10 @@ struct ConsoleUI::Impl {
     fleet.reset();
     if (loader.joinable())
       loader.join();
+    if (inspector.joinable())
+      inspector.join();
+    if (serviceWorker.joinable())
+      serviceWorker.join();
     DestroyWindow(window);
     if (fieldBrush)
       DeleteObject(fieldBrush);
@@ -225,9 +303,15 @@ struct ConsoleUI::Impl {
                DWORD style = 0) {
     if (std::wstring(kind) == L"BUTTON" && !(style & BS_AUTOCHECKBOX))
       style |= BS_OWNERDRAW;
-    auto c =
-        CreateWindowExW(0, kind, wide(title).c_str(), WS_CHILD | WS_VISIBLE | WS_TABSTOP | style, x,
-                        y, w, h, window, (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr);
+    std::string windowsTitle;
+    for (size_t i = 0; i < title.size(); ++i) {
+      if (title[i] == '\n' && (i == 0 || title[i - 1] != '\r'))
+        windowsTitle += '\r';
+      windowsTitle += title[i];
+    }
+    auto c = CreateWindowExW(0, kind, wide(windowsTitle).c_str(),
+                             WS_CHILD | WS_VISIBLE | WS_TABSTOP | style, x, y, w, h, window,
+                             (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr);
     SendMessageW(c, WM_SETFONT, (WPARAM)font, TRUE);
     controls.push_back(c);
     return c;
@@ -297,7 +381,8 @@ struct ConsoleUI::Impl {
           button(a.active ? "Stop" : "Go", base, 28, cardY + cardHeight - 42, 76);
           button("Details", base + 1, 112, cardY + cardHeight - 42, 86);
           profileFields[a.id + "Count"] =
-              edit(std::to_string(a.spec.count), base + 4, cw - 94, cardY + cardHeight - 42, 62);
+              edit(!advancedMode && a.spec.loop ? std::string() : std::to_string(a.spec.count),
+                   base + 4, cw - 94, cardY + cardHeight - 42, 62);
           if (advancedMode) {
             std::vector<std::string> roles = {"Unassigned", "Hard matcher", "Drafter", "Refiner",
                                               "Random"};
@@ -346,7 +431,7 @@ struct ConsoleUI::Impl {
       button("Tour", GUIDE, 382, height - 48, 68);
       button("MCP connection", OPEN_MCP, width - 332, height - 116, 144);
       button("Run logs", OPEN_LOG, width - 180, height - 116, 116);
-      button("This repo needs", ENCYCLOPEDIA, width - 332, 16, 188);
+      button("This repo needs", REQUIREMENTS, width - 332, 16, 188);
     } else if (screen == Screen::atlas) {
       search = edit(atlasQuery, SEARCH, 18, 52, cw - 250);
       layoutChoice = combo({"ov", "size", "match", "author"}, ATLAS_LAYOUT, cw - 222, 52, 100,
@@ -362,6 +447,11 @@ struct ConsoleUI::Impl {
                                              : 0);
       button("Add to cart", ATLAS_CART, width - 328, 285, 130);
       button("Assign cart", ADD_CART, width - 188, 285, 130);
+      button("Inspect source", ATLAS_INSPECT, width - 328, 330, 140);
+      button("Pop out module", ATLAS_MODULE, width - 180, 330, 120);
+      label("Wheel: zoom; left drag: pan\nRight drag: select; WASD/arrows: travel\nSpace: cart; "
+            "Esc: zoom out",
+            width - 332, 378, 310, 56);
       button("Controller", HOME, 18, height - 48, 108);
       button("Reload", ATLAS_LOAD, 134, height - 48, 90);
       button("Encyclopedia", ENCYCLOPEDIA, 232, height - 48, 126);
@@ -379,6 +469,7 @@ struct ConsoleUI::Impl {
       button("Run", TOOL_RUN, 255, height - 98, 76);
       button("Cancel", TOOL_CANCEL, 339, height - 98, 88);
       button("Edit arguments", TOOL_FORM, 435, height - 98, 142);
+      button("Tool visibility", TOOL_ENABLE, 18, height - 98, 164);
       button("Close", HOME, 18, height - 48, 90);
       label("Run dock · complete output", width - 332, 57, 310);
       logBox = edit("", 0, width - 332, 88, 310, height - 164,
@@ -404,14 +495,160 @@ struct ConsoleUI::Impl {
       if (keys.empty())
         keys = {"OPENAI_API_KEY",   "ANTHROPIC_API_KEY", "GLM_API_KEY",
                 "DEEPSEEK_API_KEY", "REQUESTY_API_KEY",  "CLAIMS_API_KEY"};
-      keyChoice = combo(keys, 0, 18, 378, cw - 36);
+      for (auto &key : vault.values())
+        if (std::find(keys.begin(), keys.end(), key.first) == keys.end())
+          keys.push_back(key.first);
+      keyChoice = control(L"COMBOBOX", "", 0, 18, 378, cw - 36, 300, CBS_DROPDOWN | WS_VSCROLL);
+      for (auto &key : keys)
+        SendMessageW(keyChoice, CB_ADDSTRING, 0, (LPARAM)wide(key).c_str());
+      if (!keys.empty())
+        SendMessageW(keyChoice, CB_SETCURSEL, 0, 0);
       keyEdit = edit("", 0, 18, 419, cw - 36, 30, ES_PASSWORD | ES_AUTOHSCROLL);
       button("Store key", VAULT_SAVE, 18, 460, 108);
       button("Remove key", VAULT_REMOVE, 136, 460, 118);
       button("Save settings", SAVE_SETTINGS, 18, height - 98, 136);
       button("Close", HOME, 18, height - 48, 90);
-      body = edit(settingsSummary(), 0, width - 332, 62, 310, height - 132,
+      int py = 58;
+      for (auto entry : std::vector<std::pair<std::string, std::string>>{
+               {"animateBackground", "Animate background"},
+               {"allowNearMiss", "Allow near-miss tips"},
+               {"allowGhidra", "Allow Ghidra drafts"},
+               {"safeMode", "Safe mode: block agent writes"},
+               {"reports", "Save activity reports"},
+               {"useAgents", "Allow agent delegation"},
+               {"autoLand", "Auto-land in agent worktree"},
+               {"liveRefresh", "Live refresh (enabled profiles)"}}) {
+        auto h = control(L"BUTTON", entry.second, 0, width - 332, py, 310, 32, BS_AUTOCHECKBOX);
+        SendMessageW(h, BM_SETCHECK,
+                     policy.value(entry.first, entry.first == "animateBackground" ||
+                                                   entry.first == "allowNearMiss"),
+                     0);
+        profileFields["policy:" + entry.first] = h;
+        py += 38;
+      }
+      label("Delegation limit", width - 332, py, 150);
+      profileFields["policy:agentFanout"] =
+          edit(std::to_string(policy.value("agentFanout", 8)), 0, width - 172, py, 120);
+      py += 44;
+      button("Connections", CONNECTIONS, width - 332, py, 136);
+      button("Project services", SERVICES, width - 188, py, 156);
+      py += 44;
+      body = edit(settingsSummary(), 0, width - 332, py, 310, std::max(60, height - py - 30),
                   ES_MULTILINE | ES_READONLY | WS_VSCROLL);
+    } else if (screen == Screen::requirements) {
+      body = edit(preflightSummary(serviceResult), 0, 18, 62, cw - 36, height - 176,
+                  ES_MULTILINE | ES_READONLY | WS_VSCROLL);
+      button("Check again", REQ_REFRESH, 18, height - 98, 118);
+      button("Copy steps", REQ_COPY, 144, height - 98, 112);
+      button("Open terminal", REQ_TERMINAL, 264, height - 98, 136);
+      button("Controller", HOME, 18, height - 48, 110);
+      label("Requirements", width - 332, 62, 310, 32);
+      label(
+          "Your repository supplies its tools, compiler and ROM inputs. Installations and external "
+          "account setup are yours to control. Run the steps shown on the left, then check again.",
+          width - 332, 110, 310, 180);
+      button("GitHub sign-in", REQ_GITHUB, width - 332, 320, 156);
+      button("Encyclopedia", ENCYCLOPEDIA, width - 332, 366, 140);
+    } else if (screen == Screen::queue) {
+      auto a = activeAgent();
+      toolList = control(L"LISTBOX", "", 0, 18, 62, cw - 36, height - 190, LBS_NOTIFY | WS_VSCROLL);
+      if (a)
+        for (auto &row : a->queue)
+          SendMessageW(toolList, LB_ADDSTRING, 0,
+                       (LPARAM)wide(row.value("module", std::string()) + " · " +
+                                    row.value("name", row.value("id", std::string("target"))))
+                           .c_str());
+      button("Move up", QUEUE_UP, 18, height - 108, 100);
+      button("Move down", QUEUE_DOWN, 126, height - 108, 110);
+      button("Remove", QUEUE_REMOVE, 244, height - 108, 100);
+      button("AI detail", DETAIL, 18, height - 48, 110);
+      button("Controller", HOME, 136, height - 48, 110);
+      label("Queued targets are reserved across the fleet. Stop the agent before reordering or "
+            "removing work. Targets added during a run remain queued for the next batch.",
+            width - 332, 62, 310, 180);
+    } else if (screen == Screen::connections) {
+      connectionProfiles =
+          Backend(repository, data, settings, vault.values()).invoke("connections.get");
+      connectionNames.clear();
+      toolList = control(L"LISTBOX", "", CONNECTION_LIST, 18, 58, 180, height - 160,
+                         LBS_NOTIFY | WS_VSCROLL);
+      for (auto it = connectionProfiles.begin(); it != connectionProfiles.end(); ++it) {
+        connectionNames.push_back(it.key());
+        SendMessageW(toolList, LB_ADDSTRING, 0, (LPARAM)wide(it.key()).c_str());
+      }
+      int y = 58;
+      for (auto field :
+           std::vector<std::pair<std::string, std::string>>{{"Name", "atlas.live"},
+                                                            {"URL", ""},
+                                                            {"Key variable", ""},
+                                                            {"Key header", "Authorization"},
+                                                            {"Key prefix", "Bearer "}}) {
+        label(field.first, 214, y + 4, 110);
+        profileFields[field.first] = edit(field.second, 0, 328, y, cw - 348);
+        y += 40;
+      }
+      label("Method", 214, y + 4, 110);
+      profileFields["Method"] =
+          combo({"GET", "POST", "PUT", "PATCH", "DELETE"}, 0, 328, y, cw - 348);
+      y += 40;
+      for (auto entry : std::vector<std::pair<std::string, std::string>>{
+               {"Enabled", "Enable this connection"},
+               {"Automatic", "Allow automatic remote leases"}}) {
+        profileFields[entry.first] =
+            control(L"BUTTON", entry.second, 0, 214, y, cw - 232, 30, BS_AUTOCHECKBOX);
+        y += 38;
+      }
+      label("Lease body template (optional JSON)", 214, y, cw - 232);
+      y += 28;
+      profileFields["Template"] = edit("{}", 0, 214, y, cw - 232, std::max(60, height - y - 110),
+                                       ES_MULTILINE | WS_VSCROLL);
+      button("Preview save", CONNECTION_SAVE, 214, height - 64, 140);
+      button("Settings", SETTINGS, 18, height - 48, 108);
+      body = edit(
+          "Connections belong to you. Paste your service's endpoint and reference a key stored in "
+          "the vault or your environment. Connections start disabled.\n\nUse atlas.live, "
+          "atlas.cosmetics, atlas.counts, atlas.progress, claims or update.check as read profiles. "
+          "Remote leases require claims.acquire, claims.heartbeat and claims.release.\n\nNo keys "
+          "belong in these fields. Review the complete configuration before saving.",
+          0, width - 332, 62, 310, height - 132, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
+    } else if (screen == Screen::services) {
+      std::vector<std::string> methods = {
+          "preflight",     "claims.read",     "stats.get",       "harvest.list", "reports.list",
+          "projects.list", "connections.get", "preferences.get", "git.status",   "git.syncPreview",
+          "git.sync",      "github.credits",  "atlas.cosmetics", "atlas.counts", "atlas.progress",
+          "update.check",  "reports.export",  "stats.clear",     "git.backup"};
+      if (std::find(methods.begin(), methods.end(), serviceMethod) == methods.end())
+        methods.push_back(serviceMethod);
+      auto at = std::find(methods.begin(), methods.end(), serviceMethod) - methods.begin();
+      serviceChoice = combo(methods, 0, 18, 58, cw - 36, (int)at);
+      label("Arguments (advanced; leave {} for ordinary checks)", 18, 100, cw - 36);
+      serviceArguments =
+          edit(serviceRequest.dump(2), 0, 18, 128, cw - 36, 110, ES_MULTILINE | WS_VSCROLL);
+      button("Inspect / preview", SERVICE_RUN, 18, 252, 146);
+      button("Confirm preview", SERVICE_CONFIRM, 172, 252, 150);
+      EnableWindow(GetDlgItem(window, SERVICE_CONFIRM),
+                   serviceResult.value("requiresConfirmation", false));
+      body = edit(serviceResult.dump(2), 0, 18, 296, cw - 36, std::max(60, height - 360),
+                  ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL);
+      button("Controller", HOME, 18, height - 48, 110);
+      button("Settings", SETTINGS, 136, height - 48, 108);
+      label("Inspect requirements, claims, reports, recovery and connections. Destructive changes "
+            "require a separate confirmation of the full preview. Credentials remain on your "
+            "computer.",
+            width - 332, 62, 310, 180);
+    } else if (screen == Screen::functionDetail) {
+      button("Viewer", ATLAS, 18, height - 48, 100);
+      button("Source", ATLAS_SOURCE, 18, 54, 100);
+      button("Prior tries", ATLAS_HISTORY, 126, 54, 110);
+      button("Add to cart", ATLAS_CART, 244, 54, 120);
+      body = edit(historyTab ? historyText : inspectText, 0, 18, 96, cw - 36, height - 158,
+                  ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL);
+      if (pickedFunction < atlas.size()) {
+        auto &f = atlas[pickedFunction];
+        label(f.name + "\nModule: " + f.module + "\nState: " + f.state +
+                  "\nBytes: " + std::to_string(f.size),
+              width - 332, 62, 310, 180);
+      }
     } else if (screen == Screen::parameters) {
       auto &tool = descriptor.tool(toolId);
       int end = std::min((int)tool.args.size(), (argumentPage + 1) * 10), yy = 64;
@@ -464,6 +701,7 @@ struct ConsoleUI::Impl {
       label(a ? a->detail : "Select an agent", width - 332, 108, 310, 120);
       button("Commit reviewed", COMMIT_AGENT, width - 332, 250, 170);
       button("Land driver results", LAND_AGENT, width - 332, 290, 170);
+      button("Manage queue", QUEUE, width - 332, 330, 170);
     } else if (screen == Screen::tour) {
       button("Previous", TOUR_PREVIOUS, 50, height - 108, 110);
       button("Next", TOUR_NEXT, 168, height - 108, 100);
@@ -487,6 +725,12 @@ struct ConsoleUI::Impl {
       body = edit(tips[tourStep], 0, 50, 102, width - 100, height - 254,
                   ES_MULTILINE | ES_READONLY | WS_VSCROLL);
     }
+    if (viewerOnly)
+      for (int id : std::vector<int>{HOME, ADD_CART, ENCYCLOPEDIA, ATLAS_MODULE}) {
+        auto h = GetDlgItem(window, id);
+        if (h)
+          EnableWindow(h, FALSE);
+      }
     InvalidateRect(window, nullptr, TRUE);
   }
   std::string settingsSummary() {
@@ -602,34 +846,392 @@ struct ConsoleUI::Impl {
     if (loader.joinable())
       loader.join();
     atlasReady = false;
+    ++atlasGeneration;
     atlasError.clear();
+    retainedCart.clear();
+    for (auto i : cart)
+      if (i < atlas.size())
+        retainedCart.push_back(atlas[i].id);
+    retainedSelection = pickedFunction < atlas.size() ? atlas[pickedFunction].id : std::string();
     atlas.clear();
     tiles.clear();
     cachedLayout.clear();
     pickedFunction = SIZE_MAX;
     cart.clear();
-    loader = std::thread([this] {
+    sourceCache.clear();
+    auto keys = vault.values();
+    auto prefs = settings;
+    bool published = liveAtlas;
+    loader = std::thread([this, keys, prefs, published] {
       try {
-        atlas = parseAtlas(liveAtlas ? fetchHttps(descriptor.document.value("data", Json::object())
-                                                      .value("committedDbUrl", std::string()))
-                                     : read(confinedPath(repository, descriptor.database)));
+        Backend backend(repository, data, prefs, keys);
+        auto profiles = backend.invoke("connections.get");
+        auto enabled = [&](const std::string &name) {
+          return profiles.contains(name) && profiles[name].value("enabled", false);
+        };
+        atlasExtras = Json::object();
+        if (published && enabled("atlas.live")) {
+          auto r = backend.invoke("atlas.live");
+          if (!r.value("ok", false))
+            throw std::runtime_error("Published Atlas service refused the request");
+          atlas = parseAtlas(r.at("data").dump());
+        } else
+          atlas =
+              parseAtlas(published ? fetchHttps(descriptor.document.value("data", Json::object())
+                                                    .value("committedDbUrl", std::string()))
+                                   : read(confinedPath(repository, descriptor.database)));
+        if (published) {
+          for (auto name : {"atlas.cosmetics", "atlas.counts", "atlas.progress", "github.credits"})
+            if (enabled(name)) {
+              try {
+                auto r = backend.invoke(name);
+                if (r.value("ok", false))
+                  atlasExtras[name] = r["data"];
+              } catch (const std::exception &e) {
+                atlasExtras["notes"].push_back(std::string(name) + ": " + e.what());
+              }
+            }
+          if (enabled("claims"))
+            try {
+              auto claims = backend.invoke("claims.read", {{"connection", "claims"}});
+              for (auto &f : atlas)
+                if (heldTarget(f.row, claims))
+                  f.row["claim"] = {{"status", "active"}};
+            } catch (const std::exception &e) {
+              atlasExtras["notes"].push_back(e.what());
+            }
+          if (atlasExtras.contains("atlas.progress")) {
+            auto progress = atlasExtras["atlas.progress"];
+            if (progress.value("ready", false) && progress.contains("matched") &&
+                progress["matched"].is_array()) {
+              for (auto &f : atlas) {
+                bool matched = std::find(progress["matched"].begin(), progress["matched"].end(),
+                                         f.id) != progress["matched"].end();
+                f.row["matched"] = matched;
+                f.state = matched ? "matched" : f.row.contains("div") ? "near_miss" : "unmatched";
+              }
+            }
+          }
+        }
       } catch (const std::exception &e) {
         atlasError = e.what();
       }
+      atlasPublished = true;
       atlasReady = true;
     });
+  }
+  static LRESULT CALLBACK popupProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
+    auto p = (Popup *)GetWindowLongPtrW(h, GWLP_USERDATA);
+    if (msg == WM_NCCREATE) {
+      p = (Popup *)((CREATESTRUCTW *)l)->lpCreateParams;
+      SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)p);
+      p->window = h;
+    }
+    if (p) {
+      if (msg == WM_SIZE && p->ui) {
+        p->ui->resize(std::max(800, (int)LOWORD(l)), std::max(600, (int)HIWORD(l)) - 66);
+        return 0;
+      }
+      if (msg == WM_CLOSE) {
+        p->ui.reset();
+        DestroyWindow(h);
+        return 0;
+      }
+      if (msg == WM_NCDESTROY)
+        p->window = nullptr;
+      if (msg == WM_ERASEBKGND)
+        return 1;
+      if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        auto dc = BeginPaint(h, &ps);
+        RECT r;
+        GetClientRect(h, &r);
+        skin::background(dc, r.right, r.bottom);
+        skin::label(dc, L"Chaos Viewer · module", 18, 18, r.right - 36, 30, 18, true);
+        EndPaint(h, &ps);
+        return 0;
+      }
+    }
+    return DefWindowProcW(h, msg, w, l);
+  }
+  void openModule(const std::string &module) {
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = popupProc;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = L"TangOSLiteModule";
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    RegisterClassW(&wc);
+    auto popup = std::make_unique<Popup>();
+    auto h = CreateWindowExW(0, wc.lpszClassName, wide(module + " · Chaos Viewer").c_str(),
+                             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
+                             1160, 820, parent, nullptr, wc.hInstance, popup.get());
+    if (!h)
+      throw std::runtime_error("Could not open module window");
+    popup->ui = std::make_unique<ConsoleUI>(
+        h, font, repository, data, settings, [] {}, std::function<void(const Settings &)>{}, true,
+        module,
+        [this](Json row) {
+          auto id = row.value("id", std::string());
+          for (size_t i = 0; i < atlas.size(); ++i)
+            if (atlas[i].id == id && atlas[i].state != "matched" && !exemptTarget(atlas[i].row) &&
+                (!atlas[i].row.contains("claim") || atlas[i].row["claim"].is_null()) &&
+                std::find(cart.begin(), cart.end(), i) == cart.end()) {
+              cart.push_back(i);
+              break;
+            }
+          InvalidateRect(window, nullptr, FALSE);
+        });
+    RECT r;
+    GetClientRect(h, &r);
+    popup->ui->resize(r.right - 28, r.bottom - 66);
+    popup->ui->show(true, true);
+    popups.push_back(std::move(popup));
+    ShowWindow(h, SW_SHOWNORMAL);
+  }
+  static void copyText(HWND owner, const std::string &value) {
+    if (!OpenClipboard(owner))
+      throw std::runtime_error("Clipboard is busy");
+    auto text = wide(value);
+    auto memory = GlobalAlloc(GMEM_MOVEABLE, (text.size() + 1) * sizeof(wchar_t));
+    if (!memory) {
+      CloseClipboard();
+      throw std::runtime_error("Could not allocate clipboard text");
+    }
+    auto bytes = GlobalLock(memory);
+    memcpy(bytes, text.c_str(), (text.size() + 1) * sizeof(wchar_t));
+    GlobalUnlock(memory);
+    EmptyClipboard();
+    if (!SetClipboardData(CF_UNICODETEXT, memory))
+      GlobalFree(memory);
+    CloseClipboard();
+  }
+  static std::string preflightSummary(const Json &r) {
+    if (r.empty())
+      return "Checking repository requirements...";
+    if (r.contains("error"))
+      return r["error"].get<std::string>();
+    std::string out = "This repo needs\n\n";
+    for (auto &item : r.value("checks", Json::array())) {
+      out += (item.value("available", false) ? "PASS  " : "MISSING  ") +
+             item.value("name", std::string()) + "\n";
+      if (!item.value("available", false))
+        out +=
+            "  " +
+            item.value(
+                "fix",
+                item.value(
+                    "command",
+                    std::string("Inspect the declared repository tool and its required inputs."))) +
+            "\n";
+    }
+    out += "\nPython packages\n";
+    for (auto &item : r.value("pythonPackages", Json::array()))
+      out += (item.value("available", false) ? "PASS  " : "MISSING  ") +
+             item.value("package", std::string()) + "\n  " + item.value("fix", std::string()) +
+             "\n";
+    out += "\nPython\n" + r.value("python", Json::object()).value("detail", std::string()) + "\n";
+    out += "\nGitHub authentication\n" +
+           r.value("github", Json::object()).value("detail", std::string()) + "\n";
+    out += "\nSetup commands you run yourself\ngh auth login\n";
+    out += "For Python packages, use the repository's pinned requirements. Compiler and ROM paths "
+           "belong in local settings.\n\n";
+    out += r.value("instructions", std::string());
+    return out;
+  }
+  void serviceCall(const std::string &method, Json args) {
+    if (serviceBusy || serviceReady)
+      throw std::runtime_error("Wait for the current service operation");
+    if (serviceWorker.joinable())
+      serviceWorker.join();
+    serviceBusy = true;
+    auto prefs = settings;
+    auto keys = vault.values();
+    serviceWorker = std::thread([this, method, args, prefs, keys] {
+      Json result;
+      try {
+        result = Backend(repository, data, prefs, keys).invoke(method, args);
+      } catch (const std::exception &e) {
+        result = {{"error", e.what()}};
+      }
+      {
+        std::lock_guard<std::mutex> lock(outputMutex);
+        pendingServiceResult = std::move(result);
+      }
+      serviceReady = true;
+      serviceBusy = false;
+    });
+    if (screen == Screen::services) {
+      setText(body, "Working...");
+      EnableWindow(GetDlgItem(window, SERVICE_CONFIRM), FALSE);
+    }
+  }
+  void selectConnection() {
+    auto at = (int)SendMessageW(toolList, LB_GETCURSEL, 0, 0);
+    if (at < 0 || at >= (int)connectionNames.size())
+      return;
+    auto name = connectionNames[at];
+    auto c = connectionProfiles[name];
+    setText(profileFields["Name"], name);
+    for (auto field : std::vector<std::pair<std::string, std::string>>{{"URL", "url"},
+                                                                       {"Key variable", "keyEnv"},
+                                                                       {"Key header", "keyHeader"},
+                                                                       {"Key prefix", "keyPrefix"}})
+      setText(profileFields[field.first],
+              c.value(field.second, field.second == "keyHeader"   ? std::string("Authorization")
+                                    : field.second == "keyPrefix" ? std::string("Bearer ")
+                                                                  : std::string()));
+    std::vector<std::string> methods = {"GET", "POST", "PUT", "PATCH", "DELETE"};
+    auto it = std::find(methods.begin(), methods.end(), c.value("method", std::string("GET")));
+    SendMessageW(profileFields["Method"], CB_SETCURSEL,
+                 it == methods.end() ? 0 : it - methods.begin(), 0);
+    SendMessageW(profileFields["Enabled"], BM_SETCHECK, c.value("enabled", false), 0);
+    SendMessageW(profileFields["Automatic"], BM_SETCHECK, c.value("automatic", false), 0);
+    setText(profileFields["Template"], c.value("bodyTemplate", Json::object()).dump(2));
+  }
+  void requestInspection(size_t index) {
+    if (inspectBusy || inspectReady || !atlasReady || index >= atlas.size())
+      return;
+    if (inspector.joinable())
+      inspector.join();
+    inspectBusy = true;
+    inspectIndex = index;
+    inspectGeneration = atlasGeneration;
+    auto f = atlas[index];
+    auto prefs = settings;
+    auto keys = vault.values();
+    inspector = std::thread([this, f, prefs, keys] {
+      Json r = Json::object();
+      try {
+        Backend backend(repository, data, prefs, keys);
+        auto path = f.row.value("srcPath", std::string());
+        if (path.empty())
+          path = f.row.value("sourcePath", std::string());
+        if (path.empty())
+          r["source"] = {
+              {"source",
+               f.row.value("disasm",
+                           std::string("No source path is published for this function."))}};
+        else {
+          try {
+            r["source"] = backend.invoke("atlas.source", {{"path", path}});
+          } catch (const std::exception &) {
+            if (f.row.contains("disasm") && f.row["disasm"].is_string())
+              r["source"] = {{"source", f.row["disasm"]}};
+            else
+              throw;
+          }
+        }
+        r["history"] = backend.invoke("atlas.history", f.row);
+      } catch (const std::exception &e) {
+        r["error"] = e.what();
+      }
+      {
+        std::lock_guard<std::mutex> lock(outputMutex);
+        inspectResult = std::move(r);
+      }
+      inspectReady = true;
+      inspectBusy = false;
+    });
+  }
+  void inspectFunction() {
+    if (pickedFunction >= atlas.size())
+      throw std::runtime_error("Select a function first");
+    inspectText = "Loading source...";
+    historyText = "Loading prior tries...";
+    historyTab = false;
+    if (sourceCache.count(pickedFunction))
+      inspectText = sourceCache[pickedFunction];
+    requestInspection(pickedFunction);
+    navigate(Screen::functionDetail);
+  }
+  void flyRect(ViewRect rect) {
+    if (rect.width <= 0 || rect.height <= 0)
+      return;
+    flightFrom = camera;
+    flightTo = camera;
+    flightTo.zoom = std::clamp(
+        .92 * std::min((width - 390) / rect.width, (height - 170) / rect.height), 1., 4096.);
+    flightTo.center(rect.x + rect.width / 2, rect.y + rect.height / 2, width - 390, height - 170);
+    flightAt = GetTickCount64();
+    flying = true;
+  }
+  void flyFunction(size_t index) {
+    for (auto t : tiles)
+      if (t.index == index) {
+        pickedFunction = index;
+        flyRect({t.x, t.y, t.width, t.height});
+        requestInspection(index);
+        break;
+      }
+  }
+  void viewerKey(WPARAM key) {
+    if (key == VK_ESCAPE) {
+      if (lod.update(zoom) == 3 && pickedFunction < atlas.size()) {
+        double x = 1e100, y = 1e100, right = 0, bottom = 0;
+        for (auto t : tiles)
+          if (atlas[t.index].module == atlas[pickedFunction].module) {
+            x = std::min(x, t.x);
+            y = std::min(y, t.y);
+            right = std::max(right, t.x + t.width);
+            bottom = std::max(bottom, t.y + t.height);
+          }
+        flyRect({x, y, right - x, bottom - y});
+      } else {
+        flightFrom = camera;
+        flightTo = AtlasCamera();
+        flightAt = GetTickCount64();
+        flying = true;
+        pickedFunction = SIZE_MAX;
+      }
+      return;
+    }
+    if (key == VK_SPACE && pickedFunction < atlas.size()) {
+      auto &f = atlas[pickedFunction];
+      if (f.state == "matched" || exemptTarget(f.row) || f.row.contains("claim"))
+        return;
+      auto at = std::find(cart.begin(), cart.end(), pickedFunction);
+      if (at == cart.end()) {
+        cart.push_back(pickedFunction);
+        if (draftAdded)
+          draftAdded(f.row);
+      } else
+        cart.erase(at);
+      InvalidateRect(window, nullptr, FALSE);
+      return;
+    }
+    int dx = key == VK_LEFT || key == 'A' ? -1 : key == VK_RIGHT || key == 'D' ? 1 : 0;
+    int dy = key == VK_UP || key == 'W' ? -1 : key == VK_DOWN || key == 'S' ? 1 : 0;
+    if ((dx || dy) && lod.update(zoom) >= 2 && GetTickCount64() - lastTravel >= 160) {
+      if (pickedFunction == SIZE_MAX && !tiles.empty())
+        pickedFunction = tiles.front().index;
+      auto next = atlasNeighbor(atlas, tiles, pickedFunction, dx, dy);
+      if (next < atlas.size())
+        flyFunction(next);
+      lastTravel = GetTickCount64();
+    }
+  }
+  void moveMini(POINT p) {
+    double mw = std::max(1L, miniBounds.right - miniBounds.left),
+           mh = std::max(1L, miniBounds.bottom - miniBounds.top);
+    camera.center((p.x - miniBounds.left) * (width - 390) / mw,
+                  (p.y - miniBounds.top) * (height - 170) / mh, width - 390, height - 170);
   }
   void paint(HDC dc) {
     skin::panel(dc, 0, 0, width - 356, height);
     skin::panel(dc, width - 340, 0, 340, height, true);
-    std::string title = screen == Screen::controller     ? "Chaos Controller"
-                        : screen == Screen::atlas        ? "Chaos Viewer"
-                        : screen == Screen::encyclopedia ? "Encyclopedia"
-                        : screen == Screen::settings     ? "Settings"
-                        : screen == Screen::profile      ? "Connect AI"
-                        : screen == Screen::detail       ? "AI detail"
-                        : screen == Screen::parameters   ? "Run dock · arguments"
-                                                         : "Welcome to tangOS Lite";
+    std::string title = screen == Screen::controller       ? "Chaos Controller"
+                        : screen == Screen::atlas          ? "Chaos Viewer"
+                        : screen == Screen::encyclopedia   ? "Encyclopedia"
+                        : screen == Screen::settings       ? "Settings"
+                        : screen == Screen::profile        ? "Connect AI"
+                        : screen == Screen::detail         ? "AI detail"
+                        : screen == Screen::requirements   ? "Requirements"
+                        : screen == Screen::connections    ? "Connections"
+                        : screen == Screen::services       ? "Project services"
+                        : screen == Screen::queue          ? "AI queue"
+                        : screen == Screen::functionDetail ? "Function inspection"
+                        : screen == Screen::parameters     ? "Run dock · arguments"
+                                                           : "Welcome to tangOS Lite";
     skin::label(dc, wide(title), 16, 17, width - 390, 28, 16, true);
     hits.clear();
     if (screen == Screen::controller) {
@@ -648,8 +1250,7 @@ struct ConsoleUI::Impl {
         skin::panel(dc, 16, y, cw, cardHeight, true);
         skin::label(dc, wide((a.active ? "● " : "○ ") + a.spec.name), 30, y + 13, cw - 300, 26, 16,
                     true, false, true);
-        skin::label(dc, wide(a.spec.kind + " · " + a.phase), 30, y + 86, 140, 24, 12, false,
-                    true);
+        skin::label(dc, wide(a.spec.kind + " · " + a.phase), 30, y + 86, 140, 24, 12, false, true);
         skin::label(dc, wide(a.detail.empty() ? "Ready · " + a.spec.role : a.detail), 30, y + 47,
                     cw - 32, 40, 13, false, true);
         skin::label(dc, wide(a.lastLine), 178, y + 86, cw - 180, 20, 12, false, true);
@@ -689,8 +1290,8 @@ struct ConsoleUI::Impl {
       std::transform(needle.begin(), needle.end(), needle.begin(),
                      [](unsigned char c) { return std::tolower(c); });
       int left = 18, top = 100, w = width - 390, h = height - 170;
-      std::string key = needle + "|" + atlasMode + "|" + atlasFilter + "|" + std::to_string(w) +
-                        "x" + std::to_string(h);
+      std::string key = needle + "|" + atlasMode + "|" + atlasFilter + "|" + moduleFilter + "|" +
+                        std::to_string(w) + "x" + std::to_string(h);
       if (key != cachedLayout) {
         filtered.clear();
         for (size_t i = 0; i < atlas.size(); i++) {
@@ -699,12 +1300,16 @@ struct ConsoleUI::Impl {
           std::transform(hay.begin(), hay.end(), hay.begin(),
                          [](unsigned char c) { return std::tolower(c); });
           if ((needle.empty() || hay.find(needle) != hay.npos) &&
-              (atlasFilter == "all" || atlas[i].state == atlasFilter))
+              (atlasFilter == "all" || atlas[i].state == atlasFilter) &&
+              (moduleFilter.empty() || atlas[i].module == moduleFilter))
             filtered.push_back(i);
         }
         tiles = atlasLayout(atlas, filtered, w, h, atlasMode);
+        lod.compute(atlas, tiles, w, h);
+        camera.clamp(w, h);
         cachedLayout = key;
       }
+      int band = lod.update(zoom);
       int saved = SaveDC(dc);
       IntersectClipRect(dc, left, top, left + w, top + h);
       for (auto tile : tiles) {
@@ -726,23 +1331,80 @@ struct ConsoleUI::Impl {
           }
           color = RGB(80 + (hash & 127), 80 + ((hash >> 8) & 127), 80 + ((hash >> 16) & 127));
         }
-        HBRUSH brush = CreateSolidBrush(color);
+        if (atlasExtras.contains("atlas.cosmetics") && f.state == "matched" &&
+            atlasMode == "author") {
+          auto colors = atlasExtras["atlas.cosmetics"].value("colors", Json::object());
+          auto author = f.row.value("author", std::string());
+          if (colors.contains(author) && colors[author].is_string()) {
+            auto hex = colors[author].get<std::string>();
+            if (hex.size() == 7 && hex[0] == '#' &&
+                hex.find_first_not_of("0123456789abcdefABCDEF", 1) == std::string::npos) {
+              auto value = std::stoul(hex.substr(1), nullptr, 16);
+              color = RGB((value >> 16) & 255, (value >> 8) & 255, value & 255);
+            }
+          }
+        }
+        HBRUSH brush = (HBRUSH)GetStockObject(DC_BRUSH);
+        SetDCBrushColor(dc, color);
         RECT bounds{x, y, x + tw - 1, y + th - 1};
         FillRect(dc, &bounds, brush);
-        DeleteObject(brush);
         if (std::find(cart.begin(), cart.end(), tile.index) != cart.end() ||
             tile.index == pickedFunction) {
-          brush = CreateSolidBrush(RGB(255, 214, 40));
-          FrameRect(dc, &bounds, brush);
-          DeleteObject(brush);
+          SetDCBrushColor(dc, RGB(255, 214, 40));
+          FrameRect(dc, &bounds, (HBRUSH)GetStockObject(DC_BRUSH));
         }
-        if (tw > 90 && th > 24)
-          skin::label(dc, wide(f.name), x + 4, y + 3, tw - 8, th - 6, 11, true);
+        if (tw > 90 && th > 24) {
+          skin::label(dc, wide(band == 1 ? f.module : f.name), x + 4, y + 3, tw - 8, 22, 11, true);
+          if (atlasExtras.contains("atlas.cosmetics"))
+            for (auto &star : atlasExtras["atlas.cosmetics"].value("stars", Json::array()))
+              if ((star.value("function", std::string()) == f.name ||
+                   star.value("function", std::string()) == f.id)) {
+                skin::label(dc, L"★", x + tw - 22, y + 3, 20, 22, 15, true);
+                break;
+              }
+          auto code = sourceCache.find(tile.index);
+          if (band == 3 && tile.index == pickedFunction && tw > 180 && th > 90 &&
+              code != sourceCache.end()) {
+            int savedCode = SaveDC(dc);
+            IntersectClipRect(dc, x + 1, y + 24, x + tw - 1, y + th - 1);
+            skin::label(dc, wide(code->second.substr(0, 16000)), x + 6, y + 28, tw - 12, th - 34,
+                        11);
+            RestoreDC(dc, savedCode);
+          }
+        }
         RECT hit{std::max(left, x), std::max(top, y), std::min(left + w, x + tw),
                  std::min(top + h, y + th)};
         hits.push_back({hit, (int)tile.index});
       }
+      if (marquee) {
+        RECT r{std::min(dragStart.x, dragEnd.x), std::min(dragStart.y, dragEnd.y),
+               std::max(dragStart.x, dragEnd.x), std::max(dragStart.y, dragEnd.y)};
+        auto b = CreateSolidBrush(RGB(255, 214, 40));
+        FrameRect(dc, &r, b);
+        DeleteObject(b);
+      }
       RestoreDC(dc, saved);
+      miniBounds = {left + w - 154, top + h - 106, left + w - 8, top + h - 8};
+      auto mb = CreateSolidBrush(skin::field());
+      FillRect(dc, &miniBounds, mb);
+      DeleteObject(mb);
+      double mw = miniBounds.right - miniBounds.left, mh = miniBounds.bottom - miniBounds.top;
+      for (auto t : tiles) {
+        RECT r{miniBounds.left + (int)(t.x * mw / w), miniBounds.top + (int)(t.y * mh / h),
+               miniBounds.left + (int)((t.x + t.width) * mw / w),
+               miniBounds.top + (int)((t.y + t.height) * mh / h)};
+        mb = CreateSolidBrush(atlas[t.index].state == "matched" ? RGB(63, 196, 95)
+                                                                : RGB(130, 170, 210));
+        FillRect(dc, &r, mb);
+        DeleteObject(mb);
+      }
+      auto v = camera.visible(w, h);
+      RECT vr{miniBounds.left + (int)(v.x * mw / w), miniBounds.top + (int)(v.y * mh / h),
+              miniBounds.left + (int)((v.x + v.width) * mw / w),
+              miniBounds.top + (int)((v.y + v.height) * mh / h)};
+      mb = CreateSolidBrush(RGB(255, 214, 40));
+      FrameRect(dc, &vr, mb);
+      DeleteObject(mb);
       skin::label(dc,
                   wide(std::to_string(filtered.size()) + " functions · " +
                        std::to_string(cart.size()) + " in cart"),
@@ -797,7 +1459,15 @@ struct ConsoleUI::Impl {
     if (manualBusy)
       return;
     auto &tool = descriptor.tool(toolId);
-    if (settings.portOnly && !tool.readOnly) throw std::runtime_error("Port-only mode blocks mutating descriptor tools in the primary checkout. Use an isolated agent worktree, or explicitly disable port-only mode.");
+    auto prefs = Backend(repository, data, settings, vault.values()).invoke("preferences.get");
+    if (!enabledTool(prefs, tool.id))
+      throw std::runtime_error("Tool disabled by user policy");
+    if (!tool.readOnly && prefs.value("safeMode", false))
+      throw std::runtime_error("Safe mode blocks mutating tools");
+    if (settings.portOnly && !tool.readOnly)
+      throw std::runtime_error(
+          "Port-only mode blocks mutating descriptor tools in the primary checkout. Use an "
+          "isolated agent worktree, or explicitly disable port-only mode.");
     auto values = Json::parse(text(argsBox));
     auto c = toolCommand(descriptor, tool, values, repository, allowWrites,
                          values.value("apply", false));
@@ -879,7 +1549,18 @@ struct ConsoleUI::Impl {
         fleet->configure(a->id, spec);
       } else if (op == 4 && notification == EN_KILLFOCUS) {
         auto spec = a->spec;
-        spec.count = std::stoi(text(profileFields.at(a->id + "Count")));
+        auto count = trim(text(profileFields.at(a->id + "Count")));
+        if (count.empty() && !advancedMode) {
+          spec.loop = true;
+          spec.count = 16;
+        } else {
+          if (count.empty() || count.find_first_not_of("0123456789") != std::string::npos)
+            throw std::runtime_error(
+                "Use a number from 1 to 200, or leave it empty in Simple mode for continuous work");
+          spec.count = std::stoi(count);
+          if (!advancedMode)
+            spec.loop = false;
+        }
         fleet->configure(a->id, spec);
       } else if (op == 5 && notification == BN_CLICKED)
         launch(false);
@@ -904,6 +1585,10 @@ struct ConsoleUI::Impl {
       InvalidateRect(window, nullptr, FALSE);
       return;
     }
+    if (id == CONNECTION_LIST && notification == LBN_SELCHANGE) {
+      selectConnection();
+      return;
+    }
     if (id == TOOL_LIST && notification == LBN_SELCHANGE) {
       selectTool();
       return;
@@ -917,6 +1602,121 @@ struct ConsoleUI::Impl {
     if (notification != BN_CLICKED)
       return;
     switch (id) {
+    case REQUIREMENTS:
+      if (serviceBusy || serviceReady)
+        throw std::runtime_error("Wait for the current operation");
+      serviceResult = Json::object();
+      navigate(Screen::requirements);
+      serviceCall("preflight", Json::object());
+      break;
+    case REQ_REFRESH:
+      serviceCall("preflight", Json::object());
+      break;
+    case REQ_COPY:
+      copyText(window, preflightSummary(serviceResult));
+      break;
+    case REQ_TERMINAL:
+      ShellExecuteW(window, L"open", L"powershell.exe", L"-NoExit", repository.c_str(),
+                    SW_SHOWNORMAL);
+      break;
+    case REQ_GITHUB:
+      ShellExecuteW(window, L"open", L"powershell.exe", L"-NoExit -Command \"gh auth login\"",
+                    repository.c_str(), SW_SHOWNORMAL);
+      break;
+    case QUEUE:
+      navigate(Screen::queue);
+      break;
+    case QUEUE_UP:
+    case QUEUE_DOWN:
+    case QUEUE_REMOVE: {
+      if (!fleet)
+        break;
+      auto index = (int)SendMessageW(toolList, LB_GETCURSEL, 0, 0);
+      if (index < 0)
+        throw std::runtime_error("Select a queued target");
+      fleet->editQueue(selectedId, index, id == QUEUE_UP ? -1 : 1, id == QUEUE_REMOVE);
+      build();
+      break;
+    }
+    case TOOL_ENABLE: {
+      if (toolId.empty())
+        break;
+      Backend backend(repository, data, settings, vault.values());
+      auto prefs = backend.invoke("preferences.get");
+      if (!prefs.value("allowNearMiss", true) && toolId.rfind("nearmiss_", 0) == 0)
+        throw std::runtime_error("Allow near-miss tips in Settings before enabling this tool");
+      auto disabled = prefs.value("disabledTools", Json::array());
+      Json next = Json::array();
+      bool currently = enabledTool(prefs, toolId);
+      for (auto &value : disabled)
+        if (value != toolId)
+          next.push_back(value);
+      if (currently)
+        next.push_back(toolId);
+      Json args = {{"disabledTools", next}};
+      auto preview = backend.invoke("preferences.set", args);
+      if (MessageBoxW(window,
+                      wide(std::string(currently ? "Disable " : "Enable ") + toolId +
+                           " for tools and agents?")
+                          .c_str(),
+                      L"Tool policy", MB_YESNO | MB_ICONQUESTION) != IDYES)
+        break;
+      args["confirmation"] = preview.at("confirmation");
+      policy = backend.invoke("preferences.set", args);
+      selectTool();
+      break;
+    }
+    case CONNECTIONS:
+      navigate(Screen::connections);
+      break;
+    case SERVICES:
+      if (serviceBusy || serviceReady)
+        throw std::runtime_error("Wait for the current operation");
+      serviceMethod = "preflight";
+      serviceRequest = Json::object();
+      serviceResult = Json::object();
+      navigate(Screen::services);
+      serviceCall(serviceMethod, serviceRequest);
+      break;
+    case CONNECTION_SAVE: {
+      if (serviceBusy || serviceReady)
+        throw std::runtime_error("Wait for the current operation");
+      auto name = text(profileFields["Name"]);
+      if (name.empty())
+        throw std::runtime_error("Connection name is required");
+      auto c = connectionProfiles.value(name, Json::object());
+      c["url"] = text(profileFields["URL"]);
+      c["method"] = selected(profileFields["Method"]);
+      c["keyEnv"] = text(profileFields["Key variable"]);
+      c["keyHeader"] = text(profileFields["Key header"]);
+      c["keyPrefix"] = text(profileFields["Key prefix"]);
+      c["enabled"] = SendMessageW(profileFields["Enabled"], BM_GETCHECK, 0, 0) == BST_CHECKED;
+      c["automatic"] = SendMessageW(profileFields["Automatic"], BM_GETCHECK, 0, 0) == BST_CHECKED;
+      c["bodyTemplate"] = Json::parse(text(profileFields["Template"]));
+      serviceMethod = "connections.set";
+      serviceRequest = connectionProfiles;
+      serviceRequest[name] = c;
+      serviceResult = Json::object();
+      navigate(Screen::services);
+      serviceCall(serviceMethod, serviceRequest);
+      break;
+    }
+    case SERVICE_RUN:
+      serviceMethod = selected(serviceChoice);
+      serviceRequest = Json::parse(text(serviceArguments));
+      serviceCall(serviceMethod, serviceRequest);
+      break;
+    case SERVICE_CONFIRM: {
+      if (!serviceResult.value("requiresConfirmation", false))
+        throw std::runtime_error("Inspect a preview first");
+      if (selected(serviceChoice) != serviceMethod ||
+          Json::parse(text(serviceArguments)) != serviceRequest)
+        throw std::runtime_error("Arguments changed: inspect a fresh preview");
+      auto args = serviceRequest;
+      args["confirmation"] = serviceResult.at("confirmation");
+      serviceCall(serviceMethod, args);
+      break;
+    }
     case HOME:
       navigate(Screen::controller);
       break;
@@ -1014,6 +1814,20 @@ struct ConsoleUI::Impl {
     case SAVE_SETTINGS: {
       if (fleet && fleet->running())
         throw std::runtime_error("Stop agents before changing safety settings");
+      Json nextPolicy = Json::object();
+      for (auto field : {"animateBackground", "allowNearMiss", "allowGhidra", "safeMode", "reports",
+                         "useAgents", "autoLand", "liveRefresh"})
+        nextPolicy[field] = SendMessageW(profileFields.at(std::string("policy:") + field),
+                                         BM_GETCHECK, 0, 0) == BST_CHECKED;
+      nextPolicy["agentFanout"] = std::stoi(text(profileFields.at("policy:agentFanout")));
+      Backend backend(repository, data, settings, vault.values());
+      auto policyPreview = backend.invoke("preferences.set", nextPolicy);
+      if (MessageBoxW(window, wide("Save these policies?\n\n" + nextPolicy.dump(2)).c_str(),
+                      L"Review settings", MB_YESNO | MB_ICONQUESTION) != IDYES)
+        break;
+      nextPolicy["confirmation"] = policyPreview.at("confirmation");
+      policy = backend.invoke("preferences.set", nextPolicy);
+      skin::animate(policy.value("animateBackground", true));
       advancedMode = SendMessageW(advanced, BM_GETCHECK, 0, 0) == BST_CHECKED;
       allowWrites = SendMessageW(writes, BM_GETCHECK, 0, 0) == BST_CHECKED;
       bool next = SendMessageW(portOnly, BM_GETCHECK, 0, 0) == BST_CHECKED;
@@ -1080,12 +1894,26 @@ struct ConsoleUI::Impl {
       reviewAgent(false);
       break;
     case LAND_AGENT:
-      if (MessageBoxW(window, L"Run the repository's result-landing tool in this agent's isolated worktree? It may change src/ and requires port-only mode to be disabled. Review the resulting diff before committing.", L"Land driver results", MB_YESNO | MB_ICONQUESTION) == IDYES) fleet->land(selectedId);
+      if (MessageBoxW(window,
+                      L"Run the repository's result-landing tool in this agent's isolated "
+                      L"worktree? It may change src/ and requires port-only mode to be disabled. "
+                      L"Review the resulting diff before committing.",
+                      L"Land driver results", MB_YESNO | MB_ICONQUESTION) == IDYES)
+        fleet->land(selectedId);
       break;
     case COMMIT_AGENT:
       reviewAgent(true);
       break;
     case ATLAS_CART:
+      if (pickedFunction >= atlas.size())
+        throw std::runtime_error("Select a function first");
+      if (atlas[pickedFunction].state == "matched" || exemptTarget(atlas[pickedFunction].row) ||
+          (atlas[pickedFunction].row.contains("claim") &&
+           !atlas[pickedFunction].row["claim"].is_null()))
+        throw std::runtime_error(
+            "This function is matched, exempt or claimed; choose available work");
+      if (draftAdded && pickedFunction < atlas.size())
+        draftAdded(atlas[pickedFunction].row);
       if (pickedFunction != SIZE_MAX &&
           std::find(cart.begin(), cart.end(), pickedFunction) == cart.end())
         cart.push_back(pickedFunction);
@@ -1102,6 +1930,22 @@ struct ConsoleUI::Impl {
       navigate(Screen::controller);
       break;
     }
+    case ATLAS_INSPECT:
+      inspectFunction();
+      break;
+    case ATLAS_SOURCE:
+      historyTab = false;
+      setText(body, inspectText);
+      break;
+    case ATLAS_HISTORY:
+      historyTab = true;
+      setText(body, historyText);
+      break;
+    case ATLAS_MODULE:
+      if (pickedFunction >= atlas.size())
+        throw std::runtime_error("Select a function in the module first");
+      openModule(atlas[pickedFunction].module);
+      break;
     case ATLAS_RESET:
       zoom = 1;
       panX = panY = 0;
@@ -1131,6 +1975,106 @@ struct ConsoleUI::Impl {
     }
   }
   void tick() {
+    if (flying) {
+      double t = std::min(1., (GetTickCount64() - flightAt) / 350.);
+      t = t * t * (3 - 2 * t);
+      zoom = flightFrom.zoom + (flightTo.zoom - flightFrom.zoom) * t;
+      panX = flightFrom.x + (flightTo.x - flightFrom.x) * t;
+      panY = flightFrom.y + (flightTo.y - flightFrom.y) * t;
+      if (t >= 1)
+        flying = false;
+      InvalidateRect(window, nullptr, FALSE);
+    }
+    if (atlasReady && atlasPublished.exchange(false)) {
+      for (size_t i = 0; i < atlas.size(); ++i) {
+        if (std::find(retainedCart.begin(), retainedCart.end(), atlas[i].id) != retainedCart.end())
+          cart.push_back(i);
+        if (atlas[i].id == retainedSelection)
+          pickedFunction = i;
+      }
+      std::error_code ec;
+      atlasModified = fs::last_write_time(confinedPath(repository, descriptor.database), ec);
+      atlasPoll = GetTickCount64();
+    }
+    if (screen == Screen::atlas && atlasReady && IsWindowVisible(window) && !IsIconic(parent) &&
+        GetTickCount64() - atlasPoll >= 1000) {
+      atlasPoll = GetTickCount64();
+      if (!liveAtlas) {
+        std::error_code ec;
+        auto changed = fs::last_write_time(confinedPath(repository, descriptor.database), ec);
+        if (!ec && changed != atlasModified)
+          loadAtlas();
+      } else if (policy.value("liveRefresh", false) &&
+                 GetTickCount64() / 30000 != (GetTickCount64() - 1000) / 30000)
+        loadAtlas();
+    }
+    if (serviceReady.exchange(false)) {
+      {
+        std::lock_guard<std::mutex> lock(outputMutex);
+        serviceResult = std::move(pendingServiceResult);
+      }
+      if (screen == Screen::requirements)
+        setText(body, preflightSummary(serviceResult));
+      if (screen == Screen::services) {
+        std::lock_guard<std::mutex> lock(outputMutex);
+        setText(body, serviceResult.dump(2));
+        EnableWindow(GetDlgItem(window, SERVICE_CONFIRM),
+                     serviceResult.value("requiresConfirmation", false));
+      }
+    }
+    if (inspectReady.exchange(false)) {
+      Json r;
+      {
+        std::lock_guard<std::mutex> lock(outputMutex);
+        r = std::move(inspectResult);
+      }
+      if (inspectGeneration == atlasGeneration && inspectIndex < atlas.size()) {
+        auto code =
+            r.contains("error")
+                ? r["error"].get<std::string>()
+                : numberedSource(r.value("source", Json::object()).value("source", std::string()));
+        sourceCache[inspectIndex] = code;
+        if (inspectIndex == pickedFunction) {
+          inspectText = code;
+          auto history = r.value("history", Json::object());
+          historyText = "Prior tries\n\n";
+          for (auto &attempt : history.value("attempts", Json::array())) {
+            historyText += std::string(std::min(100, attempt.value("depth", 0)) * 2, ' ') +
+                           attempt.value("attemptId", std::string("unknown")) + " · " +
+                           attempt.value("status", std::string("unknown"));
+            if (attempt.contains("divergences") && !attempt["divergences"].is_null())
+              historyText += " · divergence " + attempt["divergences"].dump();
+            if (attempt.contains("model") && attempt["model"].is_string())
+              historyText += " · " + attempt["model"].get<std::string>();
+            historyText += "\n";
+            if (attempt.contains("note") && attempt["note"].is_string())
+              historyText += "  " + attempt["note"].get<std::string>() + "\n";
+          }
+          if (history.contains("tip") && !history["tip"].is_null())
+            historyText += "\nBest near-miss tip\n" + history["tip"].dump(2);
+          if (history.contains("note") && history["note"].is_string())
+            historyText += "\n" + history["note"].get<std::string>();
+          if (screen == Screen::functionDetail)
+            setText(body, historyTab ? historyText : inspectText);
+        }
+      }
+    }
+    if (screen == Screen::functionDetail && inspectText == "Loading source..." && !inspectBusy &&
+        !inspectReady) {
+      if (sourceCache.count(pickedFunction)) {
+        inspectText = sourceCache[pickedFunction];
+        setText(body, inspectText);
+      } else
+        requestInspection(pickedFunction);
+    }
+    if (screen == Screen::atlas && atlasReady && lod.update(zoom) == 3 && !inspectBusy &&
+        !inspectReady)
+      for (auto hit : hits)
+        if ((size_t)hit.index == pickedFunction && hit.rect.right - hit.rect.left > 180 &&
+            hit.rect.bottom - hit.rect.top > 90 && !sourceCache.count(hit.index)) {
+          requestInspection(hit.index);
+          break;
+        }
     refreshAgents();
     if (screen == Screen::controller)
       for (size_t i = 0; i < agents.size(); ++i) {
@@ -1157,7 +2101,8 @@ struct ConsoleUI::Impl {
           setText(logBox, tailFile(a->log));
       }
     }
-    if (screen == Screen::controller || screen == Screen::atlas)
+    if ((screen == Screen::controller || screen == Screen::atlas || skin::animationEnabled()) &&
+        IsWindowVisible(window) && !IsIconic(parent))
       InvalidateRect(window, nullptr, FALSE);
   }
   static LRESULT CALLBACK proc(HWND h, UINT msg, WPARAM w, LPARAM l) {
@@ -1204,19 +2149,33 @@ struct ConsoleUI::Impl {
           FillRect(item->hDC, &item->rcItem, self->fieldBrush);
           if (item->itemID != (UINT)-1) {
             int n = (int)SendMessageW(item->hwndItem, CB_GETLBTEXTLEN, item->itemID, 0);
-            std::wstring title(std::max(0,n)+1, 0);
-            if (n >= 0) SendMessageW(item->hwndItem, CB_GETLBTEXT, item->itemID, (LPARAM)title.data());
+            std::wstring title(std::max(0, n) + 1, 0);
+            if (n >= 0)
+              SendMessageW(item->hwndItem, CB_GETLBTEXT, item->itemID, (LPARAM)title.data());
             auto oldFont = SelectObject(item->hDC, self->font);
-            SetTextColor(item->hDC, skin::text()); SetBkMode(item->hDC, TRANSPARENT);
-            RECT bounds = item->rcItem; bounds.left += 8; bounds.right -= 4;
-            DrawTextW(item->hDC, title.c_str(), -1, &bounds, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+            SetTextColor(item->hDC, skin::text());
+            SetBkMode(item->hDC, TRANSPARENT);
+            RECT bounds = item->rcItem;
+            bounds.left += 8;
+            bounds.right -= 4;
+            DrawTextW(item->hDC, title.c_str(), -1, &bounds,
+                      DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
             SelectObject(item->hDC, oldFont);
           }
           return TRUE;
         }
         break;
       }
-      case WM_CTLCOLORSTATIC:
+      case WM_CTLCOLORSTATIC: {
+        wchar_t name[32]{};
+        GetClassNameW((HWND)l, name, 32);
+        if (std::wstring(name) == L"Static") {
+          SetTextColor((HDC)w, skin::text());
+          SetBkMode((HDC)w, TRANSPARENT);
+          return (LRESULT)GetStockObject(NULL_BRUSH);
+        }
+      }
+        [[fallthrough]];
       case WM_CTLCOLOREDIT:
       case WM_CTLCOLORLISTBOX:
         SetTextColor((HDC)w, skin::text());
@@ -1236,19 +2195,143 @@ struct ConsoleUI::Impl {
         if (self->screen == Screen::atlas) {
           POINT p{(short)LOWORD(l), (short)HIWORD(l)};
           ScreenToClient(h, &p);
-          auto old = self->zoom;
-          self->zoom = std::clamp(old * (GET_WHEEL_DELTA_WPARAM(w) > 0 ? 1.25 : 0.8), 1., 64.);
-          double ratio = self->zoom / old;
-          self->panX = (p.x - 18) - (p.x - 18 - self->panX) * ratio;
-          self->panY = (p.y - 100) - (p.y - 100 - self->panY) * ratio;
+          self->camera.zoomAt(GET_WHEEL_DELTA_WPARAM(w) > 0 ? 1.25 : .8, p.x - 18, p.y - 100,
+                              self->width - 390, self->height - 170);
           InvalidateRect(h, nullptr, FALSE);
           return 0;
         }
         self->scroll = std::max(0, self->scroll - GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA * 80);
         self->build();
         return 0;
+      case WM_KEYDOWN:
+        if (self->screen == Screen::atlas) {
+          self->viewerKey(w);
+          return 0;
+        }
+        break;
+      case WM_MBUTTONDOWN:
+        if (self->screen == Screen::atlas) {
+          self->panning = true;
+          self->dragLast = {(short)LOWORD(l), (short)HIWORD(l)};
+          SetCapture(h);
+        }
+        return 0;
+      case WM_MBUTTONUP:
+        self->panning = false;
+        ReleaseCapture();
+        return 0;
+      case WM_RBUTTONDOWN: {
+        if (self->screen != Screen::atlas)
+          break;
+        POINT p{(short)LOWORD(l), (short)HIWORD(l)};
+        if (p.x >= 18 && p.x < self->width - 372 && p.y >= 100 && p.y < self->height - 70) {
+          SetFocus(h);
+          self->flying = false;
+          self->marquee = true;
+          self->additiveMarquee = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+          self->dragStart = self->dragEnd = p;
+          SetCapture(h);
+        }
+        return 0;
+      }
+      case WM_RBUTTONUP:
+        if (self->marquee)
+          return SendMessageW(h, WM_LBUTTONUP, w, l);
+        return 0;
+      case WM_CONTEXTMENU:
+        if (self->screen == Screen::atlas)
+          return 0;
+        break;
+      case WM_LBUTTONDOWN: {
+        if (self->screen != Screen::atlas)
+          break;
+        POINT p{(short)LOWORD(l), (short)HIWORD(l)};
+        SetFocus(h);
+        self->flying = false;
+        if (PtInRect(&self->miniBounds, p)) {
+          self->miniDragging = true;
+          self->moveMini(p);
+          SetCapture(h);
+        } else if ((GetKeyState(VK_SHIFT) & 0x8000) && p.x >= 18 && p.x < self->width - 372 &&
+                   p.y >= 100 && p.y < self->height - 70) {
+          self->marquee = true;
+          self->dragStart = self->dragEnd = p;
+          self->additiveMarquee = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+          SetCapture(h);
+        } else if (p.x >= 18 && p.x < self->width - 372 && p.y >= 100 && p.y < self->height - 70) {
+          self->leftDown = true;
+          self->dragged = false;
+          self->dragStart = self->dragLast = p;
+          SetCapture(h);
+        }
+        return 0;
+      }
+      case WM_MOUSEMOVE: {
+        POINT p{(short)LOWORD(l), (short)HIWORD(l)};
+        if (self->leftDown && !self->marquee && !self->miniDragging) {
+          if (std::abs(p.x - self->dragStart.x) + std::abs(p.y - self->dragStart.y) > 4)
+            self->dragged = true;
+          if (self->dragged) {
+            self->panX += p.x - self->dragLast.x;
+            self->panY += p.y - self->dragLast.y;
+            self->dragLast = p;
+            self->camera.clamp(self->width - 390, self->height - 170);
+          }
+        }
+        if (self->panning) {
+          self->panX += p.x - self->dragLast.x;
+          self->panY += p.y - self->dragLast.y;
+          self->dragLast = p;
+          self->camera.clamp(self->width - 390, self->height - 170);
+        }
+        if (self->miniDragging)
+          self->moveMini(p);
+        if (self->marquee)
+          self->dragEnd = p;
+        if (self->panning || self->marquee || self->miniDragging || self->leftDown)
+          InvalidateRect(h, nullptr, FALSE);
+        return 0;
+      }
+      case WM_CAPTURECHANGED:
+        self->panning = self->marquee = self->miniDragging = self->leftDown = false;
+        return 0;
+      case WM_LBUTTONDBLCLK:
+        if (self->screen == Screen::atlas && self->pickedFunction < self->atlas.size())
+          self->inspectFunction();
+        return 0;
       case WM_LBUTTONUP: {
         POINT point{(short)LOWORD(l), (short)HIWORD(l)};
+        bool moved = self->leftDown && self->dragged;
+        self->leftDown = false;
+        if (moved) {
+          ReleaseCapture();
+          return 0;
+        }
+        if (self->miniDragging) {
+          self->miniDragging = false;
+          ReleaseCapture();
+          return 0;
+        }
+        if (self->marquee) {
+          auto selected =
+              marqueeTiles(self->tiles, {(self->dragStart.x - 18 - self->panX) / self->zoom,
+                                         (self->dragStart.y - 100 - self->panY) / self->zoom,
+                                         (point.x - self->dragStart.x) / self->zoom,
+                                         (point.y - self->dragStart.y) / self->zoom});
+          if (!self->additiveMarquee)
+            self->cart.clear();
+          for (auto index : selected)
+            if (self->atlas[index].state != "matched" && !exemptTarget(self->atlas[index].row) &&
+                (!self->atlas[index].row.contains("claim") ||
+                 self->atlas[index].row["claim"].is_null()) &&
+                std::find(self->cart.begin(), self->cart.end(), index) == self->cart.end())
+              self->cart.push_back(index);
+          self->marquee = false;
+          ReleaseCapture();
+          InvalidateRect(h, nullptr, FALSE);
+          return 0;
+        }
+        ReleaseCapture();
         for (auto hit : self->hits)
           if (PtInRect(&hit.rect, point)) {
             if (self->screen == Screen::controller) {
@@ -1257,7 +2340,9 @@ struct ConsoleUI::Impl {
             } else if (self->screen == Screen::atlas) {
               auto &f = self->atlas.at(hit.index);
               self->pickedFunction = hit.index;
-              if (GetKeyState(VK_CONTROL) & 0x8000) {
+              self->flyFunction(hit.index);
+              if ((GetKeyState(VK_CONTROL) & 0x8000) && f.state != "matched" &&
+                  !exemptTarget(f.row) && (!f.row.contains("claim") || f.row["claim"].is_null())) {
                 auto it = std::find(self->cart.begin(), self->cart.end(), hit.index);
                 if (it == self->cart.end())
                   self->cart.push_back(hit.index);
@@ -1280,9 +2365,11 @@ struct ConsoleUI::Impl {
   }
 };
 ConsoleUI::ConsoleUI(HWND parent, HFONT font, fs::path repo, fs::path data, Settings settings,
-                     std::function<void()> git, std::function<void(const Settings &)> save)
+                     std::function<void()> git, std::function<void(const Settings &)> save,
+                     bool viewerOnly, std::string module, std::function<void(Json)> draftAdded)
     : impl(std::make_unique<Impl>(parent, font, std::move(repo), std::move(data),
-                                  std::move(settings), std::move(git), std::move(save))) {}
+                                  std::move(settings), std::move(git), std::move(save), viewerOnly,
+                                  std::move(module), std::move(draftAdded))) {}
 ConsoleUI::~ConsoleUI() = default;
 void ConsoleUI::show(bool visible, bool atlas) {
   if (visible) {
@@ -1354,12 +2441,54 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
               std::to_string(pumps));
     capture(directory / "console-4.bmp");
   }
-  for (auto screen : {Screen::controller, Screen::atlas, Screen::encyclopedia, Screen::settings,
-                      Screen::profile, Screen::tour}) {
+  for (auto screen :
+       {Screen::controller, Screen::atlas, Screen::encyclopedia, Screen::settings, Screen::profile,
+        Screen::tour, Screen::connections, Screen::services, Screen::queue, Screen::requirements}) {
     impl->navigate(screen);
     ShowWindow(impl->window, SW_SHOW);
     capture(directory / fs::u8path("console-" + std::to_string((int)screen) + ".bmp"));
   }
+  if (impl->atlas.empty())
+    throw std::runtime_error("GUI viewer fixture has no functions");
+  impl->pickedFunction = 0;
+  impl->inspectFunction();
+  auto waitFor = [&](const std::function<bool()> &pending) {
+    auto started = GetTickCount64();
+    while (pending()) {
+      if (GetTickCount64() - started > 15000)
+        throw std::runtime_error("GUI parity workflow timed out");
+      MSG m;
+      while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&m);
+        DispatchMessageW(&m);
+      }
+      impl->tick();
+      Sleep(10);
+    }
+    impl->tick();
+  };
+  waitFor([&] { return impl->inspectBusy.load() || impl->inspectReady.load(); });
+  if (impl->inspectText.find("1  int fixture_source") == std::string::npos)
+    throw std::runtime_error("Native source inspection did not load numbered source");
+  capture(directory / "console-8.bmp");
+  impl->openModule(impl->atlas[0].module);
+  auto &popup = *impl->popups.back();
+  if (popup.ui->impl->loader.joinable())
+    popup.ui->impl->loader.join();
+  popup.ui->impl->pickedFunction = 1;
+  popup.ui->impl->action(ATLAS_CART, BN_CLICKED);
+  if (impl->cart.empty() || popup.ui->impl->fleet)
+    throw std::runtime_error("Module popout cart relay or controller isolation failed");
+  SendMessageW(popup.window, WM_CLOSE, 0, 0);
+  impl->navigate(Screen::services);
+  impl->serviceCall("preflight", Json::object());
+  waitFor([&] { return impl->serviceBusy.load() || impl->serviceReady.load(); });
+  if (impl->serviceResult.contains("error"))
+    throw std::runtime_error(impl->serviceResult.dump());
+  capture(directory / "console-10.bmp");
+  write(directory / "viewer-gui-report.txt",
+        "PASS: native source/history inspection and asynchronous preflight screens; "
+        "viewport/LOD/marquee validated by unit tests.");
   impl->navigate(Screen::controller);
 }
 } // namespace lite

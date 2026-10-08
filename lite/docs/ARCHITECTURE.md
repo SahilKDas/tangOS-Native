@@ -65,3 +65,9 @@ Descriptor parsing and argv expansion are isolated in descriptor; atlas_layout p
 ## Backend parity services
 
 Backend owns a native JSON request dispatcher, atomic local preferences/project/statistics/report stores, repository-bound single-use mutation previews, source/attempt/history queries and user-configured service adapters. Transport is injected for unit tests and WinHTTP in the packaged executable. RemoteLease owns atomic range requests and a cancellable heartbeat/release lifecycle for opted-in API/CLI work. Fleet feeds statistics/harvest records after independent verification and refuses held targets/transcribed source. MCP exposes read-only backend methods and filtered tool discovery; local users confirm writes through the executable backend interface. Connection profiles are disabled by default and reference local vault/environment credential names; no owner credentials or cloud service are bundled.
+
+## Parity additions
+
+`viewer.cpp` owns testable camera, LOD, marquee and directional navigation math. `console_ui.cpp` paints native views and publishes source/history/services results from worker threads using synchronized handoff; generation IDs discard stale Atlas responses. Module windows have Viewer state and relay drafts to the parent without acquiring another fleet lock. Background rendering and font/frame caches remain in the TinySkia/skin layer.
+
+Backend policies and statistics are shared across manual execution, fleet and MCP. Repeated batch logs append; persisted assigned-target lists distinguish the current batch from subsequently queued work. Explicit sync binds confirmation to repository content/refs, backs up allowed changes and pins recovery history before resetting. Original-code comparison tests run retained TypeScript as development oracles, outside the packaged runtime. The parity inventory distinguishes tested behavior from unresolved public contracts.

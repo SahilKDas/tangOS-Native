@@ -8,7 +8,7 @@
 - Every process runs inside a kill-on-close Job Object, assigned while suspended.
   Failure to contain the process refuses execution. Cancellation terminates
   descendants. Durable logs are flushed continuously; UI output is bounded.
-- No background publication, reset, clean, force push, or PR merge is exposed.
+- No background publication, reset, clean, force push, or PR merge is exposed. Explicit sync requires a content/ref-bound preview and confirmation. It pins the prior HEAD in a recovery ref, saves allowed changed files, then resets to the reviewed SHA. Only explicitly previewed regular untracked files can be removed; protected assets and port-only source changes block or survive the operation.
   Agent Review explicitly stages all audited changes in its isolated worktree.
   Explicit stage paths reject traversal and protected paths. Merge/rebase/pull
   require a clean tree; operations that alter history/tree require confirmation.
@@ -75,3 +75,5 @@ Repository scripts and CLI agents are trusted executable code, not sandboxed app
 ## User-owned connections and backend requests
 
 No external connection profile is enabled by default. Each URL/method/key reference is configured locally by the user. Native HTTPS requests refuse redirects and URL credentials, validate header text, bound sizes/timeouts, and redact selected environment/vault secrets in responses. HTTP is accepted only at 127.0.0.1 for local services/tests. JSON settings reject credential fields; reports omit vault/connection values. Mutation previews are single-use, time-limited and bound to method, arguments, repository-content hashes and settings. Agents cannot authorize these mutations via MCP. Optional automatic lease profiles are user-approved connections, with atomic acquisition and heartbeat cancellation; service TTLs remain necessary for network/process failure recovery. Safe mode and tool visibility apply at execution as well as discovery. No auto-push is accepted. Source transcription policy mirrors Console's whole-file HAND-ASM/NONMATCHING banner exceptions.
+
+Tool visibility and near-miss policy are enforced by manual execution and the fleet/MCP paths. Connection changes require exact configuration previews; profiles remain disabled until the user enables them. Source/history reads remain confined to the selected checkout, and late asynchronous Viewer responses cannot cross repository-data generations. Repeated batches append logs rather than truncating them.

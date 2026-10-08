@@ -26,7 +26,7 @@ struct AgentState {
   AgentSpec spec;
   std::string id, phase = "idle", detail, branch, lastLine;
   fs::path worktree, log, prompt, worklist;
-  Json queue = Json::array();
+  Json queue = Json::array(), assigned = Json::array();
   int completed = 0, total = 0;
   bool active = false;
 };
@@ -65,6 +65,7 @@ public:
   std::vector<AgentState> snapshot() const;
   void enqueue(const std::string &id, const Json &rows);
   void clear(const std::string &id);
+  void editQueue(const std::string &id, size_t index, int direction, bool remove = false);
   void start(const std::string &id, bool execute = true);
   void land(const std::string &id);
   void stop(const std::string &id);

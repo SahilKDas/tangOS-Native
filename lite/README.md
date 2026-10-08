@@ -1,4 +1,4 @@
-# TangOS Lite 0.4.0
+# TangOS Lite 0.5.0
 
 Click Tango or use **Alt+Space → About** for embedded third-party notices.
 
@@ -146,3 +146,9 @@ SM64DS-specific check adapters appear only when their scripts are found.
 ## Native backend services
 
 See [backend guide](docs/BACKEND.md) for project registration, source/history, claims/leases, preferences, reports, recovery, and confirmed Git helpers. All external connections and credentials belong to the user. No owner API key or hosted service is required to build or test.
+
+## Reference verification
+
+Development tests additionally use Node 26 to run retained original Console policies as comparison oracles. Node, TypeScript and CSS are not included in TangOSLite.exe. `test_reference_parity.py` compares source classification, adaptive roles, pool difficulty and function history; `test_statistics_reference.py` compares incremental unique-function statistics. `audit_parity.py --require-full` refuses a full-parity claim while public contracts remain unverified.
+
+Version 0.5 adds native source/history inspection, minimap/marquee/navigation/module windows, animated backgrounds, Connections/Requirements/Services screens, queue editing and retention, unique-function statistics and safer explicit sync backups. Full parity remains underway, as documented in UI-PARITY.md.
