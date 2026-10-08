@@ -21,7 +21,7 @@ def main():
         stats=tmp/'statistics.ts';stats.write_text((root/'console/src/main/aiStats.ts').read_text(encoding='utf-8').replace("'./adaptiveRole'",repr(adaptive.as_uri())).replace("'../shared/types'",repr((root/'console/src/shared/types.ts').as_uri())),encoding='utf-8')
         fixture=tmp/'rows.json';fixture.write_text(json.dumps(rows))
         runner=tmp/'reference.mjs';runner.write_text("import fs from 'node:fs'; import {aiStats} from "+json.dumps(stats.as_uri())+";const rows=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));let outputs=[];for(const r of rows){aiStats.recordMatch('fixture',r.matched,r.size,r.name);if(r.divergences>0)aiStats.recordNearMiss('fixture',r.name,r.divergences,r.size);if(r.tokensIn||r.tokensOut)aiStats.recordTokens('fixture',r.tokensIn||0,r.tokensOut||0);outputs.push(JSON.parse(JSON.stringify({entry:aiStats.serialize().fixture,best:aiStats.serializeBestDiv()})));}process.stdout.write(JSON.stringify(outputs));",encoding='utf-8')
-        run=subprocess.run(['node','--disable-warning=MODULE_TYPELESS_PACKAGE_JSON',str(runner),str(fixture)],capture_output=True,text=True,timeout=20);assert run.returncode==0,run.stderr
+        run=subprocess.run(['node','--disable-warning=MODULE_TYPELESS_PACKAGE_JSON',str(runner),str(fixture)],capture_output=True,text=True,encoding="utf-8",timeout=20);assert run.returncode==0,run.stderr
         expected=json.loads(run.stdout);entry={};best={}
         for i,(row,want) in enumerate(zip(rows,expected)):
             request=tmp/'request.json';response=tmp/'response.json'

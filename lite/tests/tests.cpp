@@ -1,5 +1,6 @@
 #include "repository.h"
 #include "viewer.h"
+#include "help.h"
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
@@ -245,6 +246,15 @@ int main() {
                read(temp / "cancel.log").find("before cancel") != std::string::npos,
            "cancel descendants and preserve log");
     runner.reset();
+    auto guide = parseGuide(
+        "# comment\n\n[thinking] @settings\nKeys\nLocal credentials\nonly\n\nPlain title\nBody",
+        true);
+    expect(guide.size() == 2 && guide[0]["emotion"] == "thinking" &&
+               guide[0]["target"] == "[data-tour=\"settings\"]" &&
+               guide[0]["body"] == "Local credentials only",
+           "reference tour options and paragraphs");
+    expect(parseGuide("# comment\n\n[smile] Advice\nBody", false)[0]["title"] == "Advice",
+           "editable tip emotion prefix");
     auto missing = runner.run({{"TangOSLite-no-such-executable"}, r});
     expect(missing.code != 0, "missing executable actionable failure");
     expect(fs::canonical(temp.parent_path()) == fs::canonical(fs::temp_directory_path()) &&

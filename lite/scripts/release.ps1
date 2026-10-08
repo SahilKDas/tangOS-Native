@@ -20,6 +20,10 @@ python "$source/tests/test_reference_parity.py" --exe "$out/build-a/TangOSLite.e
 if ($LASTEXITCODE) { throw 'Original Console comparisons failed' }
 python "$source/tests/test_statistics_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original statistics comparisons failed' }
+python "$source/tests/test_preflight_reference.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original preflight comparisons failed' }
+python "$source/tests/test_help_reference.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original help comparisons failed' }
 
 $a = "$out/build-a/TangOSLite.exe"
 $b = "$out/build-b/TangOSLite.exe"
@@ -29,10 +33,12 @@ Copy-Item -LiteralPath $a -Destination "$out/TangOSLite.exe"
 $size = (Get-Item -LiteralPath "$out/TangOSLite.exe").Length
 if ($size -ge 50000000) { throw 'Executable exceeds strict 50 MB limit' }
 & "$source/scripts/gui-smoke.ps1" -Executable "$out/TangOSLite.exe" -FixtureDir "$out/gui-fixture"
+& "$source/scripts/gui-smoke.ps1" -Executable "$out/TangOSLite.exe" -FixtureDir "$out/gui-descriptor-missing" -MissingDescriptor
+& "$source/scripts/gui-smoke.ps1" -Executable "$out/TangOSLite.exe" -FixtureDir "$out/gui-descriptor-invalid" -InvalidDescriptor
 $imports = & objdump -p "$out/TangOSLite.exe" | Select-String 'DLL Name:' | ForEach-Object { $_.Line.Trim() }
 $compiler = (& g++ --version | Select-Object -First 1)
 $cmake = (& cmake --version | Select-Object -First 1)
-$report = "TangOS Lite 0.5.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
+$report = "TangOS Lite 0.6.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
 Set-Content -LiteralPath "$out/SIZE.txt" -Value $report -Encoding utf8
 Copy-Item -LiteralPath "$source/README.md" -Destination "$out/README.md"
 Copy-Item -LiteralPath "$source/../LICENSE" -Destination "$out/LICENSE"

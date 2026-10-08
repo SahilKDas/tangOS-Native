@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable, [string]$FixtureDir = "$PSScriptRoot/../out/gui-fixture")
+param([Parameter(Mandatory)][string]$Executable, [string]$FixtureDir = "$PSScriptRoot/../out/gui-fixture", [switch]$MissingDescriptor, [switch]$InvalidDescriptor)
 $ErrorActionPreference = 'Stop'
 $fixture = [IO.Path]::GetFullPath($FixtureDir)
 if (Test-Path -LiteralPath $fixture) { throw "Use a fresh fixture directory: $fixture" }
@@ -21,6 +21,9 @@ if ($LASTEXITCODE) { throw 'Fixture git init failed' }
 git -C $repo -c user.name=Lite -c user.email=lite@example.invalid add tools/port_refcheck.py port/source.cpp tangos.json chaos-db.json
 git -C $repo -c user.name=Lite -c user.email=lite@example.invalid commit -m 'GUI fixture'
 if ($LASTEXITCODE) { throw 'Fixture commit failed' }
+if ($MissingDescriptor) { Remove-Item -LiteralPath "$repo/tangos.json" }
+if ($InvalidDescriptor) { [IO.File]::WriteAllText("$repo/tangos.json", '{"invalid":"fixture"}') }
+
 $exe = (Resolve-Path -LiteralPath $Executable).Path
 $hashFixture = Join-Path $fixture 'hash-fixture.txt'
 [IO.File]::WriteAllText($hashFixture, 'abc', [Text.Encoding]::ASCII)
@@ -42,12 +45,18 @@ $report = Join-Path $fixture 'gui-smoke-report.txt'
 if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $report)) { throw "GUI workflow failed: exit $($process.ExitCode)" }
 $result = Get-Content -LiteralPath $report -Raw
 if (-not $result.StartsWith('PASS')) { throw $result }
-foreach ($image in @('landing', 'controller', 'repository', 'workspace', 'theme-0', 'theme-1', 'theme-2', 'theme-3', 'theme-4', 'console-0', 'console-1', 'console-2', 'console-3', 'console-4', 'console-5', 'console-6', 'console-8', 'console-9', 'console-10', 'console-11', 'console-12')) {
+$images = @('landing', 'controller', 'repository', 'workspace', 'theme-0', 'theme-1', 'theme-2', 'theme-3', 'theme-4', 'console-0', 'console-1', 'console-2', 'console-3', 'console-4', 'console-5', 'console-6', 'console-8', 'console-9', 'console-10', 'console-11', 'console-12', 'tour-expression', 'tips')
+if ($MissingDescriptor -or $InvalidDescriptor) { $images = @('landing','controller','repository','workspace','theme-0','theme-1','theme-2','theme-3','theme-4','descriptor-missing','descriptor-generated','descriptor-review') }
+foreach ($image in $images) {
   $path = Join-Path $fixture "$image.bmp"
   if (-not (Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -lt 100000) { throw "Missing native window render: $image" }
 }
+if (-not ($MissingDescriptor -or $InvalidDescriptor)) {
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'fleet-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Packaged fleet workflow failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'viewer-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Native viewer parity workflow failed' }
+} else {
+if (-not (Get-Content -LiteralPath (Join-Path $fixture 'descriptor-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Descriptor gate workflow failed' }
+}
 Write-Output $result
 # This repository was created by this script. Resolve and confine cleanup before removal.
 $resolvedRepo = (Resolve-Path -LiteralPath $repo).Path

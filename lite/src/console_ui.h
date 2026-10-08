@@ -3,6 +3,7 @@
 #include "skin.h"
 #include <functional>
 namespace lite {
+constexpr UINT CONSOLE_RELOAD = WM_APP + 40, CONSOLE_PICK_REPO = WM_APP + 41;
 class ConsoleUI {
   struct Impl;
   std::unique_ptr<Impl> impl;

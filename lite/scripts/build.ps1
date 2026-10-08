@@ -15,5 +15,9 @@ python "$PSScriptRoot/../tests/test_reference_parity.py" --exe "$BuildDir/TangOS
 if ($LASTEXITCODE) { throw 'Original Console comparisons failed' }
 python "$PSScriptRoot/../tests/test_statistics_reference.py" --exe "$BuildDir/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original statistics comparisons failed' }
+python "$PSScriptRoot/../tests/test_preflight_reference.py" --exe "$BuildDir/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original preflight comparisons failed' }
+python "$PSScriptRoot/../tests/test_help_reference.py" --exe "$BuildDir/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original help comparisons failed' }
 python "$PSScriptRoot/../tests/audit_parity.py"
 if ($LASTEXITCODE) { throw 'Parity inventory failed' }

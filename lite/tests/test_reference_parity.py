@@ -58,7 +58,7 @@ def main():
             "import {readFunctionHistory} from "+json.dumps((root / "console/src/main/attemptHistory.ts").as_uri())+";\n"+
             "const f=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));\n"+
             "process.stdout.write(JSON.stringify({sources:f.sources.map(classifySource),roles:f.roles.map(r=>effectiveRole(demotionFor(r.role,r,r.pool)||r.role,r.pool)),pools:f.pools.map(p=>poolDifficulty(p)),history:readFunctionHistory(f.repo,{},f.query)}));", encoding="utf-8")
-        run = subprocess.run(["node","--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",str(reference),str(fixture)],capture_output=True,text=True,timeout=20)
+        run = subprocess.run(["node","--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",str(reference),str(fixture)],capture_output=True,text=True,encoding="utf-8",timeout=20)
         if run.returncode:
             raise AssertionError(run.stderr)
         expected = json.loads(run.stdout)

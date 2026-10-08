@@ -1,4 +1,5 @@
 #include "console_ui.h"
+#include "help.h"
 #include "atlas_layout.h"
 #include "viewer.h"
 #include "backend.h"
@@ -109,7 +110,8 @@ enum class Screen {
   connections,
   services,
   queue,
-  requirements
+  requirements,
+  descriptorGate
 };
 constexpr int REQUIREMENTS = 4480, REQ_REFRESH = 4481, REQ_TERMINAL = 4482, REQ_GITHUB = 4483,
               REQ_COPY = 4484;
@@ -118,6 +120,9 @@ constexpr int QUEUE = 4470, QUEUE_UP = 4471, QUEUE_DOWN = 4472, QUEUE_REMOVE = 4
 constexpr int CONNECTIONS = 4450, CONNECTION_LIST = 4451, CONNECTION_SAVE = 4452, SERVICES = 4453,
               SERVICE_RUN = 4454, SERVICE_CONFIRM = 4455;
 constexpr int ATLAS_INSPECT = 4400, ATLAS_MODULE = 4401, ATLAS_SOURCE = 4402, ATLAS_HISTORY = 4403;
+constexpr int HELP_EDIT = 4600, HELP_TIPS = 4601;
+constexpr int DESC_SCAN = 4610, DESC_PREVIEW = 4611, DESC_CONFIRM = 4612, DESC_RELOAD = 4613,
+              DESC_FOLDER = 4614;
 struct Hit {
   RECT rect;
   int index;
@@ -146,6 +151,10 @@ struct ConsoleUI::Impl {
   std::string selectedId, profileId, toolId;
   bool allowWrites = false, advancedMode = false, runDock = false, rebuilding = false;
   int width = 800, height = 720, tourStep = 0, scroll = 0;
+  bool tipsMode = false;
+  Json guideSteps = Json::array();
+  std::string descriptorOperation;
+  Json descriptorDraft = Json::object(), descriptorWriteArgs = Json::object();
   std::vector<AtlasFunction> atlas;
   std::vector<size_t> filtered, cart;
   std::vector<Hit> hits;
@@ -190,7 +199,11 @@ struct ConsoleUI::Impl {
   Json policy = Json::object(), connectionProfiles = Json::object(), serviceResult = Json::object(),
        pendingServiceResult, serviceRequest = Json::object();
   std::vector<std::string> connectionNames;
-  std::string serviceMethod = "preflight";
+  std::string serviceMethod = "preflight", activeServiceMethod;
+  Json agentStats = Json::object(), pendingStats;
+  std::thread statsWorker;
+  std::atomic<bool> statsBusy{false}, statsReady{false};
+  ULONGLONG statsPoll = 0;
   std::thread serviceWorker;
   std::atomic<bool> serviceBusy{false}, serviceReady{false};
   HWND serviceChoice = nullptr, serviceArguments = nullptr;
@@ -263,6 +276,8 @@ struct ConsoleUI::Impl {
     } else {
       atlasError = descriptorError;
       atlasReady = true;
+      if (!viewerOnly)
+        screen = Screen::descriptorGate;
     }
     WNDCLASSW wc{};
     wc.lpfnWndProc = proc;
@@ -295,6 +310,8 @@ struct ConsoleUI::Impl {
       inspector.join();
     if (serviceWorker.joinable())
       serviceWorker.join();
+    if (statsWorker.joinable())
+      statsWorker.join();
     DestroyWindow(window);
     if (fieldBrush)
       DeleteObject(fieldBrush);
@@ -369,7 +386,27 @@ struct ConsoleUI::Impl {
     refreshAgents();
     destroyControls();
     int cw = width - 356;
-    if (screen == Screen::controller) {
+    if (screen == Screen::descriptorGate) {
+      label(fs::exists(repository / "tangos.json") ? "That tangos.json has problems"
+                                                   : "No tangos.json here yet",
+            18, 62, cw - 36, 36);
+      label(descriptorError, 18, 106, cw - 36, 80);
+      argsBox = edit(descriptorDraft.empty() ? "Generate a draft, review it, and preview the write."
+                                             : descriptorDraft.dump(2),
+                     0, 18, 192, cw - 36, height - 370, ES_MULTILINE | WS_VSCROLL | WS_HSCROLL);
+      button("Generate descriptor", DESC_SCAN, 18, height - 160, 178);
+      button("Preview write", DESC_PREVIEW, 204, height - 160, 136);
+      button("Confirm write", DESC_CONFIRM, 348, height - 160, 140);
+      EnableWindow(GetDlgItem(window, DESC_CONFIRM),
+                   serviceResult.value("requiresConfirmation", false) &&
+                       descriptorOperation == "descriptor.write");
+      button("Reload descriptor", DESC_RELOAD, 18, height - 112, 164);
+      button("Different folder", DESC_FOLDER, 190, height - 112, 146);
+      body = edit(serviceResult.empty()
+                      ? "This changes only tangos.json after a concrete preview and confirmation."
+                      : serviceResult.dump(2),
+                  0, width - 332, 72, 310, height - 142, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
+    } else if (screen == Screen::controller) {
       cardIds.clear();
       int cardY = 64 - scroll;
       for (size_t i = 0; i < agents.size(); ++i) {
@@ -706,24 +743,17 @@ struct ConsoleUI::Impl {
       button("Previous", TOUR_PREVIOUS, 50, height - 108, 110);
       button("Next", TOUR_NEXT, 168, height - 108, 100);
       button("Done", TOUR_CLOSE, 276, height - 108, 96);
-      const std::vector<std::string> tips = {
-          "1 / 5 · Choose your repository\n\nTangOS Lite discovers the project's tangos.json "
-          "descriptor. Scripts, compiler, ROM and private assets remain yours. Review repository "
-          "instructions before executing code.",
-          "2 / 5 · Chaos Controller\n\nAdd an API, CLI or MCP agent. Set its model, role, "
-          "reasoning effort, attempts and batch size. Enable writes in Settings, then Go. Each "
-          "agent receives a separate worktree and the repository's scoped AGENTS.md instructions.",
-          "3 / 5 · Chaos Viewer\n\nSearch functions, inspect module and match state, select "
-          "targets and add them to the cart. Assign the cart to an agent or use a "
-          "descriptor-defined scheduler. Active queues refuse duplicate target claims.",
-          "4 / 5 · Encyclopedia and run dock\n\nSearch descriptor tools by category, label and "
-          "argument. Inspect commands and argument definitions. Supply values as JSON, preview "
-          "execution, and watch complete logs without blocking the window.",
-          "5 / 5 · Verify and review\n\nStop cancels the process tree and retains output. A driver "
-          "exit does not prove a match. Inspect independent checks and the complete diff before "
-          "committing. Merge the reviewed branch and preview outgoing commits before pushing."};
-      body = edit(tips[tourStep], 0, 50, 102, width - 100, height - 254,
-                  ES_MULTILINE | ES_READONLY | WS_VSCROLL);
+      guideSteps = readGuide(data, !tipsMode);
+      tourStep = std::clamp(tourStep, 0, std::max(0, (int)guideSteps.size() - 1));
+      auto &step = guideSteps.at(tourStep);
+      body =
+          edit(std::to_string(tourStep + 1) + " / " + std::to_string(guideSteps.size()) + " · " +
+                   step.value("title", std::string()) + "\n\n" + step.value("body", std::string()),
+               0, 50, 102, width - 456, height - 254, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
+      button("Edit text", HELP_EDIT, 384, height - 108, 100);
+      button(tipsMode ? "Replay tour" : "Tips", HELP_TIPS, 492, height - 108, 110);
+      EnableWindow(GetDlgItem(window, TOUR_PREVIOUS), tourStep > 0);
+      EnableWindow(GetDlgItem(window, TOUR_NEXT), tourStep + 1 < (int)guideSteps.size());
     }
     if (viewerOnly)
       for (int id : std::vector<int>{HOME, ADD_CART, ENCYCLOPEDIA, ATLAS_MODULE}) {
@@ -1005,6 +1035,27 @@ struct ConsoleUI::Impl {
       GlobalFree(memory);
     CloseClipboard();
   }
+  std::string statisticsSummary(const std::string &id) const {
+    auto stat = agentStats.value(id, Json::object());
+    std::string out = "Lifetime statistics\n\nDeclared matches: " +
+                      std::to_string(stat.value("declaredMatches", 0)) +
+                      "\nUnique attempted functions: " + std::to_string(stat.value("attempts", 0)) +
+                      "\nNear misses: " + std::to_string(stat.value("nearMisses", 0));
+    out += "\nHit rate: " + std::to_string((int)std::round(stat.value("hitRate", 0.0) * 100)) + "%";
+    if (stat.contains("tokensIn"))
+      out += "\nTokens in: " + std::to_string(stat.value("tokensIn", 0LL));
+    if (stat.contains("tokensOut"))
+      out += "\nTokens out: " + std::to_string(stat.value("tokensOut", 0LL));
+    if (stat.contains("tokensPerMatch"))
+      out += "\nTokens per declared match: " + std::to_string(stat.value("tokensPerMatch", 0LL));
+    if (stat.contains("bySize")) {
+      out += "\n\nSize · attempted / declared matches";
+      for (auto i = stat["bySize"].begin(); i != stat["bySize"].end(); ++i)
+        out += "\n" + i.key() + " · " + std::to_string(i.value().value("attempts", 0)) + " / " +
+               std::to_string(i.value().value("matches", 0));
+    }
+    return out + "\n\nDeclarations require independent matching proof before publication.";
+  }
   static std::string preflightSummary(const Json &r) {
     if (r.empty())
       return "Checking repository requirements...";
@@ -1044,6 +1095,7 @@ struct ConsoleUI::Impl {
     if (serviceWorker.joinable())
       serviceWorker.join();
     serviceBusy = true;
+    activeServiceMethod = method;
     auto prefs = settings;
     auto keys = vault.values();
     serviceWorker = std::thread([this, method, args, prefs, keys] {
@@ -1225,6 +1277,7 @@ struct ConsoleUI::Impl {
                         : screen == Screen::settings       ? "Settings"
                         : screen == Screen::profile        ? "Connect AI"
                         : screen == Screen::detail         ? "AI detail"
+                        : screen == Screen::descriptorGate ? "Repository setup"
                         : screen == Screen::requirements   ? "Requirements"
                         : screen == Screen::connections    ? "Connections"
                         : screen == Screen::services       ? "Project services"
@@ -1409,10 +1462,16 @@ struct ConsoleUI::Impl {
                   wide(std::to_string(filtered.size()) + " functions · " +
                        std::to_string(cart.size()) + " in cart"),
                   width - 322, 53, 302, 26, 13, true);
+    } else if (screen == Screen::tour && !guideSteps.empty()) {
+      skin::mascot(dc, width - 220, 120, 180,
+                   guideSteps.at(tourStep).value("emotion", std::string("smile")));
     } else if (screen == Screen::settings || screen == Screen::profile)
       skin::label(dc, L"Local configuration", width - 322, 18, 302, 28, 15, true);
-    else if (screen == Screen::detail && activeAgent())
+    else if (screen == Screen::detail && activeAgent()) {
       skin::label(dc, wide(activeAgent()->spec.name), width - 322, 18, 302, 28, 16, true);
+      skin::label(dc, wide(statisticsSummary(activeAgent()->id)), width - 322, 384, 302,
+                  height - 400, 12);
+    }
   }
   void launch(bool execute = true) {
     if (!fleet)
@@ -1729,7 +1788,42 @@ struct ConsoleUI::Impl {
     case SETTINGS:
       navigate(Screen::settings);
       break;
+    case DESC_SCAN:
+      descriptorOperation = "descriptor.preview";
+      serviceCall(descriptorOperation, Json::object());
+      break;
+    case DESC_PREVIEW:
+      descriptorDraft = Json::parse(text(argsBox));
+      parseDescriptor(descriptorDraft.dump());
+      descriptorWriteArgs = {{"descriptor", descriptorDraft}};
+      descriptorOperation = "descriptor.write";
+      serviceCall(descriptorOperation, descriptorWriteArgs);
+      break;
+    case DESC_CONFIRM: {
+      if (serviceBusy || !serviceResult.value("requiresConfirmation", false))
+        throw std::runtime_error("Preview the descriptor write first");
+      if (Json::parse(text(argsBox)) != descriptorWriteArgs.at("descriptor"))
+        throw std::runtime_error("Draft changed; preview it again");
+      if (MessageBoxW(window,
+                      wide("Write this reviewed tangos.json?\n\n" +
+                           descriptorWriteArgs.at("descriptor").dump(2))
+                          .c_str(),
+                      L"Review descriptor", MB_YESNO | MB_ICONQUESTION) != IDYES)
+        break;
+      auto args = descriptorWriteArgs;
+      args["confirmation"] = serviceResult.at("confirmation");
+      serviceCall("descriptor.write", args);
+      break;
+    }
+    case DESC_RELOAD:
+      PostMessageW(parent, CONSOLE_RELOAD, 0, 0);
+      break;
+    case DESC_FOLDER:
+      PostMessageW(parent, CONSOLE_PICK_REPO, 0, 0);
+      break;
     case GUIDE:
+      tipsMode = false;
+      tourStep = 0;
       navigate(Screen::tour);
       break;
     case GITTOOLS:
@@ -1836,8 +1930,11 @@ struct ConsoleUI::Impl {
         fleet->setPolicy(settings);
       if (savePreferences)
         savePreferences(settings);
-      write(data / "console-ui.json",
-            Json({{"advanced", advancedMode}, {"writes", allowWrites}}).dump(2));
+      auto uiPath = data / "console-ui.json";
+      auto uiPrefs = fs::exists(uiPath) ? Json::parse(read(uiPath)) : Json::object();
+      uiPrefs["advanced"] = advancedMode;
+      uiPrefs["writes"] = allowWrites;
+      write(uiPath, uiPrefs.dump(2));
       navigate(Screen::controller);
       break;
     }
@@ -1962,19 +2059,62 @@ struct ConsoleUI::Impl {
       loadAtlas();
       break;
     case TOUR_NEXT:
-      tourStep = std::min(4, tourStep + 1);
+      tourStep = std::min(std::max(0, (int)guideSteps.size() - 1), tourStep + 1);
       build();
       break;
     case TOUR_PREVIOUS:
       tourStep = std::max(0, tourStep - 1);
       build();
       break;
-    case TOUR_CLOSE:
+    case HELP_EDIT:
+      ShellExecuteW(window, L"open",
+                    (data / (tipsMode ? "tango-tips.txt" : "tango-tour.txt")).c_str(), nullptr,
+                    nullptr, SW_SHOWNORMAL);
+      break;
+    case HELP_TIPS:
+      tipsMode = !tipsMode;
+      tourStep = 0;
+      build();
+      break;
+    case TOUR_CLOSE: {
+      auto path = data / "console-ui.json";
+      auto prefs = fs::exists(path) ? Json::parse(read(path)) : Json::object();
+      prefs["tourSeen"] = true;
+      write(path, prefs.dump(2));
       navigate(Screen::controller);
       break;
     }
+    }
   }
   void tick() {
+    if (statsReady.exchange(false)) {
+      std::lock_guard<std::mutex> lock(outputMutex);
+      if (!pendingStats.contains("error"))
+        agentStats = std::move(pendingStats);
+      InvalidateRect(window, nullptr, FALSE);
+    }
+    if ((screen == Screen::controller || screen == Screen::detail) && !statsBusy && !statsReady &&
+        GetTickCount64() - statsPoll >= 1000) {
+      statsPoll = GetTickCount64();
+      if (statsWorker.joinable())
+        statsWorker.join();
+      statsBusy = true;
+      auto prefs = settings;
+      statsWorker = std::thread([this, prefs] {
+        Json result;
+        try {
+          result = Backend(repository, data, prefs).invoke("stats.get");
+        } catch (const std::exception &e) {
+          result = {{"error", e.what()}};
+        }
+        {
+          std::lock_guard<std::mutex> lock(outputMutex);
+          pendingStats = std::move(result);
+        }
+        statsReady = true;
+        statsBusy = false;
+      });
+    }
     if (flying) {
       double t = std::min(1., (GetTickCount64() - flightAt) / 350.);
       t = t * t * (3 - 2 * t);
@@ -2012,6 +2152,18 @@ struct ConsoleUI::Impl {
       {
         std::lock_guard<std::mutex> lock(outputMutex);
         serviceResult = std::move(pendingServiceResult);
+      }
+      if (screen == Screen::descriptorGate) {
+        if (descriptorOperation == "descriptor.preview" && !serviceResult.contains("error")) {
+          descriptorDraft = serviceResult;
+          setText(argsBox, descriptorDraft.dump(2));
+        }
+        setText(body, serviceResult.dump(2));
+        EnableWindow(GetDlgItem(window, DESC_CONFIRM),
+                     serviceResult.value("requiresConfirmation", false) &&
+                         descriptorOperation == "descriptor.write");
+        if (descriptorOperation == "descriptor.write" && serviceResult.value("saved", false))
+          PostMessageW(parent, CONSOLE_RELOAD, 0, 0);
       }
       if (screen == Screen::requirements)
         setText(body, preflightSummary(serviceResult));
@@ -2401,6 +2553,49 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     impl->loader.join();
   if (!fs::exists(impl->repository / ".tangos-lite-test-fixture"))
     throw std::runtime_error("GUI fleet smoke requires an explicit disposable fixture");
+  if (impl->screen == Screen::descriptorGate) {
+    auto awaitService = [&] {
+      auto start = GetTickCount64();
+      while (impl->serviceBusy || impl->serviceReady) {
+        if (GetTickCount64() - start > 15000)
+          throw std::runtime_error("Descriptor gate service timed out");
+        MSG message;
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+          TranslateMessage(&message);
+          DispatchMessageW(&message);
+        }
+        impl->tick();
+        Sleep(10);
+      }
+      if (impl->serviceResult.contains("error"))
+        throw std::runtime_error(impl->serviceResult.dump());
+    };
+    ShowWindow(impl->window, SW_SHOW);
+    capture(directory / "descriptor-missing.bmp");
+    impl->action(DESC_SCAN, BN_CLICKED);
+    awaitService();
+    parseDescriptor(text(impl->argsBox));
+    capture(directory / "descriptor-generated.bmp");
+    auto path = impl->repository / "tangos.json";
+    auto before = read(path);
+    auto existed = fs::exists(path);
+    impl->action(DESC_PREVIEW, BN_CLICKED);
+    awaitService();
+    if (!impl->serviceResult.value("requiresConfirmation", false) || fs::exists(path) != existed ||
+        read(path) != before)
+      throw std::runtime_error("Descriptor preview wrote before confirmation");
+    capture(directory / "descriptor-review.bmp");
+    auto args = impl->descriptorWriteArgs;
+    args["confirmation"] = impl->serviceResult.at("confirmation");
+    auto result =
+        Backend(impl->repository, impl->data, impl->settings).invoke("descriptor.write", args);
+    if (!result.value("saved", false) || loadDescriptor(impl->repository).tools.empty())
+      throw std::runtime_error("Confirmed descriptor did not load discovered checks");
+    write(directory / "descriptor-gui-report.txt",
+          "PASS: missing/invalid descriptor gate, async scan, editable draft, side-effect-free "
+          "preview, fixture-only confirmed write and validated reload");
+    return;
+  }
   if (impl->fleet) {
     AgentSpec agent;
     agent.name = "Native CLI fixture";
@@ -2448,6 +2643,19 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     ShowWindow(impl->window, SW_SHOW);
     capture(directory / fs::u8path("console-" + std::to_string((int)screen) + ".bmp"));
   }
+  impl->navigate(Screen::tour);
+  if (impl->guideSteps.size() != 10)
+    throw std::runtime_error("Reference tour steps missing");
+  impl->action(TOUR_NEXT, BN_CLICKED);
+  capture(directory / "tour-expression.bmp");
+  impl->action(HELP_TIPS, BN_CLICKED);
+  if (!impl->tipsMode || impl->guideSteps.empty())
+    throw std::runtime_error("Native editable tips missing");
+  capture(directory / "tips.bmp");
+  impl->action(TOUR_CLOSE, BN_CLICKED);
+  auto uiPrefs = Json::parse(read(impl->data / "console-ui.json"));
+  if (!uiPrefs.value("tourSeen", false))
+    throw std::runtime_error("Tour completion did not persist");
   if (impl->atlas.empty())
     throw std::runtime_error("GUI viewer fixture has no functions");
   impl->pickedFunction = 0;

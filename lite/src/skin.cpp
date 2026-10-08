@@ -238,8 +238,14 @@ void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
   }
   SelectObject(i.hDC, prev);
 }
-void mascot(HDC dc, int x, int y, int size) {
-  auto r = FindResourceW(nullptr, MAKEINTRESOURCEW(201), RT_RCDATA);
+void mascot(HDC dc, int x, int y, int size, const std::string &emotion) {
+  int id = emotion == "smile"      ? 214
+           : emotion == "thinking" ? 215
+           : emotion == "shy"      ? 216
+           : emotion == "tongue"   ? 217
+           : emotion == "handsup"  ? 218
+                                   : 201;
+  auto r = FindResourceW(nullptr, MAKEINTRESOURCEW(id), RT_RCDATA);
   if (!r)
     return;
   Surface s(dc, x, y, size, size);

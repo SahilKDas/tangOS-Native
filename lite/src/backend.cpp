@@ -1,4 +1,5 @@
 #include "backend.h"
+#include "help.h"
 #include "repository.h"
 #include <regex>
 #include <set>
@@ -351,9 +352,9 @@ Json Backend::catalog() {
        "git.backup",        "git.discard",       "tools.list",         "tools.run",
        "stats.get",         "stats.clear",       "reports.list",       "reports.export",
        "queue.adopt",       "policy.classify",   "policy.adaptive",    "policy.pool",
-       "policy.statistics", "projects.get",      "github.credits",     "atlas.cosmetics",
-       "atlas.counts",      "atlas.progress",    "atlas.live",         "update.check",
-       "harvest.list"});
+       "policy.statistics", "guide.parse",       "guide.tour",         "guide.tips",
+       "projects.get",      "github.credits",    "atlas.cosmetics",    "atlas.counts",
+       "atlas.progress",    "atlas.live",        "update.check",       "harvest.list"});
 }
 Json Backend::invoke(const std::string &m, Json a) {
   HANDLE lock = CreateFileW((directory / "backend.lock").c_str(),
@@ -780,6 +781,10 @@ void Backend::recordAgent(const std::string &id, const fs::path &results, const 
                          "review before publication"}});
 }
 Json Backend::execute(const std::string &m, const Json &a) {
+  if (m == "guide.parse")
+    return parseGuide(a.at("text").get<std::string>(), a.value("tour", true));
+  if (m == "guide.tour" || m == "guide.tips")
+    return readGuide(directory, m == "guide.tour");
   if (m == "connections.get")
     return fileJson(directory / "connections.json");
   if (m == "connections.set") {

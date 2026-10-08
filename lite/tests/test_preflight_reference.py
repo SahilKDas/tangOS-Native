@@ -15,7 +15,7 @@ def main():
             if stage==2:descriptor['requirements']['pythonPackages']=['sys']
             (repo/'tangos.json').write_text(json.dumps(descriptor))
             fixture=tmp/'fixture.json';fixture.write_text(json.dumps({'repo':str(repo),'descriptor':descriptor}))
-            ref=subprocess.run(['node','--disable-warning=MODULE_TYPELESS_PACKAGE_JSON',str(runner),str(fixture)],capture_output=True,text=True,timeout=30);assert ref.returncode==0,ref.stderr
+            ref=subprocess.run(['node','--disable-warning=MODULE_TYPELESS_PACKAGE_JSON',str(runner),str(fixture)],capture_output=True,text=True,encoding="utf-8",timeout=30);assert ref.returncode==0,ref.stderr
             expected={r['id']:r['ok'] for r in json.loads(ref.stdout)}
             request=tmp/'request.json';response=tmp/'response.json';request.write_text(json.dumps({'method':'preflight','arguments':{}}))
             run=subprocess.run([str(exe),'--backend',str(repo),str(tmp/'data'),str(request),str(response)],capture_output=True,timeout=30);assert run.returncode==0,run.stderr

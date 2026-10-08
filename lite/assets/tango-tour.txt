@@ -1,0 +1,49 @@
+# Tango's intro tour - the first-run walkthrough. Reword the titles and bodies freely.
+# One step per block, blank line between blocks. In each block:
+#   line 1  = options: an [emotion] and an optional @spot to highlight (either can be left off)
+#   line 2  = the step title
+#   rest    = the body text
+# Emotions: [smile] [thinking] [shy] [tongue] [handsup] [idle]
+# Spots (what to spotlight; omit the @spot to center the step): @toggle @mcp @settings @keyvault @controller @policies
+# Highlight: wrap words in :joke[ ... ] to paint them as a shimmering gradient of Tango's colors.
+# Lines starting with # are ignored.
+
+[smile]
+Hi, I'm Tango!
+New here? Give me a minute and I'll show you around and get your first functions matching. Thank you for the download!
+
+[handsup] @toggle
+Two apps, one switch
+These buttons flip between the Chaos Controller, where your AIs live, and the Chaos Viewer, a map of every function in the game.
+
+[smile] @mcp
+Turn on MCP
+Open MCP connection and configure your own client with the local connection file. Add an MCP profile with the client’s exact name, then prepare its queue.
+
+[thinking] @settings
+Keys and GitHub
+Configure your own model/provider profile in Add AI and store its key locally in Settings. Sign into GitHub too, that is how finished matches get pushed up as pull requests. Keys are stored locally and never fully shown.
+
+[smile] @controller
+Your AI crew
+Every connected or keyed AI becomes a box here. Click a box any time to see its stats and what it is best at.
+
+[tongue] @controller
+Queue up work
+Pick a batch size (16 is a good start) and hit "Add to queue". I pick functions that AI is suited for. Or press the ∞ button and it keeps pulling fresh work until you stop it.
+
+[smile] @controller
+Drive it
+For an AI with an API key, hit "Drive queue" and watch it match live. AIs connected over MCP pull from their queue on their own.
+
+[handsup] @toggle
+Hand-pick functions
+Want to choose the work yourself? Flip to the Chaos Viewer, click functions (or right-drag a box around them) to fill your cart, then "Add chosen functions" on any AI's box.
+
+[smile] @policies
+The three switches
+Writes permits tools in isolated worktrees. Review keeps publication under your control. Preview every commit and every outgoing push; port-only work must never change src/.
+
+[handsup]
+You're ready to go!
+I'll hang out in the corner. Click me any time for tips, and I may have messages for you later!

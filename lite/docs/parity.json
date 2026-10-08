@@ -351,20 +351,26 @@
     },
     {
       "contract": "generatePreview",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "Packaged missing/invalid descriptor asynchronous generation; exact original GenerateReport envelope remains"
+      ],
       "kind": "api"
     },
     {
       "contract": "writeDescriptor",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "Packaged editable draft, side-effect-free preview, confirmation and descriptor validation"
+      ],
       "kind": "api"
     },
     {
       "contract": "reloadDescriptor",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "Native deferred parent reload; generated descriptor validation tested"
+      ],
       "kind": "api"
     },
     {
@@ -467,14 +473,18 @@
     },
     {
       "contract": "getTips",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "24 reference parser comparisons and native Tips navigation; helper bubble remains"
+      ],
       "kind": "api"
     },
     {
       "contract": "openTips",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "Native Edit text opens local tips file"
+      ],
       "kind": "api"
     },
     {
@@ -521,20 +531,26 @@
     },
     {
       "contract": "getTour",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "24 tour/tips parser comparisons; ten-step native tour and expression captures; spotlight overlay remains"
+      ],
       "kind": "api"
     },
     {
       "contract": "openTour",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "Native Edit text opens local tour file"
+      ],
       "kind": "api"
     },
     {
       "contract": "markTourSeen",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "Packaged completion-state persistence assertion"
+      ],
       "kind": "api"
     },
     {
@@ -545,8 +561,10 @@
     },
     {
       "contract": "replayTour",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "Native replay resets step and reloads editable text"
+      ],
       "kind": "api"
     },
     {
