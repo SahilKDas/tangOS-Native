@@ -128,6 +128,7 @@ constexpr int QUEUE = 4470, QUEUE_UP = 4471, QUEUE_DOWN = 4472, QUEUE_REMOVE = 4
 constexpr int CONNECTIONS = 4450, CONNECTION_LIST = 4451, CONNECTION_SAVE = 4452, SERVICES = 4453,
               SERVICE_RUN = 4454, SERVICE_CONFIRM = 4455, SERVICE_CANCEL = 4456;
 constexpr int ATLAS_FUNCTION_LIST = 4410, ATLAS_FUNCTION_SORT = 4411, ATLAS_CONTRIBUTORS = 4412;
+constexpr int ATLAS_FULLSCREEN = 4413;
 constexpr int ATLAS_INSPECT = 4400, ATLAS_MODULE = 4401, ATLAS_SOURCE = 4402, ATLAS_HISTORY = 4403;
 constexpr int HELP_EDIT = 4600, HELP_TIPS = 4601;
 constexpr int DESC_SCAN = 4610, DESC_PREVIEW = 4611, DESC_CONFIRM = 4612, DESC_RELOAD = 4613,
@@ -218,6 +219,11 @@ struct ConsoleUI::Impl {
        authorChoice = nullptr, draftsChoice = nullptr;
   std::string atlasColorBy = "status", authorFilter;
   bool atlasDrafts = true;
+  bool fullAtlas = false;
+  int mapWidth() const { return std::max(1, width - (fullAtlas ? 36 : 390)); }
+  int mapTop() const { return fullAtlas ? 96 : 148; }
+  int mapHeight() const { return std::max(1, height - mapTop() - 70); }
+  RECT mapBounds() const { return {18, mapTop(), 18 + mapWidth(), mapTop() + mapHeight()}; }
   std::vector<std::pair<std::string, int>> contributorRank;
   AtlasCamera camera;
   double &zoom = camera.zoom, &panX = camera.x, &panY = camera.y;
@@ -435,7 +441,7 @@ struct ConsoleUI::Impl {
     for (auto h : controls)
       DestroyWindow(h);
     controls.clear();
-    batchList = batchTitle = batchPrompt = functionList = functionSort = nullptr;
+    batchList = batchTitle = batchPrompt = functionList = functionSort = contributorList = nullptr;
     functionRows.clear();
     layoutChoice = filterChoice = colorChoice = authorChoice = draftsChoice = nullptr;
     profileFields.clear();
@@ -496,7 +502,7 @@ struct ConsoleUI::Impl {
     } guard(rebuilding);
     refreshAgents();
     destroyControls();
-    int cw = screen == Screen::remoteGate   ? width
+    int cw = screen == Screen::remoteGate || (screen == Screen::atlas && fullAtlas) ? width
              : screen == Screen::controller ? controllerWidth()
                                             : width - 356;
     if (screen == Screen::remoteGate) {
@@ -618,28 +624,30 @@ struct ConsoleUI::Impl {
                 : atlasFilter == "unmatched" ? 2
                 : atlasFilter == "near_miss" ? 3
                                              : 0);
-      button("Add to cart", ATLAS_CART, width - 328, 285, 130);
-      button("Assign cart", ADD_CART, width - 188, 285, 130);
-      button("Inspect source", ATLAS_INSPECT, width - 328, 330, 140);
-      button("Pop out module", ATLAS_MODULE, width - 180, 330, 120);
-      label("Wheel: zoom; left drag: pan\nRight drag: select; WASD/arrows: travel\nSpace: cart; "
-            "Esc: zoom out",
-            width - 332, 378, 310, 80);
-      label("Color", width - 332, 477, 62);
-      colorChoice = combo({"status", "author"}, ATLAS_COLOR, width - 268, 474, 246,
-                          atlasColorBy == "author" ? 1 : 0);
-      label("Contributor", width - 332, 513, 88);
-      std::vector<std::string> contributors{"Everyone"};
-      int authorIndex = 0;
-      for (auto &entry : contributorRank) {
-        contributors.push_back(entry.first);
-        if (entry.first == authorFilter)
-          authorIndex = (int)contributors.size() - 1;
+      if (!fullAtlas) {
+        button("Add to cart", ATLAS_CART, width - 328, 285, 130);
+        button("Assign cart", ADD_CART, width - 188, 285, 130);
+        button("Inspect source", ATLAS_INSPECT, width - 328, 330, 140);
+        button("Pop out module", ATLAS_MODULE, width - 180, 330, 120);
+        label("Wheel: zoom; left drag: pan\nRight drag: select; WASD/arrows: travel\nSpace: cart; "
+              "Esc: zoom out",
+              width - 332, 378, 310, 80);
+        label("Color", width - 332, 477, 62);
+        colorChoice = combo({"status", "author"}, ATLAS_COLOR, width - 268, 474, 246,
+                            atlasColorBy == "author" ? 1 : 0);
+        label("Contributor", width - 332, 513, 88);
+        std::vector<std::string> contributors{"Everyone"};
+        int authorIndex = 0;
+        for (auto &entry : contributorRank) {
+          contributors.push_back(entry.first);
+          if (entry.first == authorFilter)
+            authorIndex = (int)contributors.size() - 1;
+        }
+        authorChoice = combo(contributors, ATLAS_AUTHOR, width - 238, 510, 216, authorIndex);
+        draftsChoice = control(L"BUTTON", "Show drafts and near misses", ATLAS_DRAFTS, width - 332,
+                               550, 310, 28, BS_AUTOCHECKBOX);
+        SendMessageW(draftsChoice, BM_SETCHECK, atlasDrafts ? BST_CHECKED : BST_UNCHECKED, 0);
       }
-      authorChoice = combo(contributors, ATLAS_AUTHOR, width - 238, 510, 216, authorIndex);
-      draftsChoice = control(L"BUTTON", "Show drafts and near misses", ATLAS_DRAFTS, width - 332,
-                             550, 310, 28, BS_AUTOCHECKBOX);
-      SendMessageW(draftsChoice, BM_SETCHECK, atlasDrafts ? BST_CHECKED : BST_UNCHECKED, 0);
       button("Controller", HOME, 18, height - 48, 108);
       button("Reload", ATLAS_LOAD, 134, height - 48, 90);
       button(remoteOnly ? "Connections" : "Encyclopedia", remoteOnly ? CONNECTIONS : ENCYCLOPEDIA,
@@ -649,17 +657,21 @@ struct ConsoleUI::Impl {
              : liveAtlas ? "Local data"
                          : "Live data",
              ATLAS_LIVE, 478, height - 48, 102);
-      auto sortIndex =
-          std::find(functionSortKeys.begin(), functionSortKeys.end(), functionSortKey) -
-          functionSortKeys.begin();
-      functionSort = combo({"unmatched first", "size (largest)", "size (smallest)", "name (A-Z)",
-                            "address", "module"},
-                           ATLAS_FUNCTION_SORT, width - 332, 90, 310, (int)sortIndex);
-      functionList = control(L"LISTBOX", "", ATLAS_FUNCTION_LIST, width - 332, 130, 310, 140,
-                             LBS_NOTIFY | WS_VSCROLL | WS_HSCROLL | LBS_NOINTEGRALHEIGHT);
-      contributorList = control(L"LISTBOX", "", ATLAS_CONTRIBUTORS, 18, 104, cw - 36, 32,
-                                LBS_NOTIFY | LBS_MULTICOLUMN | WS_HSCROLL | LBS_NOINTEGRALHEIGHT);
-      SendMessageW(contributorList, LB_SETCOLUMNWIDTH, 200, 0);
+      button(fullAtlas ? "Restore layout" : "Full map", ATLAS_FULLSCREEN, cw - 156, height - 48,
+             138);
+      if (!fullAtlas) {
+        auto sortIndex =
+            std::find(functionSortKeys.begin(), functionSortKeys.end(), functionSortKey) -
+            functionSortKeys.begin();
+        functionSort = combo({"unmatched first", "size (largest)", "size (smallest)", "name (A-Z)",
+                              "address", "module"},
+                             ATLAS_FUNCTION_SORT, width - 332, 90, 310, (int)sortIndex);
+        functionList = control(L"LISTBOX", "", ATLAS_FUNCTION_LIST, width - 332, 130, 310, 140,
+                               LBS_NOTIFY | WS_VSCROLL | WS_HSCROLL | LBS_NOINTEGRALHEIGHT);
+        contributorList = control(L"LISTBOX", "", ATLAS_CONTRIBUTORS, 18, 104, cw - 36, 32,
+                                  LBS_NOTIFY | LBS_MULTICOLUMN | WS_HSCROLL | LBS_NOINTEGRALHEIGHT);
+        SendMessageW(contributorList, LB_SETCOLUMNWIDTH, 200, 0);
+      }
       cachedLayout.clear();
     } else if (screen == Screen::encyclopedia) {
       search = edit("", SEARCH, 18, 52, cw - 34);
@@ -1656,9 +1668,9 @@ struct ConsoleUI::Impl {
       return;
     flightFrom = camera;
     flightTo = camera;
-    flightTo.zoom = std::clamp(
-        .92 * std::min((width - 390) / rect.width, (height - 218) / rect.height), 1., 4096.);
-    flightTo.center(rect.x + rect.width / 2, rect.y + rect.height / 2, width - 390, height - 218);
+    flightTo.zoom =
+        std::clamp(.92 * std::min(mapWidth() / rect.width, mapHeight() / rect.height), 1., 4096.);
+    flightTo.center(rect.x + rect.width / 2, rect.y + rect.height / 2, mapWidth(), mapHeight());
     flightAt = GetTickCount64();
     flying = true;
   }
@@ -1672,6 +1684,10 @@ struct ConsoleUI::Impl {
       }
   }
   void viewerKey(WPARAM key) {
+    if (key == VK_F11) {
+      action(ATLAS_FULLSCREEN, BN_CLICKED);
+      return;
+    }
     if (key == VK_ESCAPE) {
       if (lod.update(zoom) == 3 && pickedFunction < atlas.size()) {
         double x = 1e100, y = 1e100, right = 0, bottom = 0;
@@ -1720,12 +1736,13 @@ struct ConsoleUI::Impl {
   void moveMini(POINT p) {
     double mw = std::max(1L, miniBounds.right - miniBounds.left),
            mh = std::max(1L, miniBounds.bottom - miniBounds.top);
-    camera.center((p.x - miniBounds.left) * (width - 390) / mw,
-                  (p.y - miniBounds.top) * (height - 218) / mh, width - 390, height - 218);
+    camera.center((p.x - miniBounds.left) * mapWidth() / mw,
+                  (p.y - miniBounds.top) * mapHeight() / mh, mapWidth(), mapHeight());
   }
   void paint(HDC dc) {
-    bool fullController =
-        screen == Screen::remoteGate || (screen == Screen::controller && !controllerNeedsRail());
+    bool fullController = screen == Screen::remoteGate ||
+                          (screen == Screen::controller && !controllerNeedsRail()) ||
+                          (screen == Screen::atlas && fullAtlas);
     skin::panel(dc, 0, 0, fullController ? width : width - 356, height);
     if (!fullController)
       skin::panel(dc, width - 340, 0, 340, height, true);
@@ -1830,12 +1847,14 @@ struct ConsoleUI::Impl {
           matchedBytes += f.size;
         }
       }
-      skin::label(dc,
-                  wide("Functions " + std::to_string(matched) + "/" + std::to_string(atlas.size()) +
-                       " · Code " + std::to_string(matchedBytes) + "/" + std::to_string(bytes) +
-                       " bytes · " + (liveAtlas ? cacheNotice : "Local data")),
-                  18, 84, width - 390, 24, 12);
-      int left = 18, top = 148, w = width - 390, h = height - 218;
+      if (!fullAtlas)
+        skin::label(dc,
+                    wide("Functions " + std::to_string(matched) + "/" +
+                         std::to_string(atlas.size()) + " · Code " + std::to_string(matchedBytes) +
+                         "/" + std::to_string(bytes) + " bytes · " +
+                         (liveAtlas ? cacheNotice : "Local data")),
+                    18, 84, width - 390, 24, 12);
+      int left = 18, top = mapTop(), w = mapWidth(), h = mapHeight();
       std::string key = needle + "|" + atlasMode + "|" + functionSortKey + "|" + atlasFilter + "|" +
                         moduleFilter + "|" + std::to_string(w) + "x" + std::to_string(h);
       if (key != cachedLayout) {
@@ -2101,7 +2120,7 @@ struct ConsoleUI::Impl {
       mb = CreateSolidBrush(RGB(255, 214, 40));
       FrameRect(dc, &vr, mb);
       DeleteObject(mb);
-      if (!authorFilter.empty()) {
+      if (!fullAtlas && !authorFilter.empty()) {
         int lifetime = 0, daily = 0;
         for (auto &entry : contributorRank)
           if (entry.first == authorFilter)
@@ -2115,10 +2134,11 @@ struct ConsoleUI::Impl {
                          std::to_string(daily) + " today"),
                     width - 322, 584, 302, 48, 12);
       }
-      skin::label(dc,
-                  wide(std::to_string(filtered.size()) + " functions · " +
-                       std::to_string(cart.size()) + " in cart"),
-                  width - 322, 53, 302, 26, 13, true);
+      if (!fullAtlas)
+        skin::label(dc,
+                    wide(std::to_string(filtered.size()) + " functions · " +
+                         std::to_string(cart.size()) + " in cart"),
+                    width - 322, 53, 302, 26, 13, true);
     } else if (screen == Screen::tour && !guideSteps.empty()) {
       skin::mascot(dc, width - 220, 120, 180,
                    guideSteps.at(tourStep).value("emotion", std::string("smile")));
@@ -3060,6 +3080,13 @@ struct ConsoleUI::Impl {
         throw std::runtime_error("Select a function in the module first");
       openModule(atlas[pickedFunction].module);
       break;
+    case ATLAS_FULLSCREEN:
+      fullAtlas = !fullAtlas;
+      flying = false;
+      hoveredFunction = SIZE_MAX;
+      build();
+      camera.clamp(mapWidth(), mapHeight());
+      break;
     case ATLAS_RESET:
       zoom = 1;
       panX = panY = 0;
@@ -3486,8 +3513,8 @@ struct ConsoleUI::Impl {
         if (self->screen == Screen::atlas) {
           POINT p{(short)LOWORD(l), (short)HIWORD(l)};
           ScreenToClient(h, &p);
-          self->camera.zoomAt(GET_WHEEL_DELTA_WPARAM(w) > 0 ? 1.25 : .8, p.x - 18, p.y - 148,
-                              self->width - 390, self->height - 218);
+          self->camera.zoomAt(GET_WHEEL_DELTA_WPARAM(w) > 0 ? 1.25 : .8, p.x - 18,
+                              p.y - self->mapTop(), self->mapWidth(), self->mapHeight());
           InvalidateRect(h, nullptr, FALSE);
           return 0;
         }
@@ -3515,7 +3542,8 @@ struct ConsoleUI::Impl {
         if (self->screen != Screen::atlas)
           break;
         POINT p{(short)LOWORD(l), (short)HIWORD(l)};
-        if (p.x >= 18 && p.x < self->width - 372 && p.y >= 100 && p.y < self->height - 70) {
+        auto map = self->mapBounds();
+        if (PtInRect(&map, p)) {
           SetFocus(h);
           self->flying = false;
           self->marquee = true;
@@ -3537,19 +3565,19 @@ struct ConsoleUI::Impl {
         if (self->screen != Screen::atlas)
           break;
         POINT p{(short)LOWORD(l), (short)HIWORD(l)};
+        auto map = self->mapBounds();
         SetFocus(h);
         self->flying = false;
         if (PtInRect(&self->miniBounds, p)) {
           self->miniDragging = true;
           self->moveMini(p);
           SetCapture(h);
-        } else if ((GetKeyState(VK_SHIFT) & 0x8000) && p.x >= 18 && p.x < self->width - 372 &&
-                   p.y >= 100 && p.y < self->height - 70) {
+        } else if ((GetKeyState(VK_SHIFT) & 0x8000) && PtInRect(&map, p)) {
           self->marquee = true;
           self->dragStart = self->dragEnd = p;
           self->additiveMarquee = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
           SetCapture(h);
-        } else if (p.x >= 18 && p.x < self->width - 372 && p.y >= 100 && p.y < self->height - 70) {
+        } else if (PtInRect(&map, p)) {
           self->leftDown = true;
           self->dragged = false;
           self->dragStart = self->dragLast = p;
@@ -3581,14 +3609,14 @@ struct ConsoleUI::Impl {
             self->panX += p.x - self->dragLast.x;
             self->panY += p.y - self->dragLast.y;
             self->dragLast = p;
-            self->camera.clamp(self->width - 390, self->height - 218);
+            self->camera.clamp(self->mapWidth(), self->mapHeight());
           }
         }
         if (self->panning) {
           self->panX += p.x - self->dragLast.x;
           self->panY += p.y - self->dragLast.y;
           self->dragLast = p;
-          self->camera.clamp(self->width - 390, self->height - 218);
+          self->camera.clamp(self->mapWidth(), self->mapHeight());
         }
         if (self->miniDragging)
           self->moveMini(p);
@@ -3624,11 +3652,11 @@ struct ConsoleUI::Impl {
             ReleaseCapture();
             return 0;
           }
-          auto selected =
-              marqueeTiles(self->tiles, {(self->dragStart.x - 18 - self->panX) / self->zoom,
-                                         (self->dragStart.y - 148 - self->panY) / self->zoom,
-                                         (point.x - self->dragStart.x) / self->zoom,
-                                         (point.y - self->dragStart.y) / self->zoom});
+          auto selected = marqueeTiles(
+              self->tiles, {(self->dragStart.x - 18 - self->panX) / self->zoom,
+                            (self->dragStart.y - self->mapTop() - self->panY) / self->zoom,
+                            (point.x - self->dragStart.x) / self->zoom,
+                            (point.y - self->dragStart.y) / self->zoom});
           if (!self->additiveMarquee)
             self->cart.clear();
           for (auto index : selected)
@@ -3974,6 +4002,41 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
   capture(directory / "atlas-contributors.bmp");
   if (SendMessageW(impl->functionList, LB_GETCOUNT, 0, 0) != (LRESULT)impl->atlas.size())
     throw std::runtime_error("Viewer function list is incomplete");
+  auto selectionBeforeFull = impl->pickedFunction;
+  auto cartBeforeFull = impl->cart;
+  int mapBeforeFull = impl->mapWidth();
+  impl->action(ATLAS_FULLSCREEN, BN_CLICKED);
+  capture(directory / "atlas-fullscreen.bmp");
+  if (!impl->fullAtlas || impl->functionList || impl->contributorList || impl->colorChoice ||
+      impl->mapWidth() <= mapBeforeFull || impl->pickedFunction != selectionBeforeFull ||
+      impl->cart != cartBeforeFull)
+    throw std::runtime_error(
+        "Viewer fullscreen did not expand the map and preserve selection/cart");
+  impl->viewerKey(VK_F11);
+  capture(directory / "atlas-restored.bmp");
+  if (impl->fullAtlas || !impl->functionList || !impl->contributorList ||
+      impl->mapWidth() != mapBeforeFull)
+    throw std::runtime_error("Viewer fullscreen keyboard restore failed");
+  auto smallAtlas = impl->atlas;
+  auto renderStarted = GetTickCount64();
+  for (size_t i = impl->atlas.size(); i < 25000; ++i) {
+    auto function = smallAtlas[i % smallAtlas.size()];
+    function.id = "large-fixture-" + std::to_string(i);
+    function.name = function.id;
+    function.row["id"] = function.id;
+    function.row["name"] = function.name;
+    impl->atlas.push_back(std::move(function));
+  }
+  impl->cachedLayout.clear();
+  capture(directory / "atlas-large-database.bmp");
+  auto renderMs = GetTickCount64() - renderStarted;
+  if (SendMessageW(impl->functionList, LB_GETCOUNT, 0, 0) != 500 || renderMs > 10000)
+    throw std::runtime_error("Large Viewer database exceeded the capped roster or render budget");
+  write(directory / "viewer-large-database.json",
+        Json{{"functions", 25000}, {"roster", 500}, {"elapsedMs", renderMs}}.dump(2));
+  impl->atlas = std::move(smallAtlas);
+  impl->cachedLayout.clear();
+  capture(directory / "atlas-restored-small.bmp");
   SendMessageW(impl->functionSort, CB_SETCURSEL, 2, 0);
   impl->action(ATLAS_FUNCTION_SORT, CBN_SELCHANGE);
   capture(directory / "atlas-function-list.bmp");

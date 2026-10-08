@@ -21,3 +21,4 @@ console/calls-*.json
 /lite/renderer/target/
 
 /lite/release-*/
+/lite/out-*/

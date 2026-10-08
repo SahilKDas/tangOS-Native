@@ -56,6 +56,7 @@ with tempfile.TemporaryDirectory(prefix='TangOS-ZIP-fixture-') as folder:
     unsafe = [('../escaped.txt', 'x'), ('project-main/../escaped.txt', 'x'),
               ('project-main/C:escape', 'x'), ('project-main/back\\slash', 'x'),
               ('project-main/CON.txt', 'x'), ('project-main/trailing.', 'x'),
+              ('project-main/COM\u00b9.txt', 'x'),
               ('project-main/.git/config', 'x'), ('project-main/baserom.nds', 'x'),
               ('project-main/private/secret.txt', 'x'),
               ('project-main/SRC/FIXTURE.cpp', 'case alias'),
@@ -67,6 +68,13 @@ with tempfile.TemporaryDirectory(prefix='TangOS-ZIP-fixture-') as folder:
         assert not dest.exists() and not (root / 'escaped.txt').exists()
 
     symlink = zipfile.ZipInfo('project-main/link')
+    for number, entries in enumerate([
+            [('project-main/\u00c9.cpp', 'one'), ('project-main/\u00e9.cpp', 'two')],
+            [('project-main/\u00c4', 'file'), ('project-main/\u00e4/child.cpp', 'child')]]):
+        archive = make('unicode-alias-' + str(number), entries)
+        dest = root / ('unicode-rejected-' + str(number))
+        call({'archive': str(archive), 'destination': str(dest)}, succeeds=False)
+        assert not dest.exists()
     symlink.create_system = 3
     symlink.external_attr = 0o120777 << 16
     archive = make('symlink', [(symlink, '../escaped.txt')])

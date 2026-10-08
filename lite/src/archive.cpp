@@ -1,5 +1,6 @@
 #include "archive.h"
 #include "platform.h"
+#include <windows.h>
 #include <algorithm>
 #include <cstdint>
 #include <set>
@@ -7,6 +8,12 @@
 extern "C" int tangos_inflate(const unsigned char *, size_t, unsigned char *, size_t);
 namespace lite {
 namespace {
+struct WindowsPathLess {
+  bool operator()(const std::wstring &a, const std::wstring &b) const {
+    return CompareStringOrdinal(a.data(), (int)a.size(), b.data(), (int)b.size(), TRUE) ==
+           CSTR_LESS_THAN;
+  }
+};
 struct Entry {
   std::string path, content;
   bool directory;
@@ -45,7 +52,7 @@ std::vector<Entry> decode(const fs::path &archive, Settings settings) {
       uint64_t(central) + centralSize != end)
     throw std::runtime_error("Split, ZIP64 or oversized ZIP is unsupported");
   std::vector<Entry> entries;
-  std::set<std::wstring> seen;
+  std::set<std::wstring, WindowsPathLess> seen;
   uint64_t total = 0;
   size_t p = central;
   settings.portOnly = false; // Importing a fresh project is not a source repair.
@@ -75,13 +82,16 @@ std::vector<Entry> decode(const fs::path &archive, Settings settings) {
           stem == "con" || stem == "prn" || stem == "aux" || stem == "nul" ||
           (stem.size() == 4 && (stem.substr(0, 3) == "com" || stem.substr(0, 3) == "lpt") &&
            stem[3] >= '0' && stem[3] <= '9');
+      auto deviceStem = wide(stem);
+      if (deviceStem.size() == 4 &&
+          (deviceStem.substr(0, 3) == L"com" || deviceStem.substr(0, 3) == L"lpt") &&
+          (deviceStem[3] == L'\u00b9' || deviceStem[3] == L'\u00b2' || deviceStem[3] == L'\u00b3'))
+        device = true;
       if (part.empty() || part == "." || part == ".." || part.back() == '.' || part.back() == ' ' ||
           lowerPart == ".git" || device || part.find_first_of("<>\"|?*") != part.npos)
         throw std::runtime_error("Unsafe ZIP path: " + name);
     }
     auto folded = wide(name);
-    for (auto &ch : folded)
-      ch = towlower(ch);
     if (!seen.insert(folded).second)
       throw std::runtime_error("Duplicate ZIP path: " + name);
     if (size > 16 * 1024 * 1024 || (total += size) > 256 * 1024 * 1024)
@@ -143,19 +153,19 @@ std::vector<Entry> decode(const fs::path &archive, Settings settings) {
   }
   if (!descriptor)
     throw std::runtime_error("Project ZIP needs a valid root tangos.json");
-  std::set<std::wstring> files;
+  std::set<std::wstring, WindowsPathLess> files;
   for (auto &entry : entries) {
-    if (entry.directory) continue;
+    if (entry.directory)
+      continue;
     auto path = wide(entry.path);
-    for (auto &ch : path) ch = towlower(ch);
     files.insert(path);
   }
   for (auto &entry : entries) {
     auto parent = fs::u8path(entry.path).parent_path();
     while (!parent.empty()) {
       auto path = parent.generic_wstring();
-      for (auto &ch : path) ch = towlower(ch);
-      if (files.count(path)) throw std::runtime_error("ZIP file/directory collision: " + entry.path);
+      if (files.count(path))
+        throw std::runtime_error("ZIP file/directory collision: " + entry.path);
       parent = parent.parent_path();
     }
   }

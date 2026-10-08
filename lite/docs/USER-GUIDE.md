@@ -93,6 +93,10 @@ Viewer-only mode allows searching, sorting, panning, zooming and inspecting publ
 
 ## Portable updates
 
+In Viewer, **Full map** expands the map and hides the statistics and rosters.
+Choose **Restore layout**, or press F11 while the map has focus, to return.
+Selection, contributor filtering and cart contents remain available on restore.
+
 Configure your own `update.check` connection and trusted **Update asset prefix**
 (an HTTPS release directory ending in `/`). Enable downloads on that profile.
 Release metadata must contain `version`, `artifactUrl` and `sha256`, or a GitHub

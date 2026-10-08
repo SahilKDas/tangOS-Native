@@ -49,3 +49,16 @@ Draft generation uses isolated worktrees. MCP client templates and the native
 stdio bridge have transport integration tests. These additions supersede earlier
 unfinished feature notes, but do not establish exact full-screen parity or real
 provider/client interoperability. Reproducible 0.16.0 packaging remains pending.
+
+The Viewer now implements the original full-map state: statistics and rosters
+hide while the map expands beneath the header. Its toggle and F11 restore retain
+selection/cart state; zoom, camera travel, minimap and marquee use the same
+viewport bounds in both layouts. Actual GUI coverage includes a 25,000-function
+fixture and verifies the original 500-row roster cap. This is functional
+coverage, not proof of pixel-identical composition or every DPI configuration.
+
+Portable update staging/application now has opt-in native controls and tested
+checksum, executable-header, trusted-host and rollback boundaries. The official
+MCP Inspector CLI has exercised the native bridge. Paid providers and other
+desktop clients remain unverified. Real local compiler/ROM-dependent checks ran
+and retained their failures as documented in VERIFICATION.md.

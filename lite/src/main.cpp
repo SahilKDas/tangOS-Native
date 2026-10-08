@@ -779,7 +779,7 @@ void automaticUpdate() {
       !profile.value("allowUpdateDownloads", false))
     return;
   start([] {
-    Backend backend(repo, dataDir, settings);
+    Backend backend(repo, dataDir, settings, {}, requestHttp, &runner, output);
     auto args = Json::object();
     auto ticket = backend.invoke("update.stage", args);
     args["confirmation"] = ticket.at("confirmation");

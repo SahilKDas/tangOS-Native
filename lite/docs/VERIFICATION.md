@@ -82,3 +82,39 @@ Source checkpoint: `87904e1` (feature checkpoint `17191fd`). Two independent cle
 All four native suites passed, plus the driver adapter, packaged backend connection tests and 810 actual-original-code comparisons. All three packaged native GUI workflows passed: valid descriptor with fleet/Viewer/remote project, missing descriptor and invalid descriptor. The remote workflow imports a validated registry descriptor, opens a metadata-only project without Git/Fleet/MCP or automatic requests, explicitly loads published data through an injected read-only transport, captures both native screens, and checks disabled assignment and the Space shortcut. Disposable backend tests cover stable cache reopening, local versus remote project paths, invalid descriptors, no network during opening and configuration-injection rejection. INI tests cover remembered Unicode remote project IDs.
 
 The first packaging attempt revealed test sequencing that ran the remote fixture after descriptor recovery with an uninitialized UI descriptor. The test now keeps those scenarios separate; the final package above passed all workflows. Real external project endpoints and owner API credentials were not used. Full Console parity remains incomplete; see LIMITATIONS.md. Work stopped for today after this scope.
+
+## 0.16.0 source and real-integration checkpoint — 2026-10-08
+
+Source checkpoint `79f3590` adds portable updates and explicit cross-repository
+GitHub PR selection. Five native suites passed, including actual replacement of
+disposable executable copies, rollback backup preservation, changed-target
+rejection, checksum/header/trust/redirect guards and receipt confinement. The
+official MCP Inspector 2.10.1 CLI exercised the native stdio bridge. Presence has
+48 additional direct comparisons with the retained original implementation.
+The native GUI launched and passed repository/status/check/log/responsiveness,
+clone, batches, source inspection, remote Viewer and cached-data workflows.
+
+Read-only real GitHub validation used the existing local `gh` login against
+`tangosdev/tangOS` PR 16. Native readiness returned the merged PR's metadata.
+The checks command returned “no checks reported”; this is not a green checks
+claim. No remote write, PR creation, merge or push occurred.
+
+Actual `64DS-DX` checkout checks ran through the native backend and retained
+complete logs under `lite/out/live-sm64ds-*`. Port reference checks passed.
+Declaration agreement passed its existing baseline, with 12,228 existing
+disagreements; it does not establish universal agreement. Dead-reference checks
+failed on 561 new prose/comment references. Link checks skipped an empty changed
+source range, so they establish no broader relocation result.
+
+For byte matching, an isolated Python environment installed the checkout's pinned
+requirements and ndspy 4.2.0. The existing local ROM was unpacked only under the
+checkout's ignored `extracted/` tree, using both its unpack script and documented
+`dsd rom extract` layout. The compiler/link pipeline then failed the existing
+strict stock/TU baseline control: symbol checks failed and its bootstrap proof
+did not agree with the generated baseline. The outer `--no-rom` command also
+invokes a nested baseline builder that produces an ignored local ROM; none of
+that data is committed or packaged. The selected checkout's tracked source
+remained unchanged. Byte matching is failed, not verified. These failures are
+recorded without changing baselines, waiving checks or repairing `src/`.
+
+Reproducible 0.16.0 packaging and remaining screen parity are still pending.

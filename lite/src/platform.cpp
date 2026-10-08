@@ -305,8 +305,7 @@ Result Runner::run(const Command &c, const Sink &sink, const fs::path &log) {
        "] exit=" + std::to_string(result.code) + "\n");
   if (result.code && !killed)
     emit("Action: inspect file:line diagnostics above; rerun the displayed "
-         "command in this repository. Missing ROM/assets must be supplied "
-         "locally.\n");
+         "command in this repository.\n");
   filtered("", true);
   return result;
 }
