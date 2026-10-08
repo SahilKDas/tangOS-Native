@@ -46,3 +46,7 @@ Native Atlas geometry matches 24 original buildWorld cases covering all four lay
 ## 0.7.0 Viewer checkpoint
 
 Source checkpoint f6e7384. Two clean builds produced identical SHA-256 94A9052F7FABEEE8DEBA3844BC7C1A48B84C778EC05234903435785AE8D791A9. Executable size: 5,158,400 bytes (5.158 decimal MB), Windows system DLL imports only. All four native suites, packaged backend/adapter tests and 480 reference comparisons passed. Three packaged GUI workflows passed, including independent Viewer coloring, contributor selection and persistent draft/color choices. Full parity remains unfinished.
+
+## 0.8.0 MCP checkpoint
+
+Source checkpoint f668c5f. Executable: 5,186,048 bytes (5.186 decimal MB), SHA-256 74B160CED50FC2B5902B3141AB6C62CA2DEA30F94C5E37AD3928E9321E9093C6. Two clean builds were identical with Windows system DLL imports only. Four native suites, all 480 reference comparisons, packaged backend/adapter checks and three packaged GUI workflows passed. MCP integration verifies session deletion, rejected reuse, traffic telemetry and preservation of an unrelated running CLI job. GUI assertions verify start/stop/restart and persisted server preference. Null/false claims remain selectable. Full parity is still not established.
