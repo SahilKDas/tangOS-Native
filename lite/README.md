@@ -152,3 +152,5 @@ See [backend guide](docs/BACKEND.md) for project registration, source/history, c
 Development tests additionally use Node 26 to run retained original Console policies as comparison oracles. Node, TypeScript and CSS are not included in TangOSLite.exe. `test_reference_parity.py` compares source classification, adaptive roles, pool difficulty and function history; `test_statistics_reference.py` compares incremental unique-function statistics. `audit_parity.py --require-full` refuses a full-parity claim while public contracts remain unverified.
 
 Version 0.5 adds native source/history inspection, minimap/marquee/navigation/module windows, animated backgrounds, Connections/Requirements/Services screens, queue editing and retention, unique-function statistics and safer explicit sync backups. Full parity remains underway, as documented in UI-PARITY.md.
+
+0.15.0 adds remembered remote projects and viewer-only published progress. Use the project menu to import a downloaded tangos.json. See docs/USER-GUIDE.md for your own connection setup. Verified portable size: 5,400,576 bytes (5.401 MB); two clean builds are byte-identical. Full Console parity remains incomplete.

@@ -74,3 +74,11 @@ Release source checkpoint: db3c9a9. Two clean Windows x64 builds are byte-identi
 ## 0.14.0 partial driver ledger checkpoint
 
 Release source checkpoint: 8d9af41. Two clean Windows x64 builds are identical: **5,358,592 bytes (5.359 decimal MB)**, SHA256 **68E666333B3674FAE947F516EB96C8DC359A3F94FF6E3DF149E6D39364FD1FC9**. System DLL imports only. All four native suites, driver/backend tests, **810 actual-original-code comparisons**, and three packaged GUI workflows passed. Partial driver ledgers preserve unattempted queued targets, successfully drain later attempts, park zero-progress ledgers, and survive restart. Token aliases and null/per-landed fallback have 48 direct comparisons with the retained original ingestion block. Full parity remains open.
+
+## 0.15.0 remote projects / viewer-only checkpoint — 2026-10-07
+
+Source checkpoint: `87904e1` (feature checkpoint `17191fd`). Two independent clean builds in `lite/release-0.15.0-verified` produced identical portable executables: **5,400,576 bytes (5.401 MB)**, SHA-256 `84910C7556158073EF9933E7EB705FAC67BA9F6B705EE055C7EC75F0DC1CA5F6`. Imports are Windows system DLLs only.
+
+All four native suites passed, plus the driver adapter, packaged backend connection tests and 810 actual-original-code comparisons. All three packaged native GUI workflows passed: valid descriptor with fleet/Viewer/remote project, missing descriptor and invalid descriptor. The remote workflow imports a validated registry descriptor, opens a metadata-only project without Git/Fleet/MCP or automatic requests, explicitly loads published data through an injected read-only transport, captures both native screens, and checks disabled assignment and the Space shortcut. Disposable backend tests cover stable cache reopening, local versus remote project paths, invalid descriptors, no network during opening and configuration-injection rejection. INI tests cover remembered Unicode remote project IDs.
+
+The first packaging attempt revealed test sequencing that ran the remote fixture after descriptor recovery with an uninitialized UI descriptor. The test now keeps those scenarios separate; the final package above passed all workflows. Real external project endpoints and owner API credentials were not used. Full Console parity remains incomplete; see LIMITATIONS.md. Work stopped for today after this scope.
