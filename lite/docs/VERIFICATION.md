@@ -66,3 +66,7 @@ Source checkpoint 06cf95f. Executable: 5,305,856 bytes (5.306 decimal MB), SHA-2
 ## 0.12.0 Controller and project selection checkpoint
 
 Two clean release builds produced identical Windows x64 executables: **5,323,264 bytes (5.323 decimal MB)**, SHA256 **9ED7851ED2FF53B6A7D2E4CA17EB1FD5D3DA7BE42AE745313FD6493ED8AB5203**. Only Windows system DLLs are imported. All four native suites, adapter/backend tests, 738 actual-original-code comparisons, and all three packaged GUI workflows passed. The GUI exercises four-agent Simple/Advanced control containment and remembered canonical repository/title registration. Dense-detail mascot downsampling has a raster regression. The development-only original Controller reference rendered without errors. Full parity remains open as listed in UI-PARITY.md and LIMITATIONS.md.
+
+## 0.13.0 source inspection and clone cancellation checkpoint
+
+Release source checkpoint: db3c9a9. Two clean Windows x64 builds are byte-identical: **5,351,936 bytes (5.352 decimal MB)**, SHA256 **DB49E74F536250C9E68088CCE483024FE3B367A5931EF453B0081FD021522681**. Windows system DLLs only. All four native suites, driver/backend tests, **762 original-code comparisons**, and three packaged GUI workflows passed. The packaged regression reproduces rapid function-list selection followed by source inspection and verifies the final target's numbered source, fixing dropped requests. Viewer list selection/sort persistence/control separation and native service Cancel routing also passed. Full parity remains open.
