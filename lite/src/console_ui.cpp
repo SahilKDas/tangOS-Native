@@ -3212,6 +3212,8 @@ void ConsoleUI::stop() {
 }
 void ConsoleUI::smokeRemote(const fs::path &directory,
                             const std::function<void(const fs::path &)> &capture) {
+  if (impl->screen == Screen::descriptorGate)
+    return;
   if (!fs::exists(impl->repository / ".tangos-lite-test-fixture"))
     throw std::runtime_error("Remote GUI smoke requires a disposable fixture");
   auto data = directory / "remote-viewer-test";
