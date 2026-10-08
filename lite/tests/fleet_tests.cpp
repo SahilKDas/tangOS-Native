@@ -194,6 +194,24 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       auto first = fleet.add(a);
       a.name = "API B";
       auto second = fleet.add(a);
+      auto statePath = data / "projects/fixture/fleet.json";
+      HANDLE lockedState = CreateFileW(statePath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+      expect(lockedState != INVALID_HANDLE_VALUE, "fleet state lock fixture opened");
+      std::thread releaseLock([lockedState] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        CloseHandle(lockedState);
+      });
+      try {
+        fleet.saveDraft({{"items", Json::array()}});
+      } catch (...) {
+        releaseLock.join();
+        throw;
+      }
+      releaseLock.join();
+      expect(Json::parse(read(statePath)).at("agents").size() == 2 &&
+                 !fs::exists(data / "projects/fixture/fleet.tmp"),
+             "fleet state survives transient file lock");
       fleet.saveDraft({{"title", "Global fixture"},
                        {"prompt", "Preserve handoff prompt"},
                        {"items", Json::array({{{"id", "global-only"}, {"name", "global_only"}}})}});

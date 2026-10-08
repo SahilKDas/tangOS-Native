@@ -191,9 +191,20 @@ void Fleet::saveLocked() {
   j["batchBook"] = batchBook.serialize();
   auto temp = directory / "fleet.tmp";
   write(temp, j.dump(2));
-  if (!MoveFileExW(temp.c_str(), (directory / "fleet.json").c_str(),
-                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-    throw std::runtime_error("Cannot save fleet state");
+  DWORD error = ERROR_SUCCESS;
+  for (int attempt = 0; attempt < 20; ++attempt) {
+    if (MoveFileExW(temp.c_str(), (directory / "fleet.json").c_str(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+      return;
+    error = GetLastError();
+    if (error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION &&
+        error != ERROR_ACCESS_DENIED)
+      break;
+    Sleep(50);
+  }
+  throw std::runtime_error(
+      "Cannot save fleet state: " + utf8((directory / "fleet.json").wstring()) +
+      " (Windows error " + std::to_string(error) + ")");
 }
 static std::string agentNameKey(std::string name) {
   name = trim(name);
