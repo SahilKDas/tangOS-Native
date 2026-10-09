@@ -1,4 +1,25 @@
-# Windows release verification — 2026-10-07
+# Windows release verification — 2026-10-09
+
+## 0.23.0 verified portable package — 2026-10-09
+
+Release source checkpoint **707b7a7** passed two clean Windows x64 builds with
+identical bytes: **6,613,504 bytes (6.614 decimal MB)**, SHA256
+**DEBE289AB8E67F07789AC11D61D8DB7B5DF1AB7F923C3C8583E24D078B1BFC50**.
+Imports are Windows system DLLs only. All five native suites passed with the
+official MCP Inspector enabled, alongside packaged backend, driver adapter,
+disposable Git/ZIP workflows and **12,262 original Console comparisons**.
+
+All three packaged GUI workflows passed: valid, missing and invalid project
+descriptors. Each exercised repository selection, status, check execution,
+actionable diagnostics, complete retained logs and 12 responsive timer ticks.
+The valid project also exercised the complete reference screen, large database
+and display matrix. The verified portable artifact is `lite/release/TangOSLite.exe`;
+build evidence is retained in `lite/release-0.23.0-verified`.
+
+Actual provider, GitHub, display and ROM/check results are detailed below.
+The existing SM64DS dead-reference and byte-matching failures remain failures.
+Hosted providers, remote GitHub writes and exact full UI/protocol parity remain
+unverified. No credentials, ROMs or extracted assets are included in the package.
 
 ## 0.23.0 workflow and live-validation source checkpoint — 2026-10-09
 
