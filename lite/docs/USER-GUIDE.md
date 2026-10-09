@@ -74,6 +74,11 @@ the Inspector and its dependencies are development tools and are not bundled.
 
 In Chaos Viewer, left-drag pans, right-drag selects eligible functions, the wheel zooms and WASD/arrows travel. Space adds/removes the selection from the cart. Inspect source opens numbered source and prior tries; Pop out module opens an independent Viewer that sends draft additions back to the main cart. It does not start a second agent controller.
 
+Local projects with `data.generate` show **Regenerate**. It opens the configured
+tool and database output for command review before you run it. Keep the complete
+log if generation fails. After verified agent landing, the database regenerates
+inside the retained agent worktree; review those changes before committing.
+
 Settings provides matching, delegation, animation and live-refresh controls. Connections stores user-owned endpoint profiles with credentials referenced by local environment/vault names; nothing is enabled by default. Project services shows request results and exact mutation previews, followed by a separate confirmation. This repo needs checks the selected repository's tools and inputs asynchronously and offers setup commands you control. Agent Details → Manage queue lets you reorder/remove waiting targets while the current assignment runs; current targets are protected, and edits during assignment preparation require retrying. Additions made during an active batch survive that batch's completion.
 
 Explicit Git sync is destructive: review its exact target, local changes and listed deletions before confirming. It backs up allowed changed files and pins the prior commit under refs/tangos/backups. Protected assets stay local; protected tracked/source changes block the reset.

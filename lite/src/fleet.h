@@ -66,6 +66,7 @@ class Fleet {
   std::string chooseRole(const std::shared_ptr<Job> &job);
   Json schedule(const std::shared_ptr<Job> &job, const fs::path &cwd);
   void audit(const std::shared_ptr<Job> &job);
+  void refreshAtlas(const std::shared_ptr<Job> &job);
 
 public:
   Fleet(fs::path repository, fs::path directory, Descriptor descriptor, Settings settings,

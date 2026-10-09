@@ -20,10 +20,16 @@ Mutations first return a concrete preview and a single-use confirmation. Inspect
 the descriptor interpreter, working directory and `dbPath` as `{out}`. Confirm
 the preview to execute it. A successful result includes the refreshed `atlas`;
 failure includes the exit code and durable log without claiming a refresh.
+Inspect `refreshed` as well as `exit`: a successful script that produces no valid
+database reports `refreshError` and retains its log. Refreshed Atlas divergences
+seed the near-miss baseline without overwriting a better observed result.
 Output paths cannot escape the checkout or target protected source, ROMs,
 credentials or excluded assets. Repository commands remain trusted local code.
 In local Viewer, **Regenerate** opens this tool and its output argument for review.
 Remote Viewer retains **Reload** and does not execute local commands.
+Verified agent landing also runs the configured generator in that agent's isolated
+worktree. Refresh failure retains the landed changes for review; neither landing
+nor regeneration publishes those changes to the primary checkout.
 
 `connections.set` writes local `connections.json`, never a repository file. Each profile needs the user's explicit `enabled: true` and a full URL/method. There are no enabled profiles by default. For example:
 

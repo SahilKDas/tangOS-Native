@@ -892,6 +892,31 @@ Json driverResultRows(const Json &result) {
     rows.push_back({{"tokensIn", input}, {"tokensOut", output}});
   return rows;
 }
+Json seedAtlasBestDiv(Json best, const Json &functions) {
+  if (!best.is_object())
+    best = Json::object();
+  if (!functions.is_array())
+    return best;
+  for (const auto &row : functions) {
+    if (!row.is_object() || !row.contains("name") || !row["name"].is_string())
+      continue;
+    auto name = row["name"].get<std::string>();
+    if (name.empty())
+      continue;
+    double divergence = -1;
+    if (row.contains("matched") && row["matched"] == true)
+      divergence = 0;
+    else if (row.contains("div") && row["div"].is_number()) {
+      auto candidate = row["div"].get<double>();
+      if (candidate >= 1 && candidate < 999)
+        divergence = candidate;
+    }
+    if (divergence >= 0 &&
+        (!best.contains(name) || !best[name].is_number() || divergence < best[name].get<double>()))
+      best[name] = divergence;
+  }
+  return best;
+}
 Json updateAgentStats(Json entry, const Json &rows, Json &best) {
   if (!entry.contains("attemptedFuncs")) {
     entry["attempts"] = 0;
@@ -1091,6 +1116,12 @@ void Backend::recordAgent(const std::string &id, const fs::path &results, const 
       rows = jsonLines(results);
   }
   auto best = fileJson(directory / "stats-best.json");
+  if (fs::is_regular_file(repository / "tangos.json")) {
+    auto descriptor = loadDescriptor(repository);
+    auto path = confinedPath(repository, descriptor.database);
+    if (fs::is_regular_file(path))
+      best = seedAtlasBestDiv(best, fileJson(path).value("functions", Json::array()));
+  }
   {
     std::lock_guard<std::mutex> sessionLock(sessionStatsMutex);
     auto &session = sessionStats[utf8(directory.wstring())];
@@ -1430,7 +1461,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       args["connection"] = m;
     auto result = execute("network.read", args);
     if (m == "update.check" && result.value("ok", false))
-      result["update"] = updateStatus("0.25.0", result.at("data"));
+      result["update"] = updateStatus("0.26.0", result.at("data"));
     return result;
   }
   if (m == "git.clone") {
@@ -1548,7 +1579,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto folder = directory / "exports" / ("bug-report-" + uniqueId());
     fs::create_directories(folder);
     Json debug = {{"app", "TangOS Lite"},
-                  {"version", "0.25.0"},
+                  {"version", "0.26.0"},
                   {"portOnly", settings.portOnly},
                   {"project", settings.activeProject},
                   {"connections", Json::array()},
@@ -1609,7 +1640,8 @@ Json Backend::execute(const std::string &m, const Json &a) {
   if (m == "policy.classify")
     return {{"classification", classifySource(a.at("source").get<std::string>())}};
   if (m == "policy.statistics") {
-    auto best = a.value("best", Json::object());
+    auto best =
+        seedAtlasBestDiv(a.value("best", Json::object()), a.value("atlasFunctions", Json::array()));
     return {{"entry", updateAgentStats(a.value("entry", Json::object()), a.at("rows"), best)},
             {"best", best}};
   }
@@ -1872,8 +1904,26 @@ Json Backend::execute(const std::string &m, const Json &a) {
           "Configure data.generate in tangos.json before regenerating Atlas data");
     auto result = execute("tools.run", {{"tool", descriptor.generatorId},
                                         {"values", {{"out", descriptor.database}}}});
-    if (result.value("exit", 1) == 0 && !result.value("cancelled", false))
-      result["atlas"] = execute("atlas.load", Json::object());
+    result["refreshed"] = false;
+    if (result.value("exit", 1) == 0 && !result.value("cancelled", false)) {
+      try {
+        auto path = confinedPath(repository, descriptor.database);
+        if (!fs::is_regular_file(path) || fs::file_size(path) > 128 * 1024 * 1024)
+          throw std::runtime_error("Generated Atlas is missing or exceeds 128 MiB: " +
+                                   descriptor.database);
+        auto atlas = Json::parse(read(path));
+        if (!atlas.is_object() || !atlas.contains("functions") || !atlas["functions"].is_array())
+          throw std::runtime_error("Generated Atlas requires a functions array: " +
+                                   descriptor.database);
+        parseAtlas(atlas.dump());
+        auto bestPath = directory / "stats-best.json";
+        saveJson(bestPath, seedAtlasBestDiv(fileJson(bestPath), atlas["functions"]));
+        result["atlas"] = std::move(atlas);
+        result["refreshed"] = true;
+      } catch (const std::exception &error) {
+        result["refreshError"] = error.what();
+      }
+    }
     return result;
   }
   if (m == "tools.run") {

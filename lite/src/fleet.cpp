@@ -185,7 +185,7 @@ Fleet::Fleet(fs::path repo, fs::path dir, Descriptor desc, Settings prefs, Sink 
       if (!job->state.worktree.empty())
         confinedPath(directory, utf8(job->state.worktree.wstring()));
       if (job->state.phase == "running" || job->state.phase == "scheduling" ||
-          job->state.phase == "verifying") {
+          job->state.phase == "verifying" || job->state.phase == "refreshing") {
         job->state.phase = "interrupted";
         job->state.detail =
             "Previous run interrupted; inspect preserved worktree/log before resuming";
@@ -800,6 +800,41 @@ void Fleet::start(const std::string &id, bool execute) {
     }
   });
 }
+void Fleet::refreshAtlas(const std::shared_ptr<Job> &job) {
+  if (descriptor.generatorId.empty())
+    return;
+  if (!toolEnabled(descriptor.generatorId))
+    throw std::runtime_error(
+        "Atlas refresh disabled by user tool policy; retained landed changes require review");
+  Json values = {{"out", descriptor.database}};
+  validateAtlasOutput(descriptor, values, job->state.worktree, settings);
+  auto command = toolCommand(descriptor, descriptor.tool(descriptor.generatorId), values,
+                             job->state.worktree, true);
+  command.environment = vault.values();
+  command.activityTool = descriptor.generatorId;
+  command.activityArguments = values.dump();
+  command.activityLabel = "Refresh landed Atlas data";
+  command.activityReadOnly = true;
+  command.activityAgent = job->state.spec.name;
+  command.activityRepository = job->state.worktree;
+  auto log = directory / job->state.id / "atlas-refresh.log";
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    job->state.phase = "refreshing";
+    job->state.detail = "Refreshing Atlas in the isolated worktree after verified landing";
+    job->state.log = log;
+    saveLocked();
+  }
+  auto result = job->runner.run(command, events, log);
+  audit(job);
+  if (result.code)
+    throw std::runtime_error("Landed changes retained; Atlas refresh failed (exit " +
+                             std::to_string(result.code) + "); inspect atlas-refresh.log");
+  auto database = confinedPath(job->state.worktree, descriptor.database);
+  if (!fs::is_regular_file(database))
+    throw std::runtime_error("Atlas refresh produced no database: " + descriptor.database);
+  parseAtlas(read(database));
+}
 void Fleet::land(const std::string &id) {
   std::shared_ptr<Job> job;
   const Tool *tool = descriptor.role("land");
@@ -857,6 +892,7 @@ void Fleet::land(const std::string &id) {
           throw std::runtime_error("Landed changes failed: " + check.name);
       }
       audit(job);
+      refreshAtlas(job);
       update("review", gates ? "Landed changes passed checks; review complete diff"
                              : "Landed changes unverified; no available gates");
     } catch (const std::exception &e) {
@@ -1324,6 +1360,8 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
             throw std::runtime_error("Verification failed: " + check.name);
         }
       audit(job);
+      if (policy.value("autoLand", false))
+        refreshAtlas(job);
       Backend(repository, directory.parent_path().parent_path(), settings)
           .recordAgent(job->state.id, out, "review", gates,
                        job->state.spec.role == "Unassigned" ? job->runtimeRole : std::string());
@@ -1525,6 +1563,8 @@ Result Fleet::runTool(const std::string &id, const std::string &tool, const Json
     job->requestRunner = request;
   }
   try {
+    if (!descriptor.generatorId.empty() && tool == descriptor.generatorId)
+      validateAtlasOutput(descriptor, args, job->state.worktree, settings);
     auto c = toolCommand(descriptor, descriptor.tool(tool), args, job->state.worktree, true, false);
     for (auto &entry : vault.values())
       c.environment[entry.first] = entry.second;

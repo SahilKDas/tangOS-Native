@@ -211,6 +211,16 @@ int main() {
               read(fs::u8path(failed.at("log").get<std::string>())).find("generation failed") !=
                   std::string::npos,
           "Failed generation preserves its log without presenting the old database as refreshed");
+      fs::remove(repo / "generated database.json");
+      write(repo / "tools/generate_atlas.py", "print('no database produced')\n");
+      preview = backend.invoke("atlas.generate");
+      auto missing =
+          backend.invoke("atlas.generate", {{"confirmation", preview.at("confirmation")}});
+      expect(
+          missing.value("exit", 1) == 0 && !missing.value("refreshed", true) &&
+              missing.contains("refreshError") && !missing.contains("atlas") &&
+              fs::exists(fs::u8path(missing.at("log").get<std::string>())),
+          "Successful script exit without a database retains the log and reports refresh failure");
       auto collision = generatedDescriptor;
       collision["tools"].push_back(
           {{"id", "generate_atlas_data"}, {"command", "python --version"}, {"readOnly", true}});

@@ -245,6 +245,8 @@ struct ConsoleUI::Impl {
     ULONGLONG at = 0;
   };
   std::map<std::string, ProgressMotion> progressMotion;
+  std::map<std::string, ProgressMotion> cardHoverMotion;
+  std::map<std::string, int> cardHoverOffset;
   size_t pickedFunction = SIZE_MAX;
   HWND batchList = nullptr, batchTitle = nullptr, batchPrompt = nullptr;
   Json batchRows = Json::array(), draftRows = Json::array();
@@ -633,13 +635,52 @@ struct ConsoleUI::Impl {
     }
   }
   int controllerWidth() const { return width - (controllerNeedsRail() ? 354 : 14); }
-  RECT agentCardBounds(size_t index) const {
+  RECT agentCardBounds(size_t index, bool animated = true) const {
     double cardWidth = std::max(60., (controllerWidth() - 62) / 3.);
     int cardHeight = advancedMode ? 272 : 210;
     int x = 19 + int(std::round((index % 3) * (cardWidth + 12)));
     int y = 62 + int(index / 3) * (cardHeight + 12) - scroll;
+    if (animated && index < agents.size()) {
+      auto found = cardHoverOffset.find(agents[index].id);
+      if (found != cardHoverOffset.end())
+        y += found->second;
+    }
     int right = 19 + int(std::round((index % 3) * (cardWidth + 12) + cardWidth));
     return {x, y, right, y + cardHeight};
+  }
+  void updateCardHover(POINT point, bool eligible, ULONGLONG now) {
+    if (screen != Screen::controller)
+      return;
+    bool changed = false;
+    for (size_t i = 0; i < agents.size(); ++i) {
+      auto bounds = agentCardBounds(i, false);
+      auto &motion = cardHoverMotion[agents[i].id];
+      double shown = controllerProgress(motion.from, motion.target, double(now - motion.at) * 3);
+      double target =
+          eligible && bounds.top >= 62 && bounds.bottom <= height - 100 && PtInRect(&bounds, point)
+              ? -2
+              : 0;
+      if (motion.target != target)
+        motion = {shown, target, now};
+      auto offset = int(std::round(skin::animationEnabled() ? shown : target));
+      int delta = offset - cardHoverOffset[agents[i].id];
+      if (!delta)
+        continue;
+      cardHoverOffset[agents[i].id] = offset;
+      changed = true;
+      for (int controlId = 5000 + int(i) * 16; controlId < 5000 + int(i + 1) * 16; ++controlId)
+        if (auto child = GetDlgItem(window, controlId)) {
+          RECT childBounds{};
+          GetWindowRect(child, &childBounds);
+          MapWindowPoints(nullptr, window, reinterpret_cast<POINT *>(&childBounds), 2);
+          SetWindowPos(child, nullptr, childBounds.left, childBounds.top + delta, 0, 0,
+                       SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+    }
+    if (changed) {
+      skin::invalidateBackdrop(window);
+      InvalidateRect(window, nullptr, FALSE);
+    }
   }
   int controllerNameWidth(HDC dc, const AgentState &agent, int width) const {
     int occupied = agent.active && agent.spec.loop ? 29 : 0;
@@ -718,7 +759,8 @@ struct ConsoleUI::Impl {
         cardQueued[a.id] = a.queue.size();
         auto bounds = agentCardBounds(i);
         int x = bounds.left, y = bounds.top, w = bounds.right - x, h = bounds.bottom - y;
-        if (y >= 62 && y + h <= height - 100) {
+        auto layoutBounds = agentCardBounds(i, false);
+        if (layoutBounds.top >= 62 && layoutBounds.bottom <= height - 100) {
           int base = 5000 + (int)i * 16;
           int cartOffset = !advancedMode && !a.active && !cart.empty() ? 38 : 0;
           auto details = control(L"BUTTON", "Open detailed stats, history, and recommendation",
@@ -2654,7 +2696,8 @@ struct ConsoleUI::Impl {
         auto &a = agents[i];
         auto b = agentCardBounds(i);
         int x = b.left, y = b.top, w = b.right - x, h = b.bottom - y;
-        if (y < 62 || b.bottom > height - 100)
+        auto layoutBounds = agentCardBounds(i, false);
+        if (layoutBounds.top < 62 || layoutBounds.bottom > height - 100)
           continue;
         static const COLORREF palette[] = {RGB(0, 153, 224),  RGB(125, 75, 216), RGB(230, 25, 75),
                                            RGB(245, 130, 49), RGB(5, 150, 105),  RGB(219, 39, 119),
@@ -4342,6 +4385,13 @@ struct ConsoleUI::Impl {
     }
   }
   void tick() {
+    POINT cursor{};
+    GetCursorPos(&cursor);
+    auto under = WindowFromPoint(cursor);
+    bool cardEligible = IsWindowVisible(window) && IsWindowEnabled(parent) &&
+                        (under == window || IsChild(window, under));
+    ScreenToClient(window, &cursor);
+    updateCardHover(cursor, cardEligible, GetTickCount64());
     if (tourOverlay && !tourOverlay->open()) {
       tourOverlay.reset();
       if (helper)
@@ -5537,6 +5587,35 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
         throw std::runtime_error("Controller control differs from reference geometry");
     }
     capture(directory / "controller-reference-idle.bmp");
+    {
+      auto now = GetTickCount64();
+      POINT outside{-100, -100};
+      impl->updateCardHover(outside, false, now);
+      impl->updateCardHover(outside, false, now + 100);
+      auto resting = impl->agentCardBounds(0, false);
+      RECT before{};
+      auto detailControl = GetDlgItem(impl->window, 5001);
+      GetWindowRect(detailControl, &before);
+      POINT inside{resting.left + 8, resting.top + 8};
+      impl->updateCardHover(inside, true, now + 200);
+      impl->updateCardHover(inside, true, now + 300);
+      auto lifted = impl->agentCardBounds(0);
+      RECT after{};
+      GetWindowRect(detailControl, &after);
+      if (lifted.top != resting.top - 2 || after.top != before.top - 2 ||
+          after.left != before.left || after.bottom - after.top != before.bottom - before.top)
+        throw std::runtime_error(
+            "Controller hover did not move the card and native controls together");
+      capture(directory / "controller-reference-hover.bmp");
+      impl->updateCardHover(outside, false, now + 400);
+      impl->updateCardHover(outside, false, now + 500);
+      auto restored = impl->agentCardBounds(0);
+      if (!EqualRect(&resting, &restored))
+        throw std::runtime_error("Controller hover did not return to its resting layout");
+      write(directory / "controller-hover-report.txt",
+            "PASS: reference 2px hover lift and 100ms easing move painted cards and native "
+            "controls together; leave restores geometry");
+    }
     auto badgeDC = CreateCompatibleDC(nullptr);
     auto windowDC = GetDC(impl->window);
     auto badgeBitmap = CreateCompatibleBitmap(windowDC, 31, 16);

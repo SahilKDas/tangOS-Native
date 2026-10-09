@@ -9,7 +9,18 @@ Disposable backend tests cover command construction, confirmation, changed-scrip
 expiry, failed generation, output guards, tool-ID collisions and complete logs.
 The native GUI workflow verifies the configured tool selection and output preview
 in `lite/out/gui-atlas-generator-025`. Automatic post-land regeneration and
-reference statistics baseline comparison remain under implementation.
+reference statistics baseline comparison were completed in the next checkpoint.
+
+Landing and user-enabled auto-land now regenerate the database in the isolated
+agent worktree after independent verification. Failed refresh retains the landed
+changes and actionable logs. It does not copy agent output into the primary
+checkout. MCP generator calls enforce the same protected output-path rules.
+Atlas divergence baselines only improve existing best values, with 16 comparisons
+against the actual original statistics implementation. Controller cards now use
+the reference two-pixel hover lift and 100 ms easing; native child controls move
+with the card. The launched GUI passed alignment/restoration and retained-log
+checks in `lite/out/gui-hover-refresh-025`. Shadow blur and precise animation
+cadence remain under comparison.
 
 ## Styled help and window stacking checkpoint
 

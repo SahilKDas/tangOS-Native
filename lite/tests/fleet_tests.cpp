@@ -133,6 +133,13 @@ if __name__=='__main__':main()
                 Json::array({{{"name", "value"}, {"type", "string"}, {"required", true}}})}}})}};
     write(repo / "tools/land.py",
           "from pathlib import Path\nPath('port/landed.txt').write_text('landed fixture')\n");
+    descriptor["data"] = {{"dbPath", "generated-atlas.json"},
+                          {"generate", "{python} tools/regenerate.py {out}"}};
+    write(repo / "tools/regenerate.py", "import json,sys\nfrom pathlib import Path\n"
+                                        "assert Path('port/landed.txt').exists()\n"
+                                        "Path(sys.argv[1]).write_text(json.dumps({'functions':[{'"
+                                        "id':'landed','name':'landed','size':16}]}))\n"
+                                        "print('regenerated isolated Atlas',flush=True)\n");
     descriptor["tools"].push_back(
         {{"id", "match"},
          {"label", "Verify match"},
@@ -551,8 +558,29 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       wait(fleet);
       for (auto &state : fleet.snapshot())
         if (state.id == first)
-          expect(state.phase == "review" && fs::exists(state.worktree / "port/landed.txt"),
+          expect(state.phase == "review" && fs::exists(state.worktree / "port/landed.txt") &&
+                     fs::exists(state.worktree / "generated-atlas.json") &&
+                     read(state.log).find("regenerated isolated Atlas") != std::string::npos,
                  "explicit isolated landing and verification");
+      expect(!fs::exists(repo / "generated-atlas.json"),
+             "Post-land regeneration leaves the primary checkout unchanged");
+      auto landedState = fleet.snapshot();
+      auto landedAgent = std::find_if(landedState.begin(), landedState.end(),
+                                      [&](const auto &state) { return state.id == first; });
+      auto regenerationScript = landedAgent->worktree / "tools/regenerate.py";
+      auto regenerationSource = read(regenerationScript);
+      write(regenerationScript, "import sys\nprint('refresh failed',flush=True)\nsys.exit(7)\n");
+      fleet.land(first);
+      wait(fleet);
+      for (auto &state : fleet.snapshot())
+        if (state.id == first)
+          expect(state.phase == "failed" && fs::exists(state.worktree / "port/landed.txt") &&
+                     state.detail.find("Atlas refresh failed") != std::string::npos &&
+                     read(state.log).find("refresh failed") != std::string::npos,
+                 "Post-land refresh failure preserves landed changes and actionable complete logs");
+      write(regenerationScript, regenerationSource);
+      fleet.land(first);
+      wait(fleet);
       fleet.setPolicy(settings);
       auto diff = fleet.review(first);
       expect(diff.find("one.txt") != diff.npos, "complete agent diff review");
@@ -643,6 +671,8 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       fleet.start(external);
       wait(fleet);
       fleet.takeBatch(external);
+      reject([&] { fleet.runTool(external, desc.generatorId, {{"out", "src/forbidden.json"}}); },
+             "MCP cannot bypass protected Atlas generator output paths");
       auto hit = fleet.runTool(external, "match",
                                {{"value", "print('MATCHING VERSIONS: 1.2')"},
                                 {"func", "observed_hit"},

@@ -35,6 +35,28 @@ def main():
                 assert entry.get(native,default)==ref.get(original,default),(i,native,entry,ref)
             assert [int(v) for v in entry['recent']]==ref.get('recentOutcomes',[]),(i,entry,ref)
             assert best==want['best'],(i,best,want['best'])
-    print(f'PASS {len(rows)} incremental statistics comparisons against original Console')
+        seed_cases = [
+            {'best': {}, 'functions': [{'name': 'existing', 'div': 3}]},
+            {'best': {'existing': 2}, 'functions': [{'name': 'existing', 'div': 3}]},
+            {'best': {'existing': 5}, 'functions': [{'name': 'existing', 'div': 3}]},
+            {'best': {'existing': 5}, 'functions': [{'name': 'existing', 'matched': True, 'div': 9}]},
+            {'best': {}, 'functions': [{'name': '', 'div': 2}, {'name': 'no-value'}, {'name': 'matched', 'matched': True}]},
+            {'best': {'existing': 5}, 'functions': [{'name': 'existing', 'div': 3}, {'name': 'existing', 'div': 7}]},
+        ]
+        seed_cases += [{'best': {}, 'functions': [{'name': 'boundary', 'div': div}]}
+                       for div in [-1, 0, 0.5, 1, 1.5, 998, 999, 1000, '3', None]]
+        fixture.write_text(json.dumps(seed_cases))
+        runner.write_text("import fs from 'node:fs'; import {aiStats} from "+json.dumps(stats.as_uri())+
+                          ";const cases=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));const outputs=cases.map(c=>{aiStats.swapTo({},c.best);aiStats.seedBestDiv(c.functions);return aiStats.serializeBestDiv();});process.stdout.write(JSON.stringify(outputs));",encoding='utf-8')
+        run=subprocess.run(['node','--disable-warning=MODULE_TYPELESS_PACKAGE_JSON',str(runner),str(fixture)],capture_output=True,text=True,encoding='utf-8',timeout=20)
+        assert run.returncode == 0, run.stderr
+        for case,want in zip(seed_cases,json.loads(run.stdout)):
+            request.write_text(json.dumps({'method':'policy.statistics','arguments':{
+                'best':case['best'],'atlasFunctions':case['functions'],'rows':[]}}))
+            run=subprocess.run([str(exe),'--backend',str(repo),str(tmp/'data'),str(request),str(response)],capture_output=True,timeout=20)
+            assert run.returncode == 0, run.stderr
+            actual=json.loads(response.read_text(encoding='utf-8-sig'))
+            assert actual['best'] == want, (case,actual['best'],want)
+    print(f'PASS {len(rows)} incremental statistics and {len(seed_cases)} Atlas baseline comparisons against original Console')
 
 if __name__=='__main__':main()

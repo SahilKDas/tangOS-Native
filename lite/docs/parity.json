@@ -196,7 +196,7 @@
     {
       "contract": "atlasGenerate",
       "state": "partial",
-      "evidence": ["lite/tests/backend_tests.cpp: descriptor generation, failure, confirmation and output protection", "lite/out/gui-atlas-generator-025/atlas-generator-report.txt: native command review; automatic post-land refresh still pending"],
+      "evidence": ["lite/tests/backend_tests.cpp: descriptor generation, failure, confirmation and output protection", "lite/tests/fleet_tests.cpp: isolated post-land refresh, failure retention and MCP output guards", "lite/out/gui-hover-refresh-025/atlas-generator-report.txt: native command review; result envelope and isolated landing differ from reference", "lite/tests/test_statistics_reference.py: 16 original Atlas baseline comparisons"],
       "kind": "api"
     },
     {
