@@ -10,6 +10,12 @@ The key vault and advanced settings remain separate native screens. Snapshot
 and synchronization buttons route to the existing reviewed service screens;
 they do not yet reproduce the original snapshot or sync overlays exactly.
 
+The following 0.18.1 source adds a real native window/state/layout debug export
+and Ctrl+Shift+D. It exports curated metadata rather than credentials, commands,
+prompts or log text. It does not reproduce the original browser DOM/DevTools
+dump. Settings teardown ignores focus notifications during destruction, and
+reopening resets its pending destructive confirmation.
+
 The original worker policy is compared directly for 1,320 cases, alongside
 7,208 automatic-role and 2,600 provider-effort cases. Requesty, GLM, GPT and
 Nemotron remain serial drivers. Fanout means functions per sub-agent, with

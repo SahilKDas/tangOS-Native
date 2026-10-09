@@ -7,7 +7,7 @@ namespace lite {
 constexpr UINT CONSOLE_RELOAD = WM_APP + 40, CONSOLE_PICK_REPO = WM_APP + 41,
                CONSOLE_OPEN_REPO = WM_APP + 42, CONSOLE_UPDATE_INSTALL = WM_APP + 43,
                CONSOLE_UPDATE_STAGED = WM_APP + 44, CONSOLE_PICK_VIEWER = WM_APP + 45,
-               CONSOLE_TAB_STATE = WM_APP + 46;
+               CONSOLE_TAB_STATE = WM_APP + 46, CONSOLE_DEBUG_SNAPSHOT = WM_APP + 47;
 class ConsoleUI {
   struct Impl;
   std::unique_ptr<Impl> impl;
@@ -24,6 +24,7 @@ public:
   bool running() const;
   void stop();
   void openPanel(const std::string &panel);
+  Json debugState() const;
   void smokeRemote(const fs::path &directory, const std::function<void(const fs::path &)> &capture);
   void smokeScreens(const fs::path &directory,
                     const std::function<void(const fs::path &)> &capture);

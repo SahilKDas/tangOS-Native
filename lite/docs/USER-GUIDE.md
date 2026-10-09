@@ -7,6 +7,12 @@ eight is recommended. Clearing statistics needs two clicks within four seconds.
 Escape or clicking outside closes the popover. Use **Advanced settings and key
 vault** for local API keys and connection profiles. Keys remain user owned.
 
+**Save snapshot** or **Ctrl+Shift+D** saves `window.bmp`, `state.json` and
+`layout.json` in the local data folder's `debug/snapshot-*` directory. **Open
+debug folder** shows those files. State JSON omits keys, driver commands,
+prompts and log contents. Review the visible screenshot before sharing it;
+the app does not upload snapshots.
+
 Run the portable `TangOSLite.exe` on Windows 10/11 x64. Install Git first; check
 scripts additionally need Python or the repository's existing compiler/build
 tools. No ROM, extracted asset or compiler is included.

@@ -1312,7 +1312,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       args["connection"] = m;
     auto result = execute("network.read", args);
     if (m == "update.check" && result.value("ok", false))
-      result["update"] = updateStatus("0.18.0", result.at("data"));
+      result["update"] = updateStatus("0.18.1", result.at("data"));
     return result;
   }
   if (m == "git.clone") {
@@ -1416,7 +1416,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto folder = directory / "exports" / ("bug-report-" + uniqueId());
     fs::create_directories(folder);
     Json debug = {{"app", "TangOS Lite"},
-                  {"version", "0.18.0"},
+                  {"version", "0.18.1"},
                   {"portOnly", settings.portOnly},
                   {"project", settings.activeProject},
                   {"connections", Json::array()}};

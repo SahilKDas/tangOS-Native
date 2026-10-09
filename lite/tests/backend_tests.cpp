@@ -351,6 +351,14 @@ int main() {
     expect(backend.invoke("preferences.get")["disabledTools"][0] == "unsafe",
            "persist preferences");
     auto report = confirmed("reports.export", Json::object());
+    write(data / "stats.json", Json({{"fixture", {{"attempts", 8}}}}).dump());
+    write(data / "stats-best.json", Json({{"fixture", {{"function", 5}}}}).dump());
+    auto clearPreview = backend.invoke("stats.clear");
+    expect(!backend.invoke("stats.get").empty(), "stats clear preview preserves tallies");
+    backend.invoke("stats.clear", {{"confirmation", clearPreview.at("confirmation")}});
+    expect(backend.invoke("stats.get").empty() && backend.invoke("stats.session").empty() &&
+               Json::parse(read(data / "stats-best.json")).empty(),
+           "confirmed stats clear wipes lifetime, session and divergence history");
     expect(read(fs::u8path(report["path"].get<std::string>())).find("local-fixture-secret") ==
                std::string::npos,
            "export no credentials");

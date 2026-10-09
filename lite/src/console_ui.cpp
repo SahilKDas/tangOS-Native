@@ -1476,6 +1476,10 @@ struct ConsoleUI::Impl {
     if (!self)
       return DefWindowProcW(h, msg, w, l);
     switch (msg) {
+    case WM_DESTROY:
+      if (h == self->settingsPopover)
+        self->settingsBuilding = true;
+      break;
     case WM_ACTIVATE:
       if (h == self->settingsPopover && LOWORD(w) == WA_INACTIVE)
         PostMessageW(h, WM_CLOSE, 0, 0);
@@ -1487,6 +1491,7 @@ struct ConsoleUI::Impl {
       if (h == self->settingsPopover) {
         self->settingsPopover = nullptr;
         self->settingsContent = nullptr;
+        self->settingsBuilding = false;
       }
       break;
     case WM_KEYDOWN:
@@ -1666,7 +1671,8 @@ struct ConsoleUI::Impl {
     if (policy.value("reports", false))
       add(L"BUTTON", "Open reports folder", 7008, BS_OWNERDRAW | WS_TABSTOP);
     section("Debug snapshot");
-    add(L"BUTTON", "Save snapshot / report…", 7009, BS_OWNERDRAW | WS_TABSTOP);
+    add(L"BUTTON", "Save snapshot", 7009, BS_OWNERDRAW | WS_TABSTOP);
+    add(L"BUTTON", "Open debug folder", 7016, BS_OWNERDRAW | WS_TABSTOP);
     add(L"BUTTON", "Advanced settings and key vault…", 7015, BS_OWNERDRAW | WS_TABSTOP);
     y += 12;
     SetWindowPos(settingsContent, nullptr, 0, -settingsScroll, 320, y,
@@ -1755,7 +1761,12 @@ struct ConsoleUI::Impl {
                       SW_SHOWNORMAL);
         break;
       case 7009:
-        navigate(Screen::support);
+        PostMessageW(parent, CONSOLE_DEBUG_SNAPSHOT, 0, 0);
+        break;
+      case 7016:
+        fs::create_directories(data / "debug");
+        ShellExecuteW(settingsPopover, L"open", (data / "debug").c_str(), nullptr, nullptr,
+                      SW_SHOWNORMAL);
         break;
       case 7015:
         navigate(Screen::settings);
@@ -1784,6 +1795,7 @@ struct ConsoleUI::Impl {
     RECT bounds;
     GetWindowRect(parent, &bounds);
     settingsScroll = 0;
+    clearStatsArmedUntil = clearStatsDoneUntil = 0;
     settingsPopover = CreateWindowExW(
         WS_EX_TOOLWINDOW, wc.lpszClassName, L"Settings", WS_POPUP | WS_CLIPCHILDREN | WS_VSCROLL,
         bounds.right - 542, bounds.top + 56, 340,
@@ -4595,6 +4607,70 @@ void ConsoleUI::openPanel(const std::string &panel) {
   if (panel == "keys" && impl->keyChoice)
     SetFocus(impl->keyChoice);
 }
+Json ConsoleUI::debugState() const {
+  Json state = {{"screen", int(impl->screen)},
+                {"width", impl->width},
+                {"height", impl->height},
+                {"viewerOnly", impl->viewerOnly},
+                {"advanced", impl->advancedMode},
+                {"portOnly", impl->settings.portOnly},
+                {"theme", impl->settings.themeIndex},
+                {"viewer",
+                 {{"zoom", impl->zoom},
+                  {"panX", impl->panX},
+                  {"panY", impl->panY},
+                  {"functions", impl->atlas.size()},
+                  {"cart", impl->cart.size()}}},
+                {"agents", Json::array()},
+                {"layout", Json::array()}};
+  if (impl->fleet)
+    for (auto &agent : impl->fleet->snapshot())
+      state["agents"].push_back({{"id", agent.id},
+                                 {"name", agent.spec.name},
+                                 {"kind", agent.spec.kind},
+                                 {"phase", agent.phase},
+                                 {"active", agent.active},
+                                 {"completed", agent.completed},
+                                 {"total", agent.total},
+                                 {"queued", agent.queue.size()}});
+  for (auto key : {"useAgents", "agentFanout", "autoLand", "safeMode", "allowNearMiss",
+                   "allowGhidra", "reports", "animateBackground"})
+    if (impl->policy.contains(key))
+      state["policy"][key] = impl->policy.at(key);
+  struct Context {
+    HWND root;
+    Json *layout;
+  } context{impl->window, &state["layout"]};
+  EnumChildWindows(
+      impl->window,
+      [](HWND child, LPARAM raw) -> BOOL {
+        auto &context = *reinterpret_cast<Context *>(raw);
+        RECT bounds;
+        GetWindowRect(child, &bounds);
+        MapWindowPoints(nullptr, context.root, reinterpret_cast<POINT *>(&bounds), 2);
+        wchar_t kind[64]{};
+        GetClassNameW(child, kind, 64);
+        context.layout->push_back({{"id", GetDlgCtrlID(child)},
+                                   {"class", utf8(kind)},
+                                   {"visible", bool(GetWindowLongW(child, GWL_STYLE) & WS_VISIBLE)},
+                                   {"x", bounds.left},
+                                   {"y", bounds.top},
+                                   {"width", bounds.right - bounds.left},
+                                   {"height", bounds.bottom - bounds.top}});
+        return TRUE;
+      },
+      reinterpret_cast<LPARAM>(&context));
+  auto secrets = impl->vault.values();
+  std::function<void(Json &)> clean = [&](Json &value) {
+    if (value.is_string())
+      value = redact(value.get<std::string>(), secrets);
+    else if (value.is_object() || value.is_array())
+      for (auto &child : value)
+        clean(child);
+  };
+  clean(state);
+  return state;
+}
 void ConsoleUI::smokeRemote(const fs::path &directory,
                             const std::function<void(const fs::path &)> &capture) {
   if (impl->screen == Screen::descriptorGate)
@@ -4952,9 +5028,21 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     impl->settingsAction(7007, BN_CLICKED);
     if (impl->clearStatsArmedUntil <= GetTickCount64())
       throw std::runtime_error("Stats clear did not require a second click");
+    SetFocus(GetDlgItem(impl->settingsContent, 7005));
     DestroyWindow(impl->settingsPopover);
     if (impl->settingsPopover || impl->settingsContent)
       throw std::runtime_error("Settings overlay did not release native windows");
+    impl->openSettingsPopover();
+    if (impl->clearStatsArmedUntil || impl->clearStatsDoneUntil)
+      throw std::runtime_error("Reopened Settings retained a destructive confirmation");
+    DestroyWindow(impl->settingsPopover);
+    const std::string debugSecret = "native-debug-fixture-secret";
+    impl->vault.set("DEBUG_FIXTURE_KEY", debugSecret);
+    auto debug = debugState();
+    impl->vault.remove("DEBUG_FIXTURE_KEY");
+    if (!debug.contains("layout") || debug["layout"].empty() ||
+        debug.dump().find(debugSecret) != std::string::npos)
+      throw std::runtime_error("Debug state layout or credential exclusion failed");
     write(directory / "settings-overlay-report.txt",
           "PASS: Controller preserved, scroll, expandable help, persisted toggle, guarded stats "
           "clear and cleanup");

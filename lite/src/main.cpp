@@ -3,6 +3,7 @@
 #include "console_ui.h"
 #include "backend.h"
 #include "updater.h"
+#include "activity.h"
 #include <algorithm>
 #include <commctrl.h>
 #include <dwmapi.h>
@@ -201,7 +202,7 @@ std::string resourceText(int id) {
 }
 void about() {
   reviewDialog(
-      "TangOS Lite 0.18.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
+      "TangOS Lite 0.18.1\nPortable native Windows repository workbench.\nUse Encyclopedia "
       "for checks and Git; Repository for status.\nAlways read AGENTS.md and review "
       "changes before publication.\n\n" +
           resourceText(204) + "\n\nMinGW-w64 libwinpthread\n" + resourceText(202) +
@@ -586,7 +587,7 @@ void paintChrome(HDC dc, int w, int h) {
     skin::label(dc, L"Repository status", rail + 16, 345, 308, 24, 14, true);
   skin::label(dc, L"Port-only  ·  Review before push", rail + 16, h - 139, 300, 23, 12, true, true);
   skin::mascot(dc, w - 137, h - 127, 96);
-  skin::label(dc, L"v0.18.0", w - 74, h - 27, 60, 18, 10, false, true);
+  skin::label(dc, L"v0.18.1", w - 74, h - 27, 60, 18, 10, false, true);
 }
 void snapshot(const fs::path &path) {
   skin::invalidateBackdrop(window);
@@ -667,6 +668,29 @@ void snapshot(const fs::path &path) {
   DeleteObject(bitmap);
   DeleteDC(memory);
   ReleaseDC(window, dc);
+}
+fs::path saveDebugSnapshot() {
+  auto folder = dataDir / "debug" / ("snapshot-" + uniqueId());
+  fs::create_directories(folder);
+  snapshot(folder / "window.bmp");
+  Json state = {{"app", "TangOS Lite"},
+                {"version", "0.18.1"},
+                {"capturedAt", activityNow()},
+                {"toolboxOpen", toolboxOpen},
+                {"repositoryView", repositoryView},
+                {"theme", settings.themeIndex},
+                {"portOnly", settings.portOnly}};
+  if (consoleUI)
+    state["console"] = consoleUI->debugState();
+  write(folder / "state.json", state.dump(2));
+  write(folder / "layout.json",
+        state.value("console", Json::object()).value("layout", Json::array()).dump(2));
+  write(folder / "README.txt",
+        "Local native window, state and layout snapshot.\n"
+        "State omits credentials, driver commands, prompts and log contents.\n"
+        "The screenshot can show visible repository content. Review before sharing.\n"
+        "No upload or network connection was performed.\n");
+  return folder;
 }
 void browse() {
   IFileDialog *d = nullptr;
@@ -1279,6 +1303,14 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   case CONSOLE_PICK_REPO:
     PostMessageW(h, WM_COMMAND, MAKEWPARAM(BROWSE, BN_CLICKED), 0);
     return 0;
+  case CONSOLE_DEBUG_SNAPSHOT:
+    try {
+      auto folder = saveDebugSnapshot();
+      set(activityLabel, "Snapshot saved: " + utf8(folder.wstring()));
+    } catch (const std::exception &error) {
+      MessageBoxW(h, wide(error.what()).c_str(), L"Debug snapshot", MB_OK | MB_ICONERROR);
+    }
+    return 0;
   case CONSOLE_TAB_STATE:
     repositoryView = w != 0;
     InvalidateRect(controllerTab, nullptr, FALSE);
@@ -1376,6 +1408,13 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           if (fs::exists(repo / "tangos.json"))
             consoleUI->smokeRemote(config.parent_path(), snapshot);
         }
+        auto debug = saveDebugSnapshot();
+        if (fs::file_size(debug / "window.bmp") < 100000 ||
+            !Json::parse(read(debug / "state.json")).contains("capturedAt") ||
+            !Json::parse(read(debug / "layout.json")).is_array())
+          throw std::runtime_error("Native debug snapshot failed");
+        write(config.parent_path() / "debug-snapshot-report.txt",
+              "PASS: native window bitmap, valid state/layout JSON and local-only output");
         snapshot(config.parent_path() / "controller.bmp");
         SendMessageW(h, WM_COMMAND, REPOSITORY_TAB, 0);
         snapshot(config.parent_path() / "repository.bmp");
@@ -1562,6 +1601,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
       PostMessageW(h, WM_COMMAND, AUTO_UPDATE, 0);
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+      if (msg.message == WM_KEYDOWN && msg.wParam == 'D' && GetKeyState(VK_CONTROL) < 0 &&
+          GetKeyState(VK_SHIFT) < 0) {
+        SendMessageW(h, CONSOLE_DEBUG_SNAPSHOT, 0, 0);
+        continue;
+      }
       if (!IsDialogMessageW(h, &msg)) {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);

@@ -1,5 +1,12 @@
 # Security and destructive-operation review
 
+Native debug snapshots are saved locally, with no upload. Their JSON contains
+UI geometry, reviewed policy flags, agent identifiers/phases and queue counts;
+it omits key values, driver commands, prompts and log bodies. Known vault values
+are also redacted recursively from metadata strings. The window image captures
+visible UI content, so users must review it before sharing. Snapshot files are
+not staged or committed by the application.
+
 ## Enforced by the app
 
 - Process operations are isolated from UI. General commands use CreateProcessW

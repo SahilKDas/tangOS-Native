@@ -1,4 +1,4 @@
-# TangOS Lite 0.18.0
+# TangOS Lite 0.18.1
 
 Click Tango or use **Alt+Space → About** for embedded third-party notices.
 
@@ -105,7 +105,11 @@ Git outside Lite. Merge/rebase can legitimately update upstream `src/`.
 ## Build and test
 
 Recommended verified toolchain: Windows x64, MSYS2 UCRT64 GCC 14.1.0, CMake,
-MinGW Make, Python 3, and Git, on PATH. No npm packages are required. Rust GNU dependencies must be fetched once as described below.
+MinGW Make, Python 3, Git, Rust GNU and Node.js, on PATH. The reference-comparison
+tests use Node's TypeScript loading (verified here with Node 26.7.0); Node is not
+part of the executable. No npm packages are required for the build. Optional
+third-party MCP Inspector validation uses a separate development installation.
+Rust GNU dependencies must be fetched once as described below.
 
 ```powershell
 .\lite\scripts\build.ps1

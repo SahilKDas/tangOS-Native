@@ -418,7 +418,7 @@ struct McpServer::Impl {
                            : supported.front();
         result = {{"protocolVersion", version},
                   {"capabilities", {{"tools", Json::object()}}},
-                  {"serverInfo", {{"name", "TangOS Lite"}, {"version", "0.18.0"}}},
+                  {"serverInfo", {{"name", "TangOS Lite"}, {"version", "0.18.1"}}},
                   {"instructions", "Pull next_batch and follow its scoped AGENTS.md instructions. "
                                    "Work only in the assigned worktree."}};
       } else if (method == "ping")
@@ -565,7 +565,7 @@ struct McpServer::Impl {
       if (modern) {
         result["resultType"] = "complete";
         result["_meta"]["io.modelcontextprotocol/serverInfo"] = {{"name", "TangOS Lite"},
-                                                                 {"version", "0.18.0"}};
+                                                                 {"version", "0.18.1"}};
         if (method == "tools/list") {
           result["ttlMs"] = 0;
           result["cacheScope"] = "private";
