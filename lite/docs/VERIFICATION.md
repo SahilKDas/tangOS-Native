@@ -1,5 +1,20 @@
 # Windows release verification — 2026-10-07
 
+## 0.19.0 verified Controller package — 2026-10-08
+
+Source checkpoint **afad693** passed two clean Windows x64 builds with identical
+bytes: **6,299,136 bytes (6.299 decimal MB)**, SHA256
+**71E8518B3140B66EEEAFA0897FB001AE74BDCCBEF53953919AB8E322600F1D15**.
+All five native suites, disposable backend/Git/ZIP workflows, 12,100 original
+source comparisons and all three packaged GUI workflows passed. Official MCP
+Inspector was enabled. Controller tests cover reference control geometry,
+remembered Writes state, badge text surviving composition, and Simple-mode cart
+assignment without provider execution. The cross-agent policy/statistics lock
+collision is covered by a deterministic regression.
+The package is `lite/release-0.19.0-final/TangOSLite.exe`, with Windows system
+DLL imports only. Full UI, arbitrary DPI, paid-provider and GitHub-write parity
+remain unverified. Further source edits after this checkpoint are not included.
+
 ## 0.18.1 verified native snapshot package — 2026-10-08
 
 Source checkpoint **2dbdf07** passed two clean Windows x64 builds with identical
