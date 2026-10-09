@@ -1,5 +1,20 @@
 # Windows release verification — 2026-10-07
 
+## 0.18.1 verified native snapshot package — 2026-10-08
+
+Source checkpoint **2dbdf07** passed two clean Windows x64 builds with identical
+bytes: **6,278,656 bytes (6.279 decimal MB)**, SHA256
+**25A2F1C82F51C11A788416CFE1060E89B86AD8B3400637BBB6249F34369439AC**.
+All five native suites, disposable backend/Git/ZIP workflows, 12,100 original
+source comparisons and all three packaged GUI workflows passed. Official MCP
+Inspector was enabled. Native snapshots produce an actual window bitmap and
+valid state/layout JSON without network requests. Closing Settings from its
+focused numeric field and reopening without a stale confirmation are covered;
+confirmed statistics clearing resets lifetime, session and best-divergence data.
+The package is `lite/release-0.18.1-final/TangOSLite.exe`, with Windows system
+DLL imports only. Full UI, arbitrary DPI, paid-provider and GitHub-write parity
+remain unverified. No such verification is implied by this release.
+
 ## 0.18.0 verified portable package — 2026-10-08
 
 Source checkpoint **f039e50** passed two clean Windows x64 builds with identical
