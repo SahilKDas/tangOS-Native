@@ -1,5 +1,26 @@
 # Windows release verification — 2026-10-07
 
+## 0.18.0 verified portable package — 2026-10-08
+
+Source checkpoint **f039e50** passed two clean Windows x64 builds with identical
+bytes: **6,251,520 bytes (6.252 decimal MB)**, SHA256
+**AB60FF4BFBF01AC7D8B66C5979A352E44B055A2F126EB22BC40D43E66C5D7EC6**.
+The package is `lite/release-0.18.0-final/TangOSLite.exe`. Imports are Windows
+system DLLs only. All five native suites, disposable backend/Git/ZIP workflows,
+**12,100 original-source comparisons**, and all three packaged GUI workflows
+passed. Official MCP Inspector was enabled during the Fleet suite. Installed
+VS Code accepted registration in a disposable profile; actual authenticated
+tool execution inside VS Code remains unverified.
+
+The native Settings overlay preserves Controller, scrolls, expands explanations,
+persists delegation changes, guards statistics clearing and releases its windows.
+Help opens Support rather than the agent operations menu. The 25,000-function,
+500-row roster fixture took **1,625 ms** for layout and capture. This is neither
+arbitrary-DPI coverage nor a sustained frame-rate benchmark. Exact footer,
+snapshot/sync overlays and remaining screen interactions still need parity work.
+No paid providers, personal client configuration changes or GitHub writes were
+used. Existing SM64DS validation failures recorded below remain failures.
+
 ## 0.17.0 source validation — 2026-10-08
 
 Release source checkpoint **b4c059d** passed two clean Windows x64 builds with
