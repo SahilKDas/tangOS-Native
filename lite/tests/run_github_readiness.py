@@ -32,5 +32,20 @@ for action in ('PR readiness', 'PR checks'):
     result = call(arguments, action.replace(' ', '-'))
     assert pathlib.Path(result['log']).is_file(), result
     summary.append({'action': action, 'exit': result['exit'], 'log': result['log']})
+    if action == 'PR readiness' and result['exit'] == 0:
+        # Native Runner includes reviewed command/cwd and completion markers.
+        # gh's compact JSON payload sits between those retained log entries.
+        payload = next((line for line in result['output'].splitlines()
+                        if line.lstrip().startswith('{')), None)
+        if payload is None:
+            raise RuntimeError('Missing GitHub metadata payload; inspect ' + result['log'])
+        metadata = json.loads(payload)
+        summary[-1].update({key: metadata.get(key) for key in
+                           ('state', 'isDraft', 'mergeable', 'mergeStateStatus', 'reviewDecision')})
+        summary[-1]['reportedChecks'] = len(metadata.get('statusCheckRollup') or [])
+    elif action == 'PR checks' and 'no checks reported' in result['output']:
+        summary[-1]['checksState'] = 'unverified: no checks reported'
+    elif action == 'PR checks':
+        summary[-1]['checksState'] = 'passed' if result['exit'] == 0 else 'failed-or-pending'
     print(action + ': exit=' + str(result['exit']) + '; log=' + result['log'])
 (output / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')

@@ -4,6 +4,14 @@
 #include <stdexcept>
 #include <windows.h>
 namespace lite {
+Json updatePresentation(const Json &downloaded, const Json &current) {
+  auto update = current.value("update", Json::object());
+  if (downloaded.value("state", std::string()) == "downloaded" && downloaded.contains("receipt") &&
+      update.value("state", std::string()) == "available" &&
+      update.value("version", std::string()) == downloaded.value("version", std::string()))
+    return downloaded;
+  return current;
+}
 std::string supportResultText(const Json &result) {
   if (result.empty())
     return "Check for updates, read the complete reference, or describe a bug to prepare a local "

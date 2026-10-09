@@ -29,6 +29,16 @@ int main() {
     expect(threw, msg);
   };
   try {
+    auto downloaded = Json{{"state", "downloaded"}, {"version", "2.0.0"}, {"receipt", "fixture"}};
+    auto available = Json{{"update", {{"state", "available"}, {"version", "2.0.0"}}}};
+    expect(updatePresentation(downloaded, available) == downloaded,
+           "checking same version preserves downloaded restart presentation");
+    available["update"]["version"] = "2.0.1";
+    expect(updatePresentation(downloaded, available) == available,
+           "newer release is not masked by older download");
+    auto updateError = Json{{"error", "offline"}};
+    expect(updatePresentation(downloaded, updateError) == updateError,
+           "download receipt does not hide failed update checks");
     expect(supportResultText({{"update", {{"state", "none"}, {"currentVersion", "1.2.3"}}}})
                    .find("up to date") != std::string::npos,
            "verified current update is shown as up to date");

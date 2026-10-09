@@ -1127,8 +1127,8 @@ struct ConsoleUI::Impl {
       button("Preview report", SUPPORT_REPORT, 166, 304, 140);
       button(activeServiceMethod == "update.stage" ? "Confirm download" : "Save report",
              SUPPORT_CONFIRM, 314, 304, 150);
-      body = edit(supportResultText(serviceResult), 0, 18, 354, cw - 36, height - 460,
-                  ES_MULTILINE | ES_READONLY | WS_VSCROLL);
+      body = edit(supportResultText(updatePresentation(portableUpdate, serviceResult)), 0, 18, 354,
+                  cw - 36, height - 460, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
       button("Copy report", SUPPORT_COPY, width - 332, 108, 170);
       button("Open export folder", SUPPORT_FOLDER, width - 332, 154, 210);
       button("Tour", GUIDE, width - 332, 216, 150);
@@ -2536,7 +2536,7 @@ struct ConsoleUI::Impl {
         skin::label(dc, L"›  RECENT RUNS", x + 22, y + h - 40, w - 44, 22, 11, true, true);
       return;
     }
-    bool fullController = screen == Screen::remoteGate ||
+    bool fullController = screen == Screen::reference || screen == Screen::remoteGate ||
                           (screen == Screen::controller && !controllerNeedsRail()) ||
                           (screen == Screen::atlas && fullAtlas);
     if (screen == Screen::atlas) {
@@ -2576,6 +2576,8 @@ struct ConsoleUI::Impl {
       title = "Clone project";
     if (screen == Screen::support)
       title = "Help and updates";
+    if (screen == Screen::reference)
+      title = "Complete reference";
     skin::label(dc, wide(title), screen == Screen::controller ? 17 : 16, 17, width - 390, 28,
                 screen == Screen::controller ? 15 : 16, true);
     hits.clear();
@@ -4386,7 +4388,7 @@ struct ConsoleUI::Impl {
         if (activeServiceMethod == "update.stage" &&
             serviceResult.value("state", std::string()) == "downloaded")
           portableUpdate = serviceResult;
-        setText(body, supportResultText(serviceResult));
+        setText(body, supportResultText(updatePresentation(portableUpdate, serviceResult)));
         SetWindowTextW(GetDlgItem(window, SUPPORT_CONFIRM), activeServiceMethod == "update.stage"
                                                                 ? L"Confirm download"
                                                                 : L"Save report");
@@ -5035,8 +5037,10 @@ void ConsoleUI::smokeDisplay(const fs::path &directory,
           throw std::runtime_error("Display validation clipped control " + control.at("id").dump() +
                                    " at " + std::to_string(size.first));
       }
-      report["layouts"].push_back({{"width", size.first},
-                                   {"height", size.second},
+      report["layouts"].push_back({{"requestedWidth", size.first},
+                                   {"requestedHeight", size.second},
+                                   {"actualConsoleWidth", impl->width},
+                                   {"actualConsoleHeight", impl->height},
                                    {"screen", int(screen)},
                                    {"state", "passed"}});
     }

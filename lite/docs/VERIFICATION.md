@@ -7,7 +7,8 @@ global reservations before a generated draft is saved. Reviewed disposable Git
 tests cover working/staged differences, history and unstaging without discarding
 working content, plus branches, tags, stash and merge/rebase conflicts. ZIP
 import safety tests pass. Native Help Tips and complete reference navigation
-pass; display validation checks nine layouts at 980×720, 1475×1025 and 1770×1230
+pass; display validation checks nine layouts with requested window sizes
+980×720, 1475×1025 and 1770×1230 (the first is clamped to Lite's 1100×760 minimum)
 and captures both attached monitors (125% and 100%, including negative origins).
 The application remains DPI-virtualized; sharp per-monitor rendering is not
 established. The 25,000-function Viewer retained a 500-row roster; fixture
@@ -23,12 +24,20 @@ unverified because no user connection is configured.
 
 Read-only GitHub readiness against tangosdev/tangOS PR 16 returned merged metadata.
 The PR has no reported checks; this is not a green-check result. Real remote
-writes/PR creation remain unverified. Actual 64DS-DX gates: port references passed
+writes/PR creation remain unverified. A second actual read-only check against
+open cli/cli PR 14640 returned real readiness metadata and mixed successful,
+failed and pending checks; the native checks command returned a failing status
+and preserved its full log. No mutation was made to either project.
+Actual 64DS-DX gates: port references passed
 8,868 checks; declaration agreement passed against 12,228 existing disagreements;
 dead references failed on 561 prose/comment references; link checks skipped an
 empty changed-source range; byte matching failed the existing strict stock-ROM
 bootstrap control (current SHA256 does not equal its admitted proof). The
 checkout's tracked source remained unchanged. No baseline was changed or waived.
+Native hashing of the existing 16-MiB baserom agrees with independent Windows
+SHA256 and rejects a deliberately different expected digest. This verifies
+real-file hashing behavior, not the ROM's retail identity; the failing bootstrap
+comparison concerns the checkout's built control ROM and remains a separate failure.
 
 An initial cancellation test used a fixed 500-ms delay and sometimes cancelled
 before Python initialized. It now waits for an actual descendant, verifies
