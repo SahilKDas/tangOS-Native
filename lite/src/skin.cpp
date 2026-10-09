@@ -11,6 +11,7 @@ extern "C" void tangos_shape(unsigned char *, unsigned, unsigned, float, uint32_
 extern "C" void tangos_image(unsigned char *, unsigned, unsigned, const unsigned char *, size_t);
 extern "C" void tangos_mesh(unsigned char *, unsigned, unsigned, float, unsigned);
 extern "C" void tangos_icon(unsigned char *, unsigned, unsigned, unsigned, uint32_t);
+extern "C" void tangos_glass(unsigned char *, unsigned, unsigned, uint32_t, uint32_t, uint32_t);
 namespace skin {
 namespace {
 struct Color {
@@ -277,11 +278,25 @@ void background(HDC dc, int w, int h, int offsetY, int totalHeight) {
   BitBlt(dc, 0, 0, w, h, frame->dc, 0, std::max(0, offsetY), SRCCOPY);
 }
 void panel(HDC dc, int x, int y, int w, int h, bool solid) {
-  shape(dc, x, y + 4, w, h, 14, Color(20, 0, 0, 0), Color(20, 0, 0, 0));
-  shape(dc, x, y, w, h, 14,
-        Color(solid ? 244 : 110, colors.field.GetR(), colors.field.GetG(), colors.field.GetB()),
-        solid ? Color(244, colors.field.GetR(), colors.field.GetG(), colors.field.GetB())
-              : colors.panel);
+  if (w <= 0 || h <= 0)
+    return;
+  static const Color gloss[] = {Color(234, 244, 253), Color(250, 208, 172), Color(20, 44, 70),
+                                Color(252, 214, 240), Color(238, 255, 196)};
+  static const Color tint[] = {Color(158, 255, 255, 255), Color(128, 255, 234, 214),
+                               Color(189, 7, 24, 42), Color(128, 255, 233, 247),
+                               Color(128, 240, 250, 208)};
+  static const Color edge[] = {Color(217, 255, 255, 255), Color(184, 255, 214, 182),
+                               Color(56, 120, 190, 230), Color(184, 255, 210, 238),
+                               Color(184, 214, 238, 168)};
+  static const Color base[] = {Color(124, 196, 242), Color(255, 178, 128), Color(5, 22, 38),
+                               Color(255, 179, 217), Color(212, 242, 126)};
+  shape(dc, x, y + 4, w, h, 18, Color(20, 0, 0, 0), Color(20, 0, 0, 0));
+  if (solid)
+    shape(dc, x, y, w, h, 18, base[paletteIndex], base[paletteIndex]);
+  Surface surface(dc, x, y, w, h);
+  if (surface.data)
+    tangos_glass(surface.data, w, h, gloss[paletteIndex].value, tint[paletteIndex].value,
+                 edge[paletteIndex].value);
 }
 void scrim(HDC dc, int w, int h) {
   if (w <= 0 || h <= 0)

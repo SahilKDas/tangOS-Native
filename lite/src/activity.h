@@ -20,4 +20,5 @@ std::string sizeRecommendation(const Json &bySize);
 Json measuredRole(const Json &stats);
 Json automaticRole(const Json &agent);
 Json effortPolicy(const Json &agent);
+Json driverPolicy(const Json &agent, const Json &preferences, size_t targets);
 } // namespace lite

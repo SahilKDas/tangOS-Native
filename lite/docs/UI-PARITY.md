@@ -1,5 +1,24 @@
 # Console parity audit
 
+## 0.18.0 implementation checkpoint
+
+The toolbar Settings button opens a native scrollable popover while preserving
+Controller or Viewer. It includes expandable explanations, interface mode,
+theme/motion, near-miss policy, delegation, functions per sub-agent, isolated
+auto-land, tour replay, two-click statistics clearing, and local reports.
+The key vault and advanced settings remain separate native screens. Snapshot
+and synchronization buttons route to the existing reviewed service screens;
+they do not yet reproduce the original snapshot or sync overlays exactly.
+
+The original worker policy is compared directly for 1,320 cases, alongside
+7,208 automatic-role and 2,600 provider-effort cases. Requesty, GLM, GPT and
+Nemotron remain serial drivers. Fanout means functions per sub-agent, with
+flooring and a 1–64 limit; the shared API/CLI/MCP prompt now carries that policy.
+Safe mode is checked when claiming prepared MCP work, as well as before local
+execution. Glass panels use the reference three-stop gradient and theme border.
+The Help/agent-operations command ID collision is fixed and covered by the
+native window workflow. These changes do not establish full parity.
+
 Reference: the original `console/` source retained in this repository. Full parity has **not** been established. `parity.json` inventories public contracts; an unverified contract must never count as complete.
 
 The native frontend includes Controller agent cards, roles/effort/count controls, API/CLI/MCP profiles, encrypted local keys, queues and isolated worktree review; a weighted Atlas with local reload, minimap, source-level rendering, source/history inspector, contributor/claim overlays, smooth navigation, marquee selection and module popouts; searchable Encyclopedia, typed arguments and tool visibility; Settings, Connections, Requirements, missing/invalid-descriptor gates and advanced Services screens. Animated TinySkia backgrounds use the five reference palettes and embedded Nunito. Left-drag pans; right-drag selects; wheel zooms; WASD/arrows navigate functions; Space toggles the cart.

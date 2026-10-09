@@ -77,12 +77,26 @@ pub unsafe extern "C" fn tangos_icon(data: *mut u8, w: u32, h: u32, icon: u32, i
 // The caller owns a width*height BGRA DIB. No pointers are retained across calls.
 #[no_mangle]
 pub unsafe extern "C" fn tangos_shape(
+    data: *mut u8, w: u32, h: u32, radius: f32, top: u32, bottom: u32,
+) {
+    gradient_shape(data, w, h, radius, top, None, bottom, 0);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tangos_glass(data: *mut u8, w: u32, h: u32, gloss: u32, panel: u32, border: u32) {
+    gradient_shape(data, w, h, 18., (gloss & 0x00ffffff) | 0x8c000000,
+        Some((gloss & 0x00ffffff) | 0x0f000000), panel, border);
+}
+
+unsafe fn gradient_shape(
     data: *mut u8,
     w: u32,
     h: u32,
     radius: f32,
     top: u32,
+    middle: Option<u32>,
     bottom: u32,
+    border: u32,
 ) {
     if data.is_null() || w == 0 || h == 0 || w > 16384 || h > 16384 {
         return;
@@ -94,13 +108,12 @@ pub unsafe extern "C" fn tangos_shape(
     }
     let mut pixmap = PixmapMut::from_bytes(bytes, w, h).unwrap();
     let mut paint = Paint::default();
+    let mut stops = vec![GradientStop::new(0., color(top)), GradientStop::new(1., color(bottom))];
+    if let Some(middle) = middle { stops.insert(1, GradientStop::new(0.42, color(middle))); }
     paint.shader = LinearGradient::new(
         Point::from_xy(0., 0.),
         Point::from_xy(0., h as f32),
-        vec![
-            GradientStop::new(0., color(top)),
-            GradientStop::new(1., color(bottom)),
-        ],
+        stops,
         SpreadMode::Pad,
         Transform::identity(),
     )
@@ -121,13 +134,18 @@ pub unsafe extern "C" fn tangos_shape(
     p.line_to(0., r);
     p.quad_to(0., 0., r, 0.);
     p.close();
+    let path = p.finish().unwrap();
     pixmap.fill_path(
-        &p.finish().unwrap(),
+        &path,
         &paint,
         FillRule::Winding,
         Transform::identity(),
         None,
     );
+    if border != 0 {
+        let mut paint = Paint::default(); paint.set_color(color(border));
+        pixmap.stroke_path(&path, &paint, &Stroke { width: 2., ..Stroke::default() }, Transform::identity(), None);
+    }
     for p in bytes.chunks_exact_mut(4) {
         p.swap(0, 2);
     }
@@ -315,6 +333,17 @@ mod tests {
         assert_eq!(a, b);
         assert_ne!(a, c);
         assert!(a.chunks_exact(4).all(|p| p[3] == 255));
+    }
+    #[test]
+    fn glass_keeps_reference_translucent_middle_and_inset_border() {
+        let mut pixels = vec![0u8; 100 * 100 * 4];
+        unsafe { tangos_glass(pixels.as_mut_ptr(), 100, 100, 0xffeaf4fd, 0x9effffff, 0xd9ffffff); }
+        let channel = |x: usize, y: usize| pixels[(y * 100 + x) * 4];
+        assert!(channel(50, 2) > 100);
+        assert!(channel(50, 42) < 30, "CSS glass has a six-percent stop at 42 percent");
+        assert!(channel(50, 97) > 140);
+        assert!(channel(0, 42) > 200, "glass border must stay visible against dark backgrounds");
+        assert_eq!(channel(0, 0), 0, "rounded corner must preserve its background");
     }
     #[test]
     fn image_downsampling_preserves_dense_detail_without_aliasing() {

@@ -290,4 +290,18 @@ Json effortPolicy(const Json &agent) {
     selected = spec.at("default");
   return {{"family", family}, {"spec", spec}, {"current", selected}};
 }
+Json driverPolicy(const Json &agent, const Json &preferences, size_t targets) {
+  auto raw = preferences.value("agentFanout", Json(8));
+  double count = raw.is_number() ? raw.get<double>() : 0;
+  int fanout = std::isfinite(count) && count >= 1 ? int(std::min(64., std::floor(count))) : 8;
+  auto family = effortPolicy(agent).at("family").get<std::string>();
+  bool serial = family == "GLM" || family == "GPT" || family == "Nemotron" ||
+                family == "Requesty" || agent.value("name", std::string()) == "Requesty";
+  bool parallel = preferences.value("useAgents", false);
+  int workers = serial || !parallel ? 1 : std::clamp(agent.value("jobs", 3), 1, 32);
+  return {{"jobs", workers},
+          {"functionsPerAgent", fanout},
+          {"subAgents", std::max(1, int(std::floor(double(targets) / fanout + .5)))},
+          {"useAgents", parallel}};
+}
 } // namespace lite

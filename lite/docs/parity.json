@@ -91,14 +91,14 @@
     },
     {
       "contract": "useAgents",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": ["lite/tests/test_auto_role_reference.py", "lite/src/console_ui.cpp:smokeScreens"],
       "kind": "state"
     },
     {
       "contract": "agentFanout",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": ["lite/tests/test_auto_role_reference.py", "lite/tests/backend_tests.cpp"],
       "kind": "state"
     },
     {
@@ -528,8 +528,8 @@
     },
     {
       "contract": "clearAllStats",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": ["lite/tests/backend_tests.cpp", "lite/src/console_ui.cpp:smokeScreens"],
       "kind": "api"
     },
     {
@@ -678,14 +678,14 @@
     },
     {
       "contract": "setUseAgents",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": ["lite/tests/test_auto_role_reference.py", "lite/src/console_ui.cpp:smokeScreens"],
       "kind": "api"
     },
     {
       "contract": "setAgentFanout",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": ["lite/tests/test_auto_role_reference.py", "lite/tests/backend_tests.cpp"],
       "kind": "api"
     },
     {

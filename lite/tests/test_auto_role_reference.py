@@ -73,3 +73,37 @@ with tempfile.TemporaryDirectory(prefix='tangos-effort-reference-') as folder:
     for agent, got, wanted in zip(effort_agents, actual, expected):
         assert got == wanted, (agent, got, wanted)
 print(f'PASS {len(effort_agents)} original provider effort comparisons')
+
+main = (root / 'console/src/main/index.ts').read_text(encoding='utf-8')
+start = main.index('  const jobs =', main.index('const attempts = agentAttempts[agentName] ?? DEFAULT_ATTEMPTS'))
+jobs_source = main[start:main.index('  batch.status =', start)]
+start = main.index('  const v = Math.floor(Number(n))', main.index("'policy:setAgentFanout'"))
+fanout_source = main[start:main.index('  saveSettings()', start)]
+driver_cases = [{'agent': {'name': name, 'jobs': 3},
+                 'preferences': {'useAgents': enabled, 'agentFanout': fanout}, 'targets': targets}
+                for name, enabled, fanout, targets in itertools.product(
+                    ['Opus', 'Fable', 'Sonnet', 'GPT', 'GLM', 'Grok', 'DeepSeek', 'Nemotron', 'Requesty', 'Kimi', 'unknown'],
+                    [False, True], [-2, -.1, 0, .9, 1, 1.99, 8, 8.9, 64, 65, 200, None], [0, 1, 7, 16, 32])]
+with tempfile.TemporaryDirectory(prefix='tangos-driver-policy-reference-') as folder:
+    tmp = pathlib.Path(folder)
+    cases = tmp / 'cases.json'
+    cases.write_text(json.dumps(driver_cases), encoding='utf-8')
+    oracle = tmp / 'oracle.mjs'
+    oracle.write_text("import fs from 'node:fs';function jobsFor(agentName,state){" + jobs_source + "return jobs;}"
+                     "function fanoutFor(n){const state={};" + fanout_source + "return state.agentFanout;}"
+                     "process.stdout.write(JSON.stringify(JSON.parse(fs.readFileSync(process.argv[2],'utf8')).map(c=>{"
+                     "const f=fanoutFor(c.preferences.agentFanout);return {jobs:jobsFor(c.agent.name,c.preferences),"
+                     "functionsPerAgent:f,subAgents:Math.max(1,Math.round(c.targets/f)),useAgents:c.preferences.useAgents};})));",
+                     encoding='utf-8')
+    run = subprocess.run(['node', str(oracle), str(cases)], capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr
+    expected = json.loads(run.stdout)
+    request, response = tmp / 'request.json', tmp / 'response.json'
+    request.write_text(json.dumps({'method': 'policy.drive', 'arguments': {'cases': driver_cases}}), encoding='utf-8')
+    native = subprocess.run([str(exe), '--backend', '-', str(tmp / 'data'), str(request), str(response)], capture_output=True, timeout=30)
+    assert native.returncode == 0, native.stderr
+    actual = json.loads(response.read_text(encoding='utf-8-sig'))
+    assert len(actual) == len(expected)
+    for case, got, wanted in zip(driver_cases, actual, expected):
+        assert got == wanted, (case, got, wanted)
+print(f'PASS {len(driver_cases)} original worker/sub-agent policy comparisons')

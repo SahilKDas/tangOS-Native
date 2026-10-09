@@ -993,6 +993,29 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
         std::lock_guard<std::mutex> lock(mutex);
         instructions += batchBook.instructions(id, rows);
       }
+      auto policy = backend("preferences.get", Json::object());
+      auto delegation = driverPolicy({{"name", job->state.spec.name},
+                                      {"provider", job->state.spec.provider},
+                                      {"jobs", job->state.spec.jobs}},
+                                     policy, rows.size());
+      if (execute && policy.value("safeMode", false))
+        throw std::runtime_error("User safe mode prohibits agent writes");
+      instructions += "\n\nUser delegation policy: " +
+                      (policy.value("useAgents", false)
+                           ? std::string("Delegation enabled: put approximately ") +
+                                 std::to_string(delegation.at("functionsPerAgent").get<int>()) +
+                                 " functions in EACH sub-agent (this batch suggests about " +
+                                 std::to_string(delegation.at("subAgents").get<int>()) +
+                                 "). Do not spawn one sub-agent per function: it multiplies setup "
+                                 "and token cost."
+                           : std::string("Do not spawn or delegate to additional agents."));
+      instructions +=
+          "\nMatching policy: " +
+          (policy.value("allowNearMiss", true)
+               ? std::string("Near-miss tips allowed. ")
+               : std::string("Do not use near-miss tips or nearmiss_* tools. ")) +
+          (policy.value("allowGhidra", false) ? std::string("Ghidra drafts allowed. ")
+                                              : std::string("Do not use Ghidra drafts. "));
       write(prompt, instructions);
       write(out, "");
       std::string list;
@@ -1031,7 +1054,7 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
                         {{"wl", utf8(wl.wstring())},
                          {"out", utf8(out.wstring())},
                          {"prompt", utf8(prompt.wstring())},
-                         {"jobs", job->state.spec.jobs},
+                         {"jobs", delegation.at("jobs")},
                          {"attempts", job->state.spec.attempts}},
                         job->state.worktree, true);
         // Existing Console Python drivers expose a standing INSTRUCTIONS block
@@ -1064,26 +1087,14 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       }
       for (auto &key : secrets)
         c.environment[key.first] = key.second;
-      auto policy = backend("preferences.get", Json::object());
       if (policy.value("safeMode", false))
         throw std::runtime_error("User safe mode prohibits agent writes");
       c.environment["TANGOS_USE_AGENTS"] = policy.value("useAgents", false) ? "1" : "0";
-      c.environment["TANGOS_AGENT_FANOUT"] = std::to_string(policy.value("agentFanout", 1));
-      write(prompt,
-            read(prompt) + "\n\nUser delegation policy: " +
-                (policy.value("useAgents", false)
-                     ? std::string("Delegation enabled; maximum ") +
-                           std::to_string(policy.value("agentFanout", 1)) + " cooperating agents."
-                     : std::string("Do not spawn or delegate to additional agents.")));
+      c.environment["TANGOS_AGENT_FANOUT"] =
+          std::to_string(delegation.at("functionsPerAgent").get<int>());
+      c.environment["TANGOS_WORKERS"] = std::to_string(delegation.at("jobs").get<int>());
       c.environment["TANGOS_ALLOW_NEAR_MISS"] = policy.value("allowNearMiss", true) ? "1" : "0";
       c.environment["TANGOS_ALLOW_GHIDRA"] = policy.value("allowGhidra", false) ? "1" : "0";
-      write(prompt,
-            read(prompt) + "\nMatching policy: " +
-                (policy.value("allowNearMiss", true)
-                     ? std::string("Near-miss tips allowed. ")
-                     : std::string("Do not use near-miss tips or nearmiss_* tools. ")) +
-                (policy.value("allowGhidra", false) ? std::string("Ghidra drafts allowed. ")
-                                                    : std::string("Do not use Ghidra drafts. ")));
       auto effort = effortPolicy({{"name", job->state.spec.name},
                                   {"provider", job->state.spec.provider},
                                   {"effort", job->state.spec.effort}});
@@ -1273,6 +1284,8 @@ Json Fleet::takeBatch(const std::string &id) {
   auto job = jobs.at(id);
   if (job->state.spec.kind != "mcp" || job->state.phase != "queued")
     return {{"status", "empty"}};
+  if (backend("preferences.get", Json::object()).value("safeMode", false))
+    throw std::runtime_error("User safe mode prohibits claiming an agent batch");
   job->state.phase = "running";
   job->state.detail = "External agent owns batch";
   batchBook.activate(id, job->state.assigned, std::time(nullptr) * int64_t(1000));

@@ -201,7 +201,7 @@ std::string resourceText(int id) {
 }
 void about() {
   reviewDialog(
-      "TangOS Lite 0.17.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
+      "TangOS Lite 0.18.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
       "for checks and Git; Repository for status.\nAlways read AGENTS.md and review "
       "changes before publication.\n\n" +
           resourceText(204) + "\n\nMinGW-w64 libwinpthread\n" + resourceText(202) +
@@ -537,6 +537,10 @@ void paintChrome(HDC dc, int w, int h) {
   }
   int cw = w - 382, rail = w - 354;
   skin::panel(dc, w / 2 - 138, 10, 276, 38);
+  if (consoleUI && !toolboxOpen) {
+    skin::label(dc, L"TangOS Lite", w - 92, h - 20, 82, 18, 10, false, true);
+    return;
+  }
   skin::panel(dc, 14, 66, cw, h - 86);
   skin::label(dc, toolboxOpen && !repositoryView ? L"Encyclopedia" : L"Chaos Controller", 30, 83,
               200, 25, 15, true);
@@ -582,7 +586,7 @@ void paintChrome(HDC dc, int w, int h) {
     skin::label(dc, L"Repository status", rail + 16, 345, 308, 24, 14, true);
   skin::label(dc, L"Port-only  ·  Review before push", rail + 16, h - 139, 300, 23, 12, true, true);
   skin::mascot(dc, w - 137, h - 127, 96);
-  skin::label(dc, L"v0.17.0", w - 74, h - 27, 60, 18, 10, false, true);
+  skin::label(dc, L"v0.18.0", w - 74, h - 27, 60, 18, 10, false, true);
 }
 void snapshot(const fs::path &path) {
   skin::invalidateBackdrop(window);

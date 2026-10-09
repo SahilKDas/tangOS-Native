@@ -65,6 +65,23 @@ int main() {
            "matching policy type validation");
     reject([&] { confirmed("preferences.set", {{"disabledTools", Json::array({42})}}); },
            "disabled tool type validation");
+    for (auto targets : Json::array({-1, 1000000001, 1.5, "8"}))
+      reject(
+          [&] {
+            backend.invoke("policy.drive",
+                           {{"cases", Json::array({{{"agent", {{"name", "Requesty"}, {"jobs", 3}}},
+                                                    {"preferences", {{"useAgents", true}}},
+                                                    {"targets", targets}}})}});
+          },
+          "driver policy rejects invalid target counts");
+    auto requesty = backend.invoke(
+        "policy.drive",
+        {{"cases", Json::array({{{"agent", {{"name", "Requesty"}, {"jobs", 3}}},
+                                 {"preferences", {{"useAgents", true}, {"agentFanout", 8.9}}},
+                                 {"targets", 16}}})}});
+    expect(requesty[0]["jobs"] == 1 && requesty[0]["functionsPerAgent"] == 8 &&
+               requesty[0]["subAgents"] == 2,
+           "Requesty remains serial while fanout groups functions per sub-agent");
     expect(backend.invoke("projects.list").empty(), "empty registry");
     confirmed("projects.register", {{"id", "fixture"}, {"repository", utf8(repo.wstring())}});
     expect(backend.invoke("projects.list").size() == 1, "registered local project");

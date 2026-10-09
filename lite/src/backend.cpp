@@ -373,7 +373,7 @@ Json Backend::catalog() {
        "atlas.counts",       "atlas.progress",    "atlas.live",         "update.check",
        "update.stage",       "bug.report",        "harvest.list",       "activity.snapshot",
        "policy.activity",    "policy.detail",     "policy.match",       "policy.role",
-       "policy.autoRole",    "policy.effort"});
+       "policy.autoRole",    "policy.effort",     "policy.drive"});
 }
 Json Backend::invoke(const std::string &m, Json a) {
   HANDLE lock = CreateFileW((directory / "backend.lock").c_str(),
@@ -416,6 +416,16 @@ Json Backend::invoke(const std::string &m, Json a) {
   if (m == "policy.match")
     return matchObservation(a.value("values", Json::object()), a.value("output", std::string()),
                             a.value("exit", 0UL), a.value("source", std::string()));
+  if (m == "policy.drive") {
+    Json out = Json::array();
+    for (auto &entry : a.at("cases")) {
+      auto targets = entry.at("targets");
+      if (!targets.is_number_integer() || targets < 0 || targets > 1000000000)
+        throw std::runtime_error("targets must be an integer from 0 to 1000000000");
+      out.push_back(driverPolicy(entry.at("agent"), entry.at("preferences"), entry.at("targets")));
+    }
+    return out;
+  }
   if (mutation(m, a)) {
     noCredentials(a);
     auto ticket = a.value("confirmation", std::string());
@@ -1056,10 +1066,10 @@ Json Backend::execute(const std::string &m, const Json &a) {
                      "animateBackground", "liveRefresh"})
       if (a.contains(key) && !a[key].is_boolean())
         throw std::runtime_error("Policy must be boolean: " + std::string(key));
-    if (a.contains("agentFanout") &&
-        (!a["agentFanout"].is_number_integer() || a["agentFanout"].get<int>() < 1 ||
-         a["agentFanout"].get<int>() > 200))
-      throw std::runtime_error("Agent fanout must be 1..200");
+    if (a.contains("agentFanout")) {
+      if (!a["agentFanout"].is_number())
+        throw std::runtime_error("Functions per sub-agent must be numeric");
+    }
     if (a.contains("disabledTools")) {
       if (!a["disabledTools"].is_array())
         throw std::runtime_error("disabledTools must be an array");
@@ -1069,6 +1079,8 @@ Json Backend::execute(const std::string &m, const Json &a) {
     }
     auto prefs = fileJson(directory / "preferences.json");
     prefs.merge_patch(a);
+    if (a.contains("agentFanout"))
+      prefs["agentFanout"] = driverPolicy(Json::object(), a, 0).at("functionsPerAgent");
     saveJson(directory / "preferences.json", prefs);
     return prefs;
   }
@@ -1300,7 +1312,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       args["connection"] = m;
     auto result = execute("network.read", args);
     if (m == "update.check" && result.value("ok", false))
-      result["update"] = updateStatus("0.17.0", result.at("data"));
+      result["update"] = updateStatus("0.18.0", result.at("data"));
     return result;
   }
   if (m == "git.clone") {
@@ -1404,7 +1416,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto folder = directory / "exports" / ("bug-report-" + uniqueId());
     fs::create_directories(folder);
     Json debug = {{"app", "TangOS Lite"},
-                  {"version", "0.17.0"},
+                  {"version", "0.18.0"},
                   {"portOnly", settings.portOnly},
                   {"project", settings.activeProject},
                   {"connections", Json::array()}};

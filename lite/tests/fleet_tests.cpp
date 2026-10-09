@@ -77,6 +77,7 @@ def main():
  p=argparse.ArgumentParser();p.add_argument('--wl');p.add_argument('--out');p.add_argument('--prompt');p.add_argument('--jobs');p.add_argument('--attempts');a=p.parse_args()
  instructions=pathlib.Path(a.prompt).read_text(encoding='utf-8')
  assert os.environ['TANGOS_EFFORT']=='medium', 'unknown model uses original family default'
+ assert a.jobs=='1', 'Use agents off must drive serially'
  assert 'ROOT_RULE' in instructions and 'NESTED_RULE' in instructions and 'never modify src/' in instructions
  if os.environ['GLM_MODEL']=='exhausted':print('402 payment required',flush=True);return
  if os.environ['GLM_MODEL']=='empty':pathlib.Path(a.out).write_text('{}');return
@@ -455,10 +456,22 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       wait(fleet);
       fleet.enqueue(external,
                     Json::array({{{"id", "external-later"}, {"name", "external_later"}}}));
+      auto preferencesPath = data / "preferences.json";
+      auto previousPreferences = fs::exists(preferencesPath) ? read(preferencesPath) : "{}";
+      auto safePreferences = Json::parse(previousPreferences);
+      safePreferences["safeMode"] = true;
+      write(preferencesPath, safePreferences.dump(2));
+      reject([&] { fleet.takeBatch(external); }, "safe mode refuses an already queued MCP batch");
+      write(preferencesPath, previousPreferences);
       auto batch = fleet.takeBatch(external);
       expect(batch["targets"].size() == 1 && batch["targets"][0]["id"] == "external",
              "MCP receives only prepared targets");
       expect(batch["status"] == "assigned", "MCP batch delivered");
+      expect(batch.at("instructions").get<std::string>().find("Do not spawn or delegate") !=
+                     std::string::npos &&
+                 batch.at("instructions").get<std::string>().find("Do not use Ghidra drafts") !=
+                     std::string::npos,
+             "MCP handoff preserves the same delegation and matching policy as native drivers");
       expect(fleet.takeBatch(external)["status"] == "empty", "MCP batch not assigned twice");
       fleet.finishBatch(external);
       for (auto &state : fleet.snapshot())

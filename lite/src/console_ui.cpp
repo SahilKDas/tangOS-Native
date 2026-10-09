@@ -13,6 +13,7 @@
 #include <chrono>
 #include <fstream>
 #include <numeric>
+#include <set>
 #include <stdexcept>
 namespace lite {
 namespace {
@@ -176,7 +177,7 @@ struct Hit {
   RECT rect;
   int index;
 };
-constexpr int DETAIL_OPERATIONS = 4850;
+constexpr int DETAIL_OPERATIONS = 4870;
 } // namespace
 struct ConsoleUI::Impl {
   HWND parent, window;
@@ -275,6 +276,12 @@ struct ConsoleUI::Impl {
     std::unique_ptr<ConsoleUI> ui;
   };
   std::vector<std::unique_ptr<Popup>> popups;
+  HWND settingsPopover = nullptr, settingsContent = nullptr;
+  bool settingsBuilding = false;
+  int settingsScroll = 0;
+  ULONGLONG clearStatsArmedUntil = 0;
+  ULONGLONG clearStatsDoneUntil = 0;
+  std::set<int> settingsInfo;
   bool viewerOnly = false;
   std::function<void(Json)> draftAdded;
   Json policy = Json::object(), connectionProfiles = Json::object(), serviceResult = Json::object(),
@@ -417,6 +424,8 @@ struct ConsoleUI::Impl {
     build();
   }
   ~Impl() {
+    if (settingsPopover)
+      DestroyWindow(settingsPopover);
     for (auto &popup : popups) {
       popup->ui.reset();
       if (popup->window)
@@ -807,7 +816,7 @@ struct ConsoleUI::Impl {
         profileFields["policy:" + entry.first] = h;
         py += 38;
       }
-      label("Delegation limit", width - 332, py, 150);
+      label("Functions per sub-agent", width - 332, py, 150);
       profileFields["policy:agentFanout"] =
           edit(std::to_string(policy.value("agentFanout", 8)), 0, width - 172, py, 120);
       py += 44;
@@ -1431,6 +1440,360 @@ struct ConsoleUI::Impl {
     popup->ui->show(true, true);
     popups.push_back(std::move(popup));
     ShowWindow(h, SW_SHOWNORMAL);
+  }
+  static LRESULT CALLBACK settingsKeyboard(HWND h, UINT msg, WPARAM w, LPARAM l, UINT_PTR id,
+                                           DWORD_PTR context) {
+    auto self = reinterpret_cast<Impl *>(context);
+    if (msg == WM_KEYDOWN && w == VK_ESCAPE) {
+      PostMessageW(self->settingsPopover, WM_CLOSE, 0, 0);
+      return 0;
+    }
+    if (msg == WM_KEYDOWN && w == VK_TAB) {
+      auto next = GetNextDlgTabItem(self->settingsContent, h, GetKeyState(VK_SHIFT) < 0);
+      if (next)
+        SetFocus(next);
+      return 0;
+    }
+    if (msg == WM_KEYDOWN && w == VK_RETURN && GetDlgCtrlID(h) == 7005) {
+      PostMessageW(self->settingsContent, WM_COMMAND, MAKEWPARAM(7005, EN_KILLFOCUS),
+                   reinterpret_cast<LPARAM>(h));
+      return 0;
+    }
+    if (msg == WM_MOUSEWHEEL) {
+      SendMessageW(self->settingsPopover, msg, w, l);
+      return 0;
+    }
+    if (msg == WM_NCDESTROY)
+      RemoveWindowSubclass(h, settingsKeyboard, id);
+    return DefSubclassProc(h, msg, w, l);
+  }
+  static LRESULT CALLBACK settingsProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
+    auto self = reinterpret_cast<Impl *>(GetWindowLongPtrW(h, GWLP_USERDATA));
+    if (msg == WM_NCCREATE) {
+      self = static_cast<Impl *>(reinterpret_cast<CREATESTRUCTW *>(l)->lpCreateParams);
+      SetWindowLongPtrW(h, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+    }
+    if (!self)
+      return DefWindowProcW(h, msg, w, l);
+    switch (msg) {
+    case WM_ACTIVATE:
+      if (h == self->settingsPopover && LOWORD(w) == WA_INACTIVE)
+        PostMessageW(h, WM_CLOSE, 0, 0);
+      break;
+    case WM_CLOSE:
+      DestroyWindow(h);
+      return 0;
+    case WM_NCDESTROY:
+      if (h == self->settingsPopover) {
+        self->settingsPopover = nullptr;
+        self->settingsContent = nullptr;
+      }
+      break;
+    case WM_KEYDOWN:
+      if (w == VK_ESCAPE) {
+        PostMessageW(self->settingsPopover, WM_CLOSE, 0, 0);
+        return 0;
+      }
+      break;
+    case WM_MOUSEWHEEL:
+    case WM_VSCROLL: {
+      int next = self->settingsScroll;
+      if (msg == WM_MOUSEWHEEL)
+        next -= GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA * 54;
+      else {
+        SCROLLINFO info{sizeof(info), SIF_TRACKPOS};
+        GetScrollInfo(self->settingsPopover, SB_VERT, &info);
+        switch (LOWORD(w)) {
+        case SB_LINEUP:
+          next -= 27;
+          break;
+        case SB_LINEDOWN:
+          next += 27;
+          break;
+        case SB_PAGEUP:
+          next -= 300;
+          break;
+        case SB_PAGEDOWN:
+          next += 300;
+          break;
+        case SB_THUMBTRACK:
+          next = info.nTrackPos;
+          break;
+        }
+      }
+      SCROLLINFO range{sizeof(range), SIF_RANGE | SIF_PAGE};
+      GetScrollInfo(self->settingsPopover, SB_VERT, &range);
+      self->settingsScroll = std::clamp(next, 0, std::max(0, range.nMax - int(range.nPage) + 1));
+      SetScrollPos(self->settingsPopover, SB_VERT, self->settingsScroll, TRUE);
+      SetWindowPos(self->settingsContent, nullptr, 0, -self->settingsScroll, 0, 0,
+                   SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+      return 0;
+    }
+    case WM_COMMAND:
+      if (self->settingsBuilding)
+        return 0;
+      try {
+        self->settingsAction(LOWORD(w), HIWORD(w));
+      } catch (const std::exception &e) {
+        MessageBoxW(self->settingsPopover, wide(e.what()).c_str(), L"Settings",
+                    MB_OK | MB_ICONERROR);
+        self->buildSettingsPopover();
+      }
+      return 0;
+    case WM_TIMER:
+      if (h == self->settingsPopover && self->settingsContent) {
+        auto title = self->clearStatsDoneUntil > GetTickCount64()    ? "Stats cleared"
+                     : self->clearStatsArmedUntil > GetTickCount64() ? "Click again to confirm"
+                                                                     : "Clear all stats";
+        auto button = GetDlgItem(self->settingsContent, 7007);
+        if (text(button) != title)
+          setText(button, title);
+      }
+      return 0;
+    case WM_DRAWITEM:
+      skin::button(*reinterpret_cast<DRAWITEMSTRUCT *>(l));
+      return TRUE;
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORBTN:
+      SetBkMode(reinterpret_cast<HDC>(w), TRANSPARENT);
+      SetTextColor(reinterpret_cast<HDC>(w), skin::text());
+      return reinterpret_cast<LRESULT>(GetStockObject(NULL_BRUSH));
+    case WM_PRINTCLIENT: {
+      RECT r;
+      GetClientRect(h, &r);
+      skin::background(reinterpret_cast<HDC>(w), r.right, r.bottom);
+      skin::panel(reinterpret_cast<HDC>(w), 0, 0, r.right, r.bottom, true);
+      return 0;
+    }
+    case WM_PAINT: {
+      PAINTSTRUCT ps;
+      auto dc = BeginPaint(h, &ps);
+      RECT r;
+      GetClientRect(h, &r);
+      skin::background(dc, r.right, r.bottom);
+      skin::panel(dc, 0, 0, r.right, r.bottom, true);
+      EndPaint(h, &ps);
+      return 0;
+    }
+    case WM_ERASEBKGND:
+      return 1;
+    }
+    return DefWindowProcW(h, msg, w, l);
+  }
+  void buildSettingsPopover() {
+    if (!settingsPopover)
+      return;
+    settingsBuilding = true;
+    if (settingsContent)
+      DestroyWindow(settingsContent);
+    settingsContent =
+        CreateWindowExW(0, L"TangOSLiteSettings", L"", WS_CHILD | WS_VISIBLE, 0, -settingsScroll,
+                        320, 1600, settingsPopover, nullptr, GetModuleHandleW(nullptr), this);
+    int y = 16;
+    auto add = [&](const wchar_t *kind, const std::string &title, int id, DWORD style,
+                   int height = 28) {
+      auto child =
+          CreateWindowExW(0, kind, wide(title).c_str(), WS_CHILD | WS_VISIBLE | style, 16, y, 288,
+                          height, settingsContent, reinterpret_cast<HMENU>(INT_PTR(id)),
+                          GetModuleHandleW(nullptr), nullptr);
+      SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+      SetWindowSubclass(child, settingsKeyboard, 3, reinterpret_cast<DWORD_PTR>(this));
+      y += height + 6;
+      return child;
+    };
+    auto section = [&](const std::string &title) {
+      y += 8;
+      add(L"STATIC", title, 0, SS_LEFT, 22);
+    };
+    auto info = [&](int id, const std::string &description) {
+      add(L"BUTTON", settingsInfo.count(id) ? "▾ What's this?" : "› What's this?", id, BS_OWNERDRAW,
+          22);
+      if (settingsInfo.count(id))
+        add(L"STATIC", description, 0, SS_LEFT, 88);
+    };
+    auto check = [&](int id, const std::string &title, bool checked) {
+      auto child = add(L"BUTTON", title, id, BS_AUTOCHECKBOX | WS_TABSTOP);
+      SendMessageW(child, BM_SETCHECK, checked ? BST_CHECKED : BST_UNCHECKED, 0);
+    };
+    section("Settings");
+    section("Decomp repo");
+    add(L"BUTTON", utf8(repository.wstring()), 7001, BS_OWNERDRAW | WS_TABSTOP);
+    add(L"BUTTON", "Sync repo…", 7002, BS_OWNERDRAW | WS_TABSTOP);
+    info(7101, "Preview upstream synchronization, including backup and protected-file checks. "
+               "Destructive changes require confirmation.");
+    section("Interface");
+    add(L"BUTTON", advancedMode ? "Advanced · switch to Simple" : "Simple · switch to Advanced",
+        7003, BS_OWNERDRAW | WS_TABSTOP);
+    info(7102, "Simple chooses agent roles automatically. Advanced exposes manual configuration "
+               "and additional tools.");
+    section("Matching");
+    check(7010, "Allow near-miss tips", policy.value("allowNearMiss", true));
+    info(7103, "Controls access to near-miss tools. Reconnect MCP clients after changing tool "
+               "visibility.");
+    section("Theme");
+    auto theme = add(L"COMBOBOX", "", 7004, CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 28);
+    for (auto name : {L"aero", L"sunset", L"deepsea", L"bubblegum", L"lemonlime"})
+      SendMessageW(theme, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name));
+    SendMessageW(theme, CB_SETCURSEL, settings.themeIndex, 0);
+    SetWindowPos(theme, nullptr, 0, 0, 288, 200, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    check(7011, "Animate the background", policy.value("animateBackground", true));
+    info(7104, "Drifting gradients and glass bubbles pause while the window is hidden. Turn motion "
+               "off for a flat background.");
+    section("Throughput");
+    check(7012, "Use agents (parallel batches)", policy.value("useAgents", false));
+    info(7105, "Off uses one worker. On enables supported drivers to delegate groups of functions. "
+               "Providers remain user configured.");
+    add(L"STATIC", "Functions per sub-agent", 0, SS_LEFT, 22);
+    add(L"EDIT", std::to_string(policy.value("agentFanout", 8)), 7005,
+        WS_BORDER | ES_NUMBER | WS_TABSTOP);
+    info(7106, "Each sub-agent receives 1–64 functions. Eight is recommended to avoid repeating "
+               "setup for every function.");
+    check(7013, "Auto-land in agent worktree", policy.value("autoLand", false));
+    info(7107, "Land verified output in the isolated agent worktree. Port-only review refuses src/ "
+               "changes. Commit and push still require previews.");
+    section("Help");
+    add(L"BUTTON", "Replay Tango's tour", 7006, BS_OWNERDRAW | WS_TABSTOP);
+    section("Stats");
+    add(L"BUTTON",
+        clearStatsArmedUntil > GetTickCount64() ? "Click again to confirm" : "Clear all stats",
+        7007, BS_OWNERDRAW | WS_TABSTOP);
+    info(7108, "Clears all-time and session tallies and best-divergence history. Click twice "
+               "within four seconds. This cannot be undone.");
+    section("Debug reports");
+    check(7014, "Save batch & run reports (48h)", policy.value("reports", false));
+    info(7109, "Optional local run reports are retained for 48 hours. Nothing is sent to an "
+               "external service.");
+    if (policy.value("reports", false))
+      add(L"BUTTON", "Open reports folder", 7008, BS_OWNERDRAW | WS_TABSTOP);
+    section("Debug snapshot");
+    add(L"BUTTON", "Save snapshot / report…", 7009, BS_OWNERDRAW | WS_TABSTOP);
+    add(L"BUTTON", "Advanced settings and key vault…", 7015, BS_OWNERDRAW | WS_TABSTOP);
+    y += 12;
+    SetWindowPos(settingsContent, nullptr, 0, -settingsScroll, 320, y,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+    RECT bounds;
+    GetClientRect(settingsPopover, &bounds);
+    SCROLLINFO scroll{sizeof(scroll), SIF_RANGE | SIF_PAGE | SIF_POS, 0, y - 1, UINT(bounds.bottom),
+                      settingsScroll};
+    SetScrollInfo(settingsPopover, SB_VERT, &scroll, TRUE);
+    settingsScroll = GetScrollPos(settingsPopover, SB_VERT);
+    SetWindowPos(settingsContent, nullptr, 0, -settingsScroll, 0, 0,
+                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    skin::invalidateBackdrop(settingsContent);
+    InvalidateRect(settingsPopover, nullptr, TRUE);
+    settingsBuilding = false;
+  }
+  void settingsAction(int id, int notification) {
+    if (id >= 7101 && id <= 7109) {
+      if (!settingsInfo.erase(id))
+        settingsInfo.insert(id);
+      buildSettingsPopover();
+      return;
+    }
+    Backend backend(repository, data, settings, vault.values());
+    auto confirmed = [&](const std::string &method, Json args) {
+      auto preview = backend.invoke(method, args);
+      args["confirmation"] = preview.at("confirmation");
+      return backend.invoke(method, args);
+    };
+    Json change = Json::object();
+    const std::map<int, std::string> flags = {{7010, "allowNearMiss"},
+                                              {7011, "animateBackground"},
+                                              {7012, "useAgents"},
+                                              {7013, "autoLand"},
+                                              {7014, "reports"}};
+    if (flags.count(id) && notification == BN_CLICKED)
+      change[flags.at(id)] =
+          SendMessageW(GetDlgItem(settingsContent, id), BM_GETCHECK, 0, 0) == BST_CHECKED;
+    else if (id == 7005 && notification == EN_KILLFOCUS) {
+      auto value = text(GetDlgItem(settingsContent, id));
+      if (!value.empty())
+        change["agentFanout"] = std::stoi(value);
+    } else if (id == 7004 && notification == CBN_SELCHANGE) {
+      settings.themeIndex = choice(GetDlgItem(settingsContent, id));
+      skin::theme(settings.themeIndex);
+      if (savePreferences)
+        savePreferences(settings);
+      InvalidateRect(parent, nullptr, TRUE);
+      InvalidateRect(window, nullptr, TRUE);
+      buildSettingsPopover();
+    } else if (notification == BN_CLICKED) {
+      switch (id) {
+      case 7001:
+        PostMessageW(parent, CONSOLE_PICK_REPO, 0, 0);
+        break;
+      case 7002:
+        serviceMethod = "git.syncPreview";
+        navigate(Screen::services);
+        break;
+      case 7003: {
+        advancedMode = !advancedMode;
+        auto path = data / "console-ui.json";
+        auto ui = fs::exists(path) ? Json::parse(read(path)) : Json::object();
+        ui["advanced"] = advancedMode;
+        write(path, ui.dump(2));
+        build();
+        buildSettingsPopover();
+        break;
+      }
+      case 7006:
+        navigate(Screen::tour);
+        break;
+      case 7007:
+        if (clearStatsArmedUntil > GetTickCount64()) {
+          confirmed("stats.clear", Json::object());
+          statsBaseline = Json::object();
+          clearStatsArmedUntil = 0;
+          clearStatsDoneUntil = GetTickCount64() + 3000;
+        } else
+          clearStatsArmedUntil = GetTickCount64() + 4000;
+        buildSettingsPopover();
+        break;
+      case 7008:
+        fs::create_directories(data / "reports");
+        ShellExecuteW(settingsPopover, L"open", (data / "reports").c_str(), nullptr, nullptr,
+                      SW_SHOWNORMAL);
+        break;
+      case 7009:
+        navigate(Screen::support);
+        break;
+      case 7015:
+        navigate(Screen::settings);
+        break;
+      }
+      if (id == 7001 || id == 7002 || id == 7006 || id == 7009 || id == 7015)
+        PostMessageW(settingsPopover, WM_CLOSE, 0, 0);
+    }
+    if (!change.empty()) {
+      policy = confirmed("preferences.set", change);
+      skin::animate(policy.value("animateBackground", true));
+      buildSettingsPopover();
+    }
+  }
+  void openSettingsPopover() {
+    if (settingsPopover) {
+      PostMessageW(settingsPopover, WM_CLOSE, 0, 0);
+      return;
+    }
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = settingsProc;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = L"TangOSLiteSettings";
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    RegisterClassW(&wc);
+    RECT bounds;
+    GetWindowRect(parent, &bounds);
+    settingsScroll = 0;
+    settingsPopover = CreateWindowExW(
+        WS_EX_TOOLWINDOW, wc.lpszClassName, L"Settings", WS_POPUP | WS_CLIPCHILDREN | WS_VSCROLL,
+        bounds.right - 542, bounds.top + 56, 340,
+        std::max(220, std::min(700, int(bounds.bottom - bounds.top) - 82)), parent, nullptr,
+        wc.hInstance, this);
+    if (!settingsPopover)
+      throw std::runtime_error("Could not open Settings overlay");
+    buildSettingsPopover();
+    SetTimer(settingsPopover, 1, 200, nullptr);
+    ShowWindow(settingsPopover, SW_SHOWNORMAL);
   }
   void storeBatchDraft() {
     if (!fleet || !batchTitle || !batchPrompt)
@@ -4219,7 +4582,9 @@ void ConsoleUI::stop() {
     impl->fleet->stopAll();
 }
 void ConsoleUI::openPanel(const std::string &panel) {
-  if (panel == "settings" || panel == "keys")
+  if (panel == "settings")
+    impl->openSettingsPopover();
+  else if (panel == "keys")
     impl->navigate(Screen::settings);
   else if (panel == "help" || panel == "report")
     impl->navigate(Screen::support);
@@ -4564,6 +4929,35 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     impl->navigate(Screen::controller);
     write(directory / "controller-navigation-report.txt",
           "PASS: session/all-time controls, Pick in Viewer, and Escape from focused detail log");
+    impl->action(SUPPORT, BN_CLICKED);
+    if (impl->screen != Screen::support)
+      throw std::runtime_error("Help opened the agent operations menu instead of Support");
+    impl->navigate(Screen::controller);
+    impl->openSettingsPopover();
+    if (!impl->settingsPopover || impl->screen != Screen::controller)
+      throw std::runtime_error("Settings overlay replaced Controller");
+    SendMessageW(impl->settingsPopover, WM_VSCROLL, SB_PAGEDOWN, 0);
+    if (impl->settingsScroll <= 0)
+      throw std::runtime_error("Settings overlay did not scroll");
+    impl->settingsAction(7106, BN_CLICKED);
+    if (!impl->settingsInfo.count(7106))
+      throw std::runtime_error("Settings explanation did not expand");
+    auto delegated = impl->policy.value("useAgents", false);
+    SendMessageW(GetDlgItem(impl->settingsContent, 7012), BM_SETCHECK, !delegated, 0);
+    impl->settingsAction(7012, BN_CLICKED);
+    if (impl->policy.value("useAgents", false) == delegated)
+      throw std::runtime_error("Settings overlay did not persist delegation");
+    SendMessageW(GetDlgItem(impl->settingsContent, 7012), BM_SETCHECK, delegated, 0);
+    impl->settingsAction(7012, BN_CLICKED);
+    impl->settingsAction(7007, BN_CLICKED);
+    if (impl->clearStatsArmedUntil <= GetTickCount64())
+      throw std::runtime_error("Stats clear did not require a second click");
+    DestroyWindow(impl->settingsPopover);
+    if (impl->settingsPopover || impl->settingsContent)
+      throw std::runtime_error("Settings overlay did not release native windows");
+    write(directory / "settings-overlay-report.txt",
+          "PASS: Controller preserved, scroll, expandable help, persisted toggle, guarded stats "
+          "clear and cleanup");
   }
   for (auto screen :
        {Screen::controller, Screen::atlas, Screen::encyclopedia, Screen::settings, Screen::profile,

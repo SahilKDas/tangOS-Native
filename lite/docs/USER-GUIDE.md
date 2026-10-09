@@ -1,5 +1,12 @@
 # TangOS Lite quick guide
 
+The toolbar sliders icon opens Settings over the current Controller or Viewer.
+Scroll to throughput, help, statistics and reports; “What's this?” expands each
+explanation. Changes apply locally. Functions per sub-agent is limited to 1–64;
+eight is recommended. Clearing statistics needs two clicks within four seconds.
+Escape or clicking outside closes the popover. Use **Advanced settings and key
+vault** for local API keys and connection profiles. Keys remain user owned.
+
 Run the portable `TangOSLite.exe` on Windows 10/11 x64. Install Git first; check
 scripts additionally need Python or the repository's existing compiler/build
 tools. No ROM, extracted asset or compiler is included.
