@@ -199,3 +199,12 @@ Display validation moves disposable test windows without changing display
 settings. The opt-in actual-provider test hardcodes loopback Ollama, uses an
 existing named model, requires no key, and runs in a disposable Git repository;
 it never downloads a model or sends repository data to an external provider.
+
+Descriptor Atlas generation uses explicit argv construction and the repository's
+configured interpreter. The output is confined to the checkout and checked
+against port-only source rules, ROMs, credentials and excluded assets in GUI,
+backend and MCP paths. These output checks do not sandbox the script itself.
+Agent post-land regeneration stays in the isolated worktree, retains a complete
+log, and leaves the primary checkout untouched. Refresh failure does not discard
+landed changes or report byte verification. Statistics baseline seeding only
+lowers known divergence values and cannot inflate counts on its own.
