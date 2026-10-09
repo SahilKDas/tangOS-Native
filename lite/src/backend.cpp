@@ -408,9 +408,10 @@ bool Backend::mutation(const std::string &m, const Json &) {
   return m == "update.stage" || m == "projects.importZip" || m == "projects.discover" ||
          m == "projects.download" || m == "projects.open" || m == "projects.register" ||
          m == "descriptor.write" || m == "preferences.set" || m == "connections.set" ||
-         m == "git.action" || m == "checks.run" || m == "tools.run" || m == "reports.export" ||
-         m == "bug.report" || m == "stats.clear" || m == "network.write" || m == "queue.adopt" ||
-         m == "git.clone" || m == "git.backup" || m == "git.discard" || m == "git.sync";
+         m == "git.action" || m == "checks.run" || m == "tools.run" || m == "atlas.generate" ||
+         m == "reports.export" || m == "bug.report" || m == "stats.clear" || m == "network.write" ||
+         m == "queue.adopt" || m == "git.clone" || m == "git.backup" || m == "git.discard" ||
+         m == "git.sync";
 }
 bool enabledTool(const Json &prefs, const std::string &id) {
   auto hidden = prefs.value("disabledTools", Json::array());
@@ -419,24 +420,24 @@ bool enabledTool(const Json &prefs, const std::string &id) {
 }
 Json Backend::catalog() {
   return Json::array(
-      {"projects.importZip",   "projects.discover", "projects.download",  "projects.list",
-       "projects.register",    "projects.open",     "descriptor.preview", "descriptor.write",
-       "preferences.get",      "preferences.set",   "connections.get",    "connections.set",
-       "network.read",         "network.write",     "atlas.load",         "atlas.source",
-       "atlas.history",        "claims.read",       "preflight",          "git.status",
-       "git.syncPreview",      "git.sync",          "git.action",         "git.clone",
-       "git.backup",           "git.discard",       "tools.list",         "tools.run",
-       "checks.list",          "checks.run",        "policy.presence",    "stats.get",
-       "stats.session",        "stats.clear",       "reports.list",       "reports.export",
-       "queue.adopt",          "policy.classify",   "policy.adaptive",    "policy.pool",
-       "policy.statistics",    "policy.layout",     "policy.color",       "policy.batches",
-       "policy.source",        "policy.usage",      "guide.parse",        "guide.tour",
-       "guide.tips",           "guide.richText",    "projects.get",       "github.credits",
-       "atlas.cosmetics",      "atlas.counts",      "atlas.progress",     "atlas.live",
-       "update.check",         "update.stage",      "bug.report",         "harvest.list",
-       "activity.snapshot",    "policy.activity",   "policy.detail",      "policy.match",
-       "policy.role",          "policy.autoRole",   "policy.effort",      "policy.drive",
-       "policy.controllerView"});
+      {"projects.importZip", "projects.discover",    "projects.download",  "projects.list",
+       "projects.register",  "projects.open",        "descriptor.preview", "descriptor.write",
+       "preferences.get",    "preferences.set",      "connections.get",    "connections.set",
+       "network.read",       "network.write",        "atlas.load",         "atlas.generate",
+       "atlas.source",       "atlas.history",        "claims.read",        "preflight",
+       "git.status",         "git.syncPreview",      "git.sync",           "git.action",
+       "git.clone",          "git.backup",           "git.discard",        "tools.list",
+       "tools.run",          "checks.list",          "checks.run",         "policy.presence",
+       "stats.get",          "stats.session",        "stats.clear",        "reports.list",
+       "reports.export",     "queue.adopt",          "policy.classify",    "policy.adaptive",
+       "policy.pool",        "policy.statistics",    "policy.layout",      "policy.color",
+       "policy.batches",     "policy.source",        "policy.usage",       "guide.parse",
+       "guide.tour",         "guide.tips",           "guide.richText",     "projects.get",
+       "github.credits",     "atlas.cosmetics",      "atlas.counts",       "atlas.progress",
+       "atlas.live",         "update.check",         "update.stage",       "bug.report",
+       "harvest.list",       "activity.snapshot",    "policy.activity",    "policy.detail",
+       "policy.match",       "policy.role",          "policy.autoRole",    "policy.effort",
+       "policy.drive",       "policy.controllerView"});
 }
 Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
   if (m == "bug.report" && a.contains("description") && a["description"].is_string())
@@ -591,11 +592,20 @@ Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
                    {"method", c.value("method", std::string("GET"))},
                    {"keyEnv", c.value("keyEnv", std::string())}};
       }
-      if (m == "tools.run") {
+      if (m == "tools.run" || m == "atlas.generate") {
         auto d = loadDescriptor(repository);
-        details["command"] =
-            preview(toolCommand(d, d.tool(a.at("tool")), a.value("values", Json::object()),
-                                repository, true, a.value("apply", false)));
+        if (m == "atlas.generate" && d.generatorId.empty())
+          throw std::runtime_error(
+              "Configure data.generate in tangos.json before regenerating Atlas data");
+        auto toolId = m == "atlas.generate" ? d.generatorId : a.at("tool").get<std::string>();
+        auto values =
+            m == "atlas.generate" ? Json{{"out", d.database}} : a.value("values", Json::object());
+        if (!d.generatorId.empty() && toolId == d.generatorId)
+          validateAtlasOutput(d, values, repository, settings);
+        details["command"] = preview(toolCommand(
+            d, d.tool(m == "atlas.generate" ? d.generatorId : a.at("tool").get<std::string>()),
+            m == "atlas.generate" ? Json{{"out", d.database}} : a.value("values", Json::object()),
+            repository, true, a.value("apply", false)));
       }
       auto nonce = uniqueId();
       saveJson(directory / "confirmations" / (nonce + ".json"),
@@ -1856,8 +1866,20 @@ Json Backend::execute(const std::string &m, const Json &a) {
                      {"enabled", enabledTool(prefs, t.id)}});
     return out;
   }
+  if (m == "atlas.generate") {
+    if (descriptor.generatorId.empty())
+      throw std::runtime_error(
+          "Configure data.generate in tangos.json before regenerating Atlas data");
+    auto result = execute("tools.run", {{"tool", descriptor.generatorId},
+                                        {"values", {{"out", descriptor.database}}}});
+    if (result.value("exit", 1) == 0 && !result.value("cancelled", false))
+      result["atlas"] = execute("atlas.load", Json::object());
+    return result;
+  }
   if (m == "tools.run") {
     auto &tool = descriptor.tool(a.at("tool"));
+    if (!descriptor.generatorId.empty() && tool.id == descriptor.generatorId)
+      validateAtlasOutput(descriptor, a.value("values", Json::object()), repository, settings);
     if (!enabledTool(fileJson(directory / "preferences.json"), tool.id))
       throw std::runtime_error("Tool disabled by user policy");
     if (!tool.readOnly && settings.portOnly)

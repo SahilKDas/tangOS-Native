@@ -917,7 +917,8 @@ struct ConsoleUI::Impl {
                                BS_AUTOCHECKBOX);
         SendMessageW(draftsChoice, BM_SETCHECK, atlasDrafts ? BST_CHECKED : BST_UNCHECKED, 0);
       }
-      button("Reload", ATLAS_LOAD, width - 130, 18, 108);
+      button(!remoteOnly && !liveAtlas && !descriptor.generatorId.empty() ? "Regenerate" : "Reload",
+             ATLAS_LOAD, width - 130, 18, 108);
       button(remoteOnly ? "Connections" : "Encyclopedia", remoteOnly ? CONNECTIONS : ENCYCLOPEDIA,
              310, height - 44, 110);
       button("Reset", ATLAS_RESET, 428, height - 44, 76);
@@ -3223,6 +3224,8 @@ struct ConsoleUI::Impl {
           "Port-only mode blocks mutating descriptor tools in the primary checkout. Use an "
           "isolated agent worktree, or explicitly disable port-only mode.");
     auto values = Json::parse(text(argsBox));
+    if (!descriptor.generatorId.empty() && tool.id == descriptor.generatorId)
+      validateAtlasOutput(descriptor, values, repository, settings);
     auto c = toolCommand(descriptor, tool, values, repository, allowWrites,
                          values.value("apply", false));
     auto prompt = "Run repository code?\n\n" + preview(c) + "\n\n" + utf8(c.cwd.wstring()) +
@@ -4293,6 +4296,18 @@ struct ConsoleUI::Impl {
       build();
       break;
     case ATLAS_LOAD:
+      if (!remoteOnly && !liveAtlas && !descriptor.generatorId.empty()) {
+        navigate(Screen::encyclopedia);
+        auto at = std::find(shownTools.begin(), shownTools.end(), descriptor.generatorId);
+        if (at == shownTools.end())
+          throw std::runtime_error("Atlas generator is not available in the tool catalog");
+        SendMessageW(toolList, LB_SETCURSEL, at - shownTools.begin(), 0);
+        selectTool();
+        auto values = Json::parse(text(argsBox));
+        values["out"] = descriptor.database;
+        setText(argsBox, values.dump(2));
+        break;
+      }
       forceLiveReload = true;
       loadAtlas();
       break;
@@ -5462,6 +5477,32 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
           "PASS: missing/invalid descriptor gate, async scan, editable draft, side-effect-free "
           "preview, fixture-only confirmed write and validated reload");
     return;
+  }
+  {
+    auto previousDescriptor = impl->descriptor;
+    auto generation = previousDescriptor.document;
+    generation["data"]["generate"] = "{python} tools/generate_fixture.py {out}";
+    impl->descriptor = parseDescriptor(generation.dump());
+    impl->navigate(Screen::atlas);
+    if (impl->loader.joinable())
+      impl->loader.join();
+    impl->tick();
+    if (text(GetDlgItem(impl->window, ATLAS_LOAD)) != "Regenerate")
+      throw std::runtime_error("Local Atlas does not expose descriptor regeneration");
+    impl->action(ATLAS_LOAD, BN_CLICKED);
+    auto values = Json::parse(text(impl->argsBox));
+    auto toolIndex = SendMessageW(impl->toolList, LB_GETCURSEL, 0, 0);
+    if (impl->screen != Screen::encyclopedia || toolIndex < 0 ||
+        impl->shownTools.at(toolIndex) != impl->descriptor.generatorId ||
+        values.at("out") != impl->descriptor.database)
+      throw std::runtime_error(
+          "Atlas regeneration did not open the configured tool and output preview");
+    capture(directory / "atlas-generator-preview.bmp");
+    impl->descriptor = previousDescriptor;
+    impl->navigate(priorScreen);
+    write(directory / "atlas-generator-report.txt",
+          "PASS: local Regenerate opens the descriptor command with its database output; no "
+          "execution before review");
   }
   if (impl->fleet) {
     if (!impl->mcpDesired && impl->mcp)

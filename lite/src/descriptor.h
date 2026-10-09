@@ -14,7 +14,7 @@ struct Tool {
   std::vector<ToolArg> args;
 };
 struct Descriptor {
-  std::string title, tagline, python = "python", cwd = ".", database = "chaos-db.json";
+  std::string title, tagline, python = "python", cwd = ".", database = "chaos-db.json", generatorId;
   Json document;
   std::vector<Tool> tools;
   std::map<std::string, std::string> roles;
@@ -28,6 +28,8 @@ std::string githubSlug(const std::string &url);
 Command toolCommand(const Descriptor &descriptor, const Tool &tool, const Json &values,
                     const fs::path &repo, bool allowWrites, bool allowApply = false);
 fs::path confinedPath(const fs::path &root, const std::string &relative);
+void validateAtlasOutput(const Descriptor &descriptor, const Json &values, const fs::path &repo,
+                         const Settings &settings);
 struct AtlasFunction {
   std::string id, name, module, state;
   uint64_t size = 1;

@@ -159,6 +159,67 @@ int main() {
                                           "{\"claims\":[{\"module\":\"arm9\",\"start\":33554432,"
                                           "\"end\":33554448}],\"echo\":\"local-fixture-secret\"}"};
                     });
+    reject([&] { backend.invoke("atlas.generate"); },
+           "Atlas generation requires a configured command");
+    {
+      auto generatedDescriptor = desc;
+      generatedDescriptor["data"] = {{"dbPath", "generated database.json"},
+                                     {"generate", "{python} tools/generate_atlas.py {out}"}};
+      write(repo / "tools/generate_atlas.py",
+            "import json,sys\nfrom pathlib import Path\n"
+            "Path(sys.argv[1]).write_text(json.dumps({'functions':[{'id':'generated','name':'"
+            "Generated','size':16}]}))\n"
+            "print('Atlas generation finished')\n");
+      write(repo / "tangos.json", generatedDescriptor.dump());
+      auto parsed = loadDescriptor(repo);
+      reject([&] { validateAtlasOutput(parsed, {{"out", "../outside.json"}}, repo, settings); },
+             "Atlas generation cannot escape its repository");
+      reject([&] { validateAtlasOutput(parsed, {{"out", "src/generated.json"}}, repo, settings); },
+             "Port-only Atlas generation cannot target src");
+      reject([&] { validateAtlasOutput(parsed, {{"out", "base.nds"}}, repo, settings); },
+             "Atlas generation cannot overwrite ROM data");
+      auto command =
+          toolCommand(parsed, parsed.tool(parsed.generatorId), Json::object(), repo, true);
+      expect(command.argv == Args({"python", "tools/generate_atlas.py", "generated database.json"}),
+             "Atlas generator uses the descriptor interpreter and a single quoted output argument");
+      auto preview = backend.invoke("atlas.generate");
+      expect(preview.value("requiresConfirmation", false) &&
+                 !fs::exists(repo / "generated database.json"),
+             "Atlas preview does not execute generation");
+      write(repo / "tools/generate_atlas.py",
+            read(repo / "tools/generate_atlas.py") + "# changed\n");
+      reject(
+          [&] { backend.invoke("atlas.generate", {{"confirmation", preview.at("confirmation")}}); },
+          "Atlas confirmation expires when the configured script changes");
+      preview = backend.invoke("atlas.generate");
+      auto generated =
+          backend.invoke("atlas.generate", {{"confirmation", preview.at("confirmation")}});
+      expect(generated.value("exit", 1) == 0 &&
+                 generated.at("atlas").at("functions").at(0).at("id") == "generated" &&
+                 fs::exists(fs::u8path(generated.at("log").get<std::string>())),
+             "Confirmed Atlas generation returns the refreshed database and complete log");
+      expect(read(fs::u8path(generated.at("log").get<std::string>()))
+                     .find("Atlas generation finished") != std::string::npos,
+             "Atlas generation retains the script's complete output");
+      write(repo / "tools/generate_atlas.py",
+            "import sys\nprint('generation failed')\nsys.exit(7)\n");
+      preview = backend.invoke("atlas.generate");
+      auto failed =
+          backend.invoke("atlas.generate", {{"confirmation", preview.at("confirmation")}});
+      expect(
+          failed.value("exit", 0) == 7 && !failed.contains("atlas") &&
+              read(fs::u8path(failed.at("log").get<std::string>())).find("generation failed") !=
+                  std::string::npos,
+          "Failed generation preserves its log without presenting the old database as refreshed");
+      auto collision = generatedDescriptor;
+      collision["tools"].push_back(
+          {{"id", "generate_atlas_data"}, {"command", "python --version"}, {"readOnly", true}});
+      auto collided = parseDescriptor(collision.dump());
+      expect(collided.generatorId == "generate_atlas_data_native" &&
+                 collided.tool("generate_atlas_data").command == "python --version",
+             "Atlas generation does not replace an existing repository tool");
+      write(repo / "tangos.json", desc.dump());
+    }
     // Agent policy reads may overlap another agent's short statistics transaction.
     auto heldLock = CreateFileW((data / "backend.lock").c_str(), GENERIC_READ | GENERIC_WRITE, 0,
                                 nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);

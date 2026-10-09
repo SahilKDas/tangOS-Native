@@ -16,6 +16,15 @@ Mutations first return a concrete preview and a single-use confirmation. Inspect
 
 ## Connection ownership
 
+`atlas.generate` previews the selected project's `data.generate` command, using
+the descriptor interpreter, working directory and `dbPath` as `{out}`. Confirm
+the preview to execute it. A successful result includes the refreshed `atlas`;
+failure includes the exit code and durable log without claiming a refresh.
+Output paths cannot escape the checkout or target protected source, ROMs,
+credentials or excluded assets. Repository commands remain trusted local code.
+In local Viewer, **Regenerate** opens this tool and its output argument for review.
+Remote Viewer retains **Reload** and does not execute local commands.
+
 `connections.set` writes local `connections.json`, never a repository file. Each profile needs the user's explicit `enabled: true` and a full URL/method. There are no enabled profiles by default. For example:
 
 ```json

@@ -1,5 +1,16 @@
 # Console parity audit
 
+## Descriptor Atlas generation checkpoint
+
+Native projects now honor `data.generate`, including the descriptor interpreter,
+working directory and database output. Local Viewer exposes Regenerate through
+the command review workflow; remote Viewer continues to reload published data.
+Disposable backend tests cover command construction, confirmation, changed-script
+expiry, failed generation, output guards, tool-ID collisions and complete logs.
+The native GUI workflow verifies the configured tool selection and output preview
+in `lite/out/gui-atlas-generator-025`. Automatic post-land regeneration and
+reference statistics baseline comparison remain under implementation.
+
 ## Styled help and window stacking checkpoint
 
 Editable `:joke[...]` text now follows the original span parser (129 differential

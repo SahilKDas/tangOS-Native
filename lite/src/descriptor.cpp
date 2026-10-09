@@ -106,6 +106,27 @@ Descriptor parseDescriptor(const std::string &text) {
     }
     d.tools.push_back(t);
   }
+  auto generation = j.value("data", Json::object()).value("generate", std::string());
+  if (!generation.empty()) {
+    Tool generator;
+    generator.id = "generate_atlas_data";
+    while (ids.count(generator.id))
+      generator.id += "_native";
+    generator.label = "Refresh Atlas data";
+    generator.category = "reporting";
+    generator.description = "Run data.generate from this repository's descriptor, then reload "
+                            "the generated Atlas. Inspect the command and complete log.";
+    generator.command = generation;
+    ToolArg output;
+    output.name = "out";
+    output.type = "string";
+    output.description = "Generated database path relative to the repository";
+    output.value = d.database;
+    output.required = true;
+    generator.args.push_back(output);
+    d.generatorId = generator.id;
+    d.tools.push_back(std::move(generator));
+  }
   auto roles = j.value("console", Json::object());
   for (auto it = roles.begin(); it != roles.end(); ++it) {
     auto id = it.value().get<std::string>();
@@ -116,6 +137,14 @@ Descriptor parseDescriptor(const std::string &text) {
 }
 Descriptor loadDescriptor(const fs::path &repo) {
   return parseDescriptor(read(repo / "tangos.json"));
+}
+void validateAtlasOutput(const Descriptor &descriptor, const Json &values, const fs::path &repo,
+                         const Settings &settings) {
+  auto path = confinedPath(repo, values.value("out", descriptor.database));
+  auto relative = utf8(path.lexically_relative(fs::weakly_canonical(repo)).wstring());
+  auto reason = blockedPath(relative, settings);
+  if (!reason.empty())
+    throw std::runtime_error("Atlas output is protected: " + relative + " — " + reason);
 }
 static std::string scalar(const Json &v) { return v.is_string() ? v.get<std::string>() : v.dump(); }
 Command toolCommand(const Descriptor &d, const Tool &t, const Json &input, const fs::path &repo,
