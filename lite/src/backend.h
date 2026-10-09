@@ -37,7 +37,7 @@ public:
           Runner *process = nullptr, std::function<void(const std::string &)> progress = {});
   static bool mutation(const std::string &method, const Json &args);
   static Json catalog();
-  Json invoke(const std::string &method, Json args = Json::object());
+  Json invoke(const std::string &method, Json args = Json::object(), unsigned lockWaitMs = 0);
   void resetRecent(const std::string &id);
   void recordAgent(const std::string &id, const fs::path &results, const std::string &phase,
                    int verifiedGates, const std::string &adaptive = "");

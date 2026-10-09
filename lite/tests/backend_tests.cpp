@@ -49,6 +49,26 @@ int main() {
                                           "{\"claims\":[{\"module\":\"arm9\",\"start\":33554432,"
                                           "\"end\":33554448}],\"echo\":\"local-fixture-secret\"}"};
                     });
+    // Agent policy reads may overlap another agent's short statistics transaction.
+    auto heldLock = CreateFileW((data / "backend.lock").c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                                nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    expect(heldLock != INVALID_HANDLE_VALUE, "hold backend transaction fixture");
+    reject([&] { backend.invoke("preferences.get"); }, "external operations remain fail-fast");
+    reject([&] { backend.invoke("preferences.get", Json::object(), 20); },
+           "internal contention wait is bounded");
+    std::thread releaseLock([heldLock] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(80));
+      CloseHandle(heldLock);
+    });
+    Json contendedRead;
+    try {
+      contendedRead = backend.invoke("preferences.get", Json::object(), 1000);
+    } catch (...) {
+      releaseLock.join();
+      throw;
+    }
+    releaseLock.join();
+    expect(contendedRead.is_object(), "fleet policy read waits for completion transaction");
     auto confirmed = [&](const std::string &method, Json args) {
       auto preview = backend.invoke(method, args);
       expect(preview.value("requiresConfirmation", false), "write preview");

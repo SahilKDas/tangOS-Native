@@ -1366,7 +1366,7 @@ Json Fleet::backend(const std::string &method, const Json &args) {
     throw std::runtime_error(
         "Agents cannot authorize backend mutations; user must preview them locally");
   return Backend(repository, directory.parent_path().parent_path(), settings, vault.values())
-      .invoke(method, args);
+      .invoke(method, args, 1000);
 }
 bool Fleet::toolEnabled(const std::string &id) {
   auto prefs = backend("preferences.get", Json::object());

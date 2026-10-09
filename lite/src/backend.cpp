@@ -375,11 +375,19 @@ Json Backend::catalog() {
        "policy.activity",    "policy.detail",     "policy.match",       "policy.role",
        "policy.autoRole",    "policy.effort",     "policy.drive"});
 }
-Json Backend::invoke(const std::string &m, Json a) {
-  HANDLE lock = CreateFileW((directory / "backend.lock").c_str(),
-                            mutation(m, a) ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ,
-                            mutation(m, a) ? 0 : FILE_SHARE_READ, nullptr, OPEN_ALWAYS,
-                            FILE_ATTRIBUTE_NORMAL, nullptr);
+Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
+  const auto deadline = GetTickCount64() + std::min(lockWaitMs, 1000u);
+  HANDLE lock;
+  do {
+    lock = CreateFileW((directory / "backend.lock").c_str(),
+                       mutation(m, a) ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ,
+                       mutation(m, a) ? 0 : FILE_SHARE_READ, nullptr, OPEN_ALWAYS,
+                       FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (lock != INVALID_HANDLE_VALUE || GetLastError() != ERROR_SHARING_VIOLATION ||
+        GetTickCount64() >= deadline)
+      break;
+    Sleep(10);
+  } while (true);
   if (lock == INVALID_HANDLE_VALUE)
     throw std::runtime_error("Another backend operation is active");
   struct Guard {
