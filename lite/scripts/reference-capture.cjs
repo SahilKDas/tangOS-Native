@@ -31,6 +31,18 @@ const { chromium } = require(path.resolve(playwrightModule));
     }
     require('fs').writeFileSync(path.resolve(outputDir, 'controller-geometry.json'), JSON.stringify(controllerGeometry, null, 2));
     await page.screenshot({ path: path.resolve(outputDir, 'controller.png') });
+    await page.getByTitle('Report a bug', { exact: true }).click();
+    await page.locator('.bug-report').waitFor();
+    const reportGeometry = {};
+    for (const selector of ['.bug-report', '.bug-report .head', '.bug-report .hint', '.bug-desc', '.bug-shots', '.bug-actions']) {
+      reportGeometry[selector] = await page.locator(selector).evaluate(element => {
+        const bounds = element.getBoundingClientRect();
+        return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+      });
+    }
+    require('fs').writeFileSync(path.resolve(outputDir, 'report-geometry.json'), JSON.stringify(reportGeometry, null, 2));
+    await page.screenshot({ path: path.resolve(outputDir, 'bug-report.png') });
+    await page.locator('.bug-report .dock-close').click();
     await page.getByTitle('Open detailed stats, history, and recommendation').first().click();
     await page.locator('.ai-detail').waitFor();
     await page.screenshot({ path: path.resolve(outputDir, 'agent-detail.png') });

@@ -6,6 +6,7 @@
 #include "archive.h"
 #include "updater.h"
 #include "activity.h"
+#include "images.h"
 #include <numeric>
 #include "repository.h"
 #include <regex>
@@ -48,6 +49,66 @@ std::string fingerprint(const std::string &s) {
   for (auto byte : digest) {
     result += hex[byte >> 4];
     result += hex[byte & 15];
+  }
+  return result;
+}
+Json redactMetadata(Json value, const std::map<std::string, std::string> &secrets) {
+  if (value.is_string())
+    return redact(value.get<std::string>(), secrets);
+  if (value.is_object() || value.is_array())
+    for (auto &item : value)
+      item = redactMetadata(item, secrets);
+  return value;
+}
+std::string screenshotBytes(const fs::path &path) {
+  auto handle = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                            FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (handle == INVALID_HANDLE_VALUE)
+    throw std::runtime_error("Cannot read the screenshot; close programs currently writing it");
+  struct Guard {
+    HANDLE handle;
+    ~Guard() { CloseHandle(handle); }
+  } guard{handle};
+  LARGE_INTEGER size{};
+  if (GetFileType(handle) != FILE_TYPE_DISK || !GetFileSizeEx(handle, &size) ||
+      size.QuadPart <= 0 || size.QuadPart > 16 * 1024 * 1024)
+    throw std::runtime_error("Each screenshot must be a regular file under 16 MiB");
+  std::string bytes(size_t(size.QuadPart), '\0');
+  DWORD received = 0;
+  if (!ReadFile(handle, bytes.data(), DWORD(bytes.size()), &received, nullptr) ||
+      received != bytes.size())
+    throw std::runtime_error("Screenshot changed or could not be read completely");
+  return bytes;
+}
+Json reportAttachments(const Json &args) {
+  auto paths = args.value("screenshots", Json::array());
+  if (!paths.is_array() || paths.size() > 16)
+    throw std::runtime_error("Choose at most 16 screenshots");
+  Json result = Json::array();
+  std::set<fs::path> seen;
+  uint64_t total = 0;
+  for (auto &value : paths) {
+    if (!value.is_string())
+      throw std::runtime_error("Screenshot paths must be strings");
+    auto path = fs::u8path(value.get<std::string>());
+    auto info = inspectScreenshot(path);
+    path = fs::canonical(path);
+    if (!seen.insert(path).second)
+      continue;
+    total += info.bytes;
+    if (total > 64 * 1024 * 1024)
+      throw std::runtime_error("Screenshot attachments exceed 64 MiB total");
+    auto bytes = screenshotBytes(path);
+    if (bytes.size() != info.bytes)
+      throw std::runtime_error("Screenshot changed during inspection; attach it again");
+    result.push_back(
+        {{"path", utf8(path.wstring())},
+         {"file", "screenshot-" + std::to_string(result.size() + 1) + "." + info.format},
+         {"bytes", bytes.size()},
+         {"width", info.width},
+         {"height", info.height},
+         {"format", info.format},
+         {"sha256", fingerprint(bytes)}});
   }
   return result;
 }
@@ -376,6 +437,8 @@ Json Backend::catalog() {
        "policy.autoRole",    "policy.effort",     "policy.drive"});
 }
 Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
+  if (m == "bug.report" && a.contains("description") && a["description"].is_string())
+    a["description"] = redact(a["description"].get<std::string>(), secrets);
   const auto deadline = GetTickCount64() + std::min(lockWaitMs, 1000u);
   HANDLE lock;
   do {
@@ -434,12 +497,13 @@ Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
     }
     return out;
   }
+  Json attachments;
   if (mutation(m, a)) {
     noCredentials(a);
     auto ticket = a.value("confirmation", std::string());
     a.erase("confirmation");
     std::string baseline;
-    if (!repository.empty() && fs::exists(repository / ".git")) {
+    if (m != "bug.report" && !repository.empty() && fs::exists(repository / ".git")) {
       Runner r;
       Repository repo(r, repository, settings);
       baseline = repo.git({"show-ref"}) + repo.git({"rev-parse", "HEAD"}) +
@@ -464,9 +528,22 @@ Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
             "Choose a ZIP under 128 MiB and an absolute new destination folder");
       baseline += sha256File(archive);
     }
+    if (m == "bug.report") {
+      auto description = a.value("description", std::string());
+      if (trim(description).empty() || description.size() > 65536 ||
+          !blockedBlob(description).empty())
+        throw std::runtime_error("Describe the bug without protected content (maximum 64 KiB)");
+      attachments = reportAttachments(a);
+      baseline += attachments.dump();
+    }
     baseline = fingerprint(baseline);
     if (ticket.empty()) {
       Json details = Json::object();
+      if (m == "bug.report")
+        details = {{"screenshots", attachments},
+                   {"description", redact(a.at("description").get<std::string>(), secrets)},
+                   {"notice", "Prepare a local folder only; screenshots retain their visible "
+                              "content and no upload is performed"}};
       if (m == "update.stage") {
         auto profiles = fileJson(directory / "connections.json");
         if (!profiles.contains("update.check"))
@@ -544,6 +621,8 @@ Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
       throw std::runtime_error("Preview expired or operation/repository changed; preview again");
     fs::remove(path);
   }
+  if (m == "bug.report")
+    a["_validatedAttachments"] = attachments;
   return execute(m, a);
 }
 namespace {
@@ -1320,7 +1399,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       args["connection"] = m;
     auto result = execute("network.read", args);
     if (m == "update.check" && result.value("ok", false))
-      result["update"] = updateStatus("0.19.0", result.at("data"));
+      result["update"] = updateStatus("0.20.0", result.at("data"));
     return result;
   }
   if (m == "git.clone") {
@@ -1418,27 +1497,57 @@ Json Backend::execute(const std::string &m, const Json &a) {
     return {{"cleared", true}};
   }
   if (m == "bug.report") {
-    auto description = a.value("description", std::string());
+    if (processRunner && processRunner->isCancelled())
+      throw std::runtime_error("Report preparation cancelled");
+    auto description = redact(a.value("description", std::string()), secrets);
     if (description.size() > 65536 || !blockedBlob(description).empty())
       throw std::runtime_error("Report description contains protected content or exceeds 64 KiB");
+    std::vector<std::pair<std::string, std::string>> images;
+    Json exportedShots = Json::array();
+    for (auto shot : a.value("_validatedAttachments", Json::array())) {
+      auto bytes = screenshotBytes(fs::u8path(shot.at("path").get<std::string>()));
+      if (fingerprint(bytes) != shot.at("sha256"))
+        throw std::runtime_error("Screenshot changed after preview; preview the report again");
+      images.emplace_back(shot.at("file").get<std::string>(), std::move(bytes));
+      shot.erase("path");
+      exportedShots.push_back(shot);
+    }
+    if (processRunner && processRunner->isCancelled())
+      throw std::runtime_error("Report preparation cancelled before export");
     auto folder = directory / "exports" / ("bug-report-" + uniqueId());
     fs::create_directories(folder);
     Json debug = {{"app", "TangOS Lite"},
-                  {"version", "0.19.0"},
+                  {"version", "0.20.0"},
                   {"portOnly", settings.portOnly},
                   {"project", settings.activeProject},
-                  {"connections", Json::array()}};
+                  {"connections", Json::array()},
+                  {"screenshots", exportedShots},
+                  {"os", "Windows"},
+                  {"architecture", "x64"},
+                  {"recentActivity", Json::array()}};
+    auto activity = activityBus().snapshot(utf8(repository.wstring()));
+    for (size_t i = activity.size() > 20 ? activity.size() - 20 : 0; i < activity.size(); ++i) {
+      Json run = Json::object();
+      for (auto field : {"toolId", "label", "status", "exitCode", "startedAt", "finishedAt"})
+        if (activity[i].contains(field))
+          run[field] = activity[i][field];
+      debug["recentActivity"].push_back(run);
+    }
     for (auto &name : {"connections.json"}) {
       auto profiles = fileJson(directory / name);
       for (auto it = profiles.begin(); it != profiles.end(); ++it)
         debug["connections"].push_back(
             {{"name", it.key()}, {"enabled", it.value().value("enabled", false)}});
     }
+    debug = redactMetadata(debug, secrets);
     auto markdown =
         "# TangOS Lite bug report\n\n" + description + "\n\n```json\n" + debug.dump(2) + "\n```\n";
     write(folder / "bug-report.md", markdown);
     saveJson(folder / "debug.json", debug);
+    for (auto &image : images)
+      write(folder / fs::u8path(image.first), image.second);
     return {{"folder", utf8(folder.wstring())},
+            {"screenshots", exportedShots},
             {"markdown", markdown},
             {"notice", "Review the report before sharing; no message was sent"}};
   }

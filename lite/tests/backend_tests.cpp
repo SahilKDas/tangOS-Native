@@ -1,4 +1,6 @@
 #include "backend.h"
+#include "images.h"
+#include "activity.h"
 #include <windows.h>
 #include "repository.h"
 #include <iostream>
@@ -238,6 +240,92 @@ int main() {
                bugReport.at("markdown").get<std::string>().find("local-fixture-secret") ==
                    std::string::npos,
            "local report includes reviewable diagnostics without credential values");
+    BITMAPFILEHEADER imageHeader{};
+    BITMAPINFOHEADER imageInfo{};
+    imageHeader.bfType = 0x4d42;
+    imageHeader.bfOffBits = sizeof(imageHeader) + sizeof(imageInfo);
+    imageHeader.bfSize = imageHeader.bfOffBits + 4;
+    imageInfo.biSize = sizeof(imageInfo);
+    imageInfo.biWidth = imageInfo.biHeight = 1;
+    imageInfo.biPlanes = 1;
+    imageInfo.biBitCount = 24;
+    imageInfo.biSizeImage = 4;
+    std::string image(reinterpret_cast<char *>(&imageHeader), sizeof(imageHeader));
+    image.append(reinterpret_cast<char *>(&imageInfo), sizeof(imageInfo));
+    image.append("\x12\x34\x56\0", 4);
+    auto screenshot = dir / "fixture screenshot.bmp";
+    write(screenshot, image);
+    expect(dibScreenshotBitmap(image.substr(sizeof(imageHeader))) == image,
+           "clipboard DIB converts to a native BMP without changing pixel data");
+    reject([&] { dibScreenshotBitmap("short"); }, "truncated clipboard DIB rejected");
+    auto pngPath = dir / "clipboard-compression.png";
+    write(pngPath, dibScreenshotPng(image.substr(sizeof(imageHeader))));
+    expect(inspectScreenshot(pngPath).format == "png", "native clipboard PNG compression");
+    auto largeInfo = imageInfo;
+    largeInfo.biWidth = 3840;
+    largeInfo.biHeight = 2160;
+    largeInfo.biBitCount = 32;
+    largeInfo.biSizeImage = 3840 * 2160 * 4;
+    std::string largeDib(reinterpret_cast<const char *>(&largeInfo), sizeof(largeInfo));
+    largeDib.append(largeInfo.biSizeImage, '\0');
+    write(pngPath, dibScreenshotPng(largeDib));
+    auto largeScreenshot = inspectScreenshot(pngPath);
+    expect(largeScreenshot.width == 3840 && largeScreenshot.height == 2160 &&
+               largeScreenshot.bytes < 16 * 1024 * 1024,
+           "4K clipboard screenshot compresses below the attachment limit");
+    auto info = inspectScreenshot(screenshot);
+    expect(info.width == 1 && info.height == 1 && info.format == "bmp",
+           "native screenshot decoder");
+    Json reportArgs = {
+        {"description", "Screenshot fixture local-fixture-secret"},
+        {"screenshots", Json::array({utf8(screenshot.wstring()), utf8(screenshot.wstring())})}};
+    auto reportPreview = backend.invoke("bug.report", reportArgs);
+    expect(reportPreview.dump().find("local-fixture-secret") == std::string::npos,
+           "known credentials are redacted before saving the report confirmation");
+    expect(reportPreview.at("details").at("screenshots").size() == 1 &&
+               reportPreview.at("details").at("screenshots")[0].at("width") == 1,
+           "report preview validates and deduplicates screenshot attachments");
+    image.back() = '\x01';
+    write(screenshot, image);
+    reportArgs["confirmation"] = reportPreview.at("confirmation");
+    reject([&] { backend.invoke("bug.report", reportArgs); },
+           "changed screenshot invalidates report preview");
+    reportArgs.erase("confirmation");
+    activityBus().publish({{"kind", "run-started"},
+                           {"run",
+                            {{"runId", "report-fixture"},
+                             {"repository", utf8(repo.wstring())},
+                             {"toolId", "check"},
+                             {"label", "local-fixture-secret"},
+                             {"output", "private output"},
+                             {"commandPreview", "private command"},
+                             {"status", "running"}}}});
+    auto withShot = confirmed("bug.report", reportArgs);
+    auto reportFolder = fs::u8path(withShot.at("folder").get<std::string>());
+    auto reportDebug = read(reportFolder / "debug.json");
+    expect(read(reportFolder / "screenshot-1.bmp") == image &&
+               withShot.at("screenshots").size() == 1,
+           "confirmed local report preserves the selected screenshot");
+    expect(reportDebug.find("local-fixture-secret") == std::string::npos &&
+               reportDebug.find("private output") == std::string::npos &&
+               reportDebug.find("private command") == std::string::npos &&
+               reportDebug.find("fixture screenshot") == std::string::npos,
+           "report activity omits credentials, commands, output and original attachment paths");
+    reject([&] { backend.invoke("bug.report", {{"description", "  "}}); },
+           "empty report description rejected");
+    auto invalidImage = dir / "invalid.png";
+    write(invalidImage, "this is not an image");
+    reject(
+        [&] {
+          backend.invoke("bug.report",
+                         {{"description", "Invalid fixture"},
+                          {"screenshots", Json::array({utf8(invalidImage.wstring())})}});
+        },
+        "non-image attachment rejected");
+    write(invalidImage, image);
+    reject([&] { inspectScreenshot(invalidImage); }, "image container must match its extension");
+    reject([&] { inspectScreenshot(fs::path("relative.bmp")); },
+           "relative screenshot path rejected");
     {
       write(repo / "tools/port_refcheck.py",
             "import time\nfrom pathlib import Path\nprint('tool-started', flush=True)\n"

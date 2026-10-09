@@ -23,6 +23,7 @@ enum class Icon {
 enum class PanelStyle { glass, controller, task };
 void iconButton(HWND window, Icon icon);
 void iconTextButton(HWND window, Icon icon);
+void drawIcon(HDC dc, Icon icon, int x, int y, int size);
 void policyButton(HWND window, unsigned state);
 void rule(HDC dc, int x, int y, int width);
 void buttonFont(HWND window, int size, int weight = 700);

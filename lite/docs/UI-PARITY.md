@@ -1,5 +1,17 @@
 # Console parity audit
 
+## Native report overlay source checkpoint
+
+The Report action now opens a native modal with the original 520px empty panel,
+482x120 description field and measured attachment/footer positions. Screenshot
+attachments survive local export; modified attachments invalidate the preview.
+The export runs on a worker and closes without blocking the main UI. Native
+regressions cover metadata, attachment hashes, redaction and the modal workflow.
+Clipboard bitmaps are compressed to PNG natively, including a tested 4K fixture.
+Remaining differences include WebP, chip sizing,
+textarea decoration and the original report's richer diagnostic fields. This
+checkpoint does not establish full Console parity or replace the 0.19.0 package.
+
 ## 0.19.0 Controller reference measurements
 
 The offline capture tool now records actual original DOM geometry alongside its

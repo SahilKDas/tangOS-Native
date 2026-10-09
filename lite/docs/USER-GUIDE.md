@@ -1,5 +1,12 @@
 # TangOS Lite quick guide
 
+The Report toolbar button opens a native modal over the current screen. Describe
+the failure, attach PNG/JPEG/BMP/GIF screenshots, or paste a clipboard bitmap.
+Select **Prepare report** to save a local report folder. The description is
+copied to your clipboard and the folder opens for review. No issue or message
+is submitted automatically. Cancel or Escape closes the modal and requests
+cancellation of an active export. Review screenshot pixels before sharing.
+
 The toolbar sliders icon opens Settings over the current Controller or Viewer.
 Scroll to throughput, help, statistics and reports; “What's this?” expands each
 explanation. Changes apply locally. Functions per sub-agent is limited to 1–64;

@@ -6,6 +6,8 @@
 #include "activity.h"
 #include "client_setup.h"
 #include "network.h"
+#include "report_dialog.h"
+#include "images.h"
 #include <commctrl.h>
 #include <shellapi.h>
 #include <shobjidl.h>
@@ -191,6 +193,7 @@ struct ConsoleUI::Impl {
   Descriptor descriptor;
   std::string descriptorError;
   std::unique_ptr<Fleet> fleet;
+  std::unique_ptr<ReportDialog> report;
   std::unique_ptr<McpServer> mcp, pendingMcp;
   std::thread mcpWorker;
   std::atomic<bool> mcpBusy{false}, mcpReady{false};
@@ -426,6 +429,7 @@ struct ConsoleUI::Impl {
     build();
   }
   ~Impl() {
+    report.reset();
     if (settingsPopover)
       DestroyWindow(settingsPopover);
     for (auto &popup : popups) {
@@ -3997,6 +4001,8 @@ struct ConsoleUI::Impl {
     }
   }
   void tick() {
+    if (report)
+      report->tick();
     if (screen == Screen::batches && fleet && batchList && GetTickCount64() - batchPoll >= 1000) {
       batchPoll = GetTickCount64();
       auto fresh = fleet->batches();
@@ -4708,21 +4714,29 @@ void ConsoleUI::resize(int width, int height) {
   impl->build();
 }
 bool ConsoleUI::running() const {
-  return impl->manualBusy || impl->serviceBusy || impl->serviceReady ||
-         (impl->fleet && impl->fleet->running());
+  return (impl->report && impl->report->running()) || impl->manualBusy || impl->serviceBusy ||
+         impl->serviceReady || (impl->fleet && impl->fleet->running());
 }
 void ConsoleUI::stop() {
+  if (impl->report)
+    impl->report->stop();
   impl->manualRunner.cancel();
   impl->serviceRunner.cancel();
   if (impl->fleet)
     impl->fleet->stopAll();
 }
 void ConsoleUI::openPanel(const std::string &panel) {
-  if (panel == "settings")
+  if (panel == "report") {
+    if (!impl->report || (!impl->report->isOpen() && !impl->report->running()))
+      impl->report =
+          std::make_unique<ReportDialog>(impl->parent, impl->font, impl->repository, impl->data,
+                                         impl->settings, impl->vault.values());
+    impl->report->show();
+  } else if (panel == "settings")
     impl->openSettingsPopover();
   else if (panel == "keys")
     impl->navigate(Screen::settings);
-  else if (panel == "help" || panel == "report")
+  else if (panel == "help")
     impl->navigate(Screen::support);
   else if (panel == "batches")
     impl->navigate(Screen::batches);
@@ -5301,6 +5315,56 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
   SendMessageW(modulePopup.window, WM_CLOSE, 0, 0);
   write(directory / "module-window-report.txt",
         "PASS: initial and resized native module window contain their Viewer with 14px margins");
+  {
+    ReportDialog dialog(impl->parent, impl->font, impl->repository, impl->data, impl->settings,
+                        impl->vault.values(), false);
+    bool ownerEnabled = IsWindowEnabled(impl->parent);
+    dialog.show();
+    dialog.saveSnapshot(directory / "report-overlay-empty.bmp");
+    auto field = GetDlgItem(dialog.window(), 7200);
+    RECT bounds{};
+    GetWindowRect(field, &bounds);
+    if (!dialog.isOpen() || IsWindowEnabled(impl->parent) || bounds.right - bounds.left != 482 ||
+        bounds.bottom - bounds.top != 120 || IsWindowEnabled(GetDlgItem(dialog.window(), 7203)))
+      throw std::runtime_error("Report overlay geometry or empty-description guard failed");
+    dialog.setDescription("Disposable native report workflow test");
+    if (!IsWindowEnabled(GetDlgItem(dialog.window(), 7203)))
+      throw std::runtime_error("Report description did not enable preparation");
+    BITMAPINFOHEADER header{};
+    header.biSize = sizeof(header);
+    header.biWidth = header.biHeight = 1;
+    header.biPlanes = 1;
+    header.biBitCount = 24;
+    std::string dib(reinterpret_cast<const char *>(&header), sizeof(header));
+    dib.append(4, '\0');
+    auto image = directory / "report-fixture.bmp";
+    write(image, dibScreenshotBitmap(dib));
+    dialog.attach(image);
+    dialog.saveSnapshot(directory / "report-overlay-attached.bmp");
+    dialog.prepare();
+    auto deadline = GetTickCount64() + 10000;
+    while (dialog.running() && GetTickCount64() < deadline) {
+      MSG message{};
+      while (PeekMessageW(&message, dialog.window(), 0, 0, PM_REMOVE)) {
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+      }
+      dialog.tick();
+      Sleep(5);
+    }
+    dialog.tick();
+    auto result = dialog.result();
+    if (dialog.running() || !result.contains("folder") ||
+        !fs::exists(fs::u8path(result.at("folder").get<std::string>()) / "screenshot-1.bmp"))
+      throw std::runtime_error("Report overlay did not export its attached screenshot");
+    dialog.saveSnapshot(directory / "report-overlay-ready.bmp");
+    dialog.close();
+    if (dialog.isOpen() || bool(IsWindowEnabled(impl->parent)) != ownerEnabled)
+      throw std::runtime_error("Closing the report did not restore its owner");
+    write(directory / "report-overlay-report.txt",
+          "PASS: native modal geometry, description guard, asynchronous screenshot export and "
+          "owner restoration; no clipboard or external launch");
+  }
   impl->navigate(Screen::atlas);
   capture(directory / "atlas-contributors.bmp");
   if (SendMessageW(impl->functionList, LB_GETCOUNT, 0, 0) != (LRESULT)impl->atlas.size())

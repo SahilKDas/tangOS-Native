@@ -40,7 +40,7 @@ $ini = Join-Path $fixture 'settings.ini'
 # Quoting is required because both the executable and repository paths can contain spaces.
 $arguments = '--smoke-test "{0}" "{1}"' -f $repo, $ini
 $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru -WindowStyle Hidden
-if (-not $process.WaitForExit(60000)) { Stop-Process -Id $process.Id; throw 'GUI workflow timed out' }
+if (-not $process.WaitForExit(120000)) { Stop-Process -Id $process.Id; throw 'GUI workflow timed out' }
 $report = Join-Path $fixture 'gui-smoke-report.txt'
 if (-not (Test-Path -LiteralPath $report)) { throw "GUI workflow failed without a report: exit $($process.ExitCode)" }
 if ($process.ExitCode -ne 0) { throw (Get-Content -LiteralPath $report -Raw) }
@@ -59,6 +59,7 @@ foreach ($image in @('controller-reference-idle', 'controller-cart')) {
 }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'controller-cart-report.txt') -Raw).StartsWith('PASS')) { throw 'Simple-mode cart workflow failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'module-window-report.txt') -Raw).StartsWith('PASS')) { throw 'Native module-window layout failed' }
+if (-not (Get-Content -LiteralPath (Join-Path $fixture 'report-overlay-report.txt') -Raw).StartsWith('PASS')) { throw 'Native report overlay workflow failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'remote-viewer-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Remote viewer workflow failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'fleet-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Packaged fleet workflow failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'viewer-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Native viewer parity workflow failed' }

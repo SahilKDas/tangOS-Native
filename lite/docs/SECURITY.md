@@ -1,5 +1,18 @@
 # Security and destructive-operation review
 
+Native bug reports are local exports. Preparing a report writes Markdown,
+curated diagnostics and explicitly selected screenshots; it sends nothing to
+a remote service. Known vault secrets are redacted from the description before
+the confirmation ticket is stored. Diagnostics omit command lines and output
+bodies. Screenshot pixels are preserved, so review their contents yourself.
+Images must be regular files with a matching PNG/JPEG/BMP/GIF container, at
+most 16 MiB each, 64 MiB total, 16 attachments, 8192 pixels per dimension and
+40 megapixels. Preview hashes are checked again at export. Image validation
+uses Windows WIC metadata decoding; it is not a full decoder fuzz audit.
+Clipboard bitmaps are bounded to 160 MiB and compressed locally to PNG using
+Windows WIC, with the same 16 MiB final attachment limit. A 3840x2160 raw bitmap
+has regression coverage. WebP remains unsupported.
+
 The reference-shaped Controller footer retains the native safety policy: Writes
 is explicit and defaults OFF; Review remains ON; Push remains OFF and opens the
 reviewed Git workflow. These last two controls intentionally do not enable the

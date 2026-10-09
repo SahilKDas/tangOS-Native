@@ -422,6 +422,11 @@ void rule(HDC dc, int x, int y, int width) {
   SelectObject(dc, previous);
   DeleteObject(pen);
 }
+void drawIcon(HDC dc, Icon icon, int x, int y, int size) {
+  Surface surface(dc, x, y, size, size);
+  if (surface.data)
+    tangos_icon(surface.data, size, size, unsigned(icon), colors.ink.value);
+}
 void buttonFont(HWND window, int size, int weight) {
   SetPropW(window, L"TangOSFontSize", reinterpret_cast<HANDLE>(uintptr_t(std::clamp(size, 8, 24))));
   SetPropW(window, L"TangOSFontWeight",

@@ -878,14 +878,14 @@
     },
     {
       "contract": "saveBugImage",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": ["lite/src/clipboard.cpp", "lite/tests/backend_tests.cpp"],
       "kind": "api"
     },
     {
       "contract": "submitBug",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": ["lite/src/report_dialog.cpp", "lite/tests/backend_tests.cpp", "lite/src/console_ui.cpp:smokeScreens"],
       "kind": "api"
     },
     {
