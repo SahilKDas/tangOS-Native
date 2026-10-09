@@ -1,5 +1,21 @@
 # Windows release verification — 2026-10-09
 
+## 0.24.0 verified portable package — 2026-10-09
+
+Source checkpoint **66a04e4** produced two identical clean Windows x64 builds:
+**6,734,336 bytes (6.734 decimal MB)**, SHA256
+**F5F37088B36269ECF862F1E1D8A2AC047154E7E8FFBC5651CE06D14C863BD7D1**.
+Imports are Windows system DLLs only. All five native suites passed (156.20
+seconds), including the official MCP Inspector. Packaged backend, adapter,
+disposable Git/ZIP tests and **12,262 original Console comparisons** passed.
+All three packaged GUI workflows passed with 11/12/12 responsive timer ticks.
+The valid descriptor workflow exercised the floating helper, all ten tour
+steps, spotlights, live settings deferral, stopping controls and display matrix.
+Evidence is retained in `lite/release-0.24.0-verified`.
+
+This release does not establish full pixel/animation or hosted-provider parity.
+The subsequent styled-help source work is separate from this packaged hash.
+
 ## Post-0.23.0 source checkpoint
 
 The native floating helper, root-level guided tour, eased progress, active

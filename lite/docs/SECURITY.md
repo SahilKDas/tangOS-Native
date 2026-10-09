@@ -1,5 +1,12 @@
 # Security and destructive-operation review
 
+Live fleet configuration changes are limited to role, effort, batch size,
+attempts and loop selection. They are saved separately from the active driver
+and apply to its next batch. Changing executable, provider, model, key reference
+or endpoint requires stopping the agent first. Cancellation disables any pending
+loop restart. Floating tips and tour read state are local JSON preferences;
+their overlays neither request credentials nor send messages.
+
 Native bug reports are local exports. Preparing a report writes Markdown,
 curated diagnostics and explicitly selected screenshots; it sends nothing to
 a remote service. Known vault secrets are redacted from the description before

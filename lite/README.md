@@ -12,7 +12,7 @@ OpenAI-compatible endpoint in a disposable repository. It does not download
 models, use account credentials or establish ROM byte correctness. Ordinary
 tests and release builds do not call a provider.
 
-Click Tango or use **Alt+Space → About** for embedded third-party notices.
+Use **Alt+Space → About** for embedded third-party notices. Click Tango for floating tips.
 
 A portable Windows 10/11 x64 C++ desktop workbench. Run `TangOSLite.exe`; no
 installer, browser runtime, administrator privileges, or ROM data is required.
