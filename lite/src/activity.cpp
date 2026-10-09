@@ -2,7 +2,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <regex>
+#include <set>
 namespace lite {
 Json measuredRole(const Json &stats) {
   auto by = stats.value("bySize", Json::object());
@@ -201,17 +203,48 @@ Json activityStreams(const std::string &output) {
     tabs[entry.first] = join(entry.second);
   return {{"models", models}, {"byTab", tabs}};
 }
-std::string sizeRecommendation(const Json &bySize) {
+Json parseStatisticsJson(const std::string &source) {
+  auto original = nlohmann::ordered_json::parse(source);
+  Json result = original;
+  std::function<void(const nlohmann::ordered_json &, Json &)> preserve;
+  preserve = [&](const nlohmann::ordered_json &node, Json &target) {
+    if (node.is_object()) {
+      if (node.contains("bySize") && node.at("bySize").is_object() &&
+          !target.contains("bySizeOrder")) {
+        target["bySizeOrder"] = Json::array();
+        for (auto it = node.at("bySize").begin(); it != node.at("bySize").end(); ++it)
+          target["bySizeOrder"].push_back(it.key());
+      }
+      for (auto it = node.begin(); it != node.end(); ++it)
+        preserve(it.value(), target[it.key()]);
+    } else if (node.is_array())
+      for (size_t i = 0; i < node.size(); ++i)
+        preserve(node[i], target[i]);
+  };
+  preserve(original, result);
+  return result;
+}
+std::string sizeRecommendation(const Json &bySize, const Json &order) {
   struct Row {
     std::string name;
     double rate;
   };
   std::vector<Row> rows;
+  std::set<std::string> seen;
+  auto add = [&](const std::string &name) {
+    if (!bySize.is_object() || !bySize.contains(name) || !seen.insert(name).second)
+      return;
+    auto &bucket = bySize.at(name);
+    if (bucket.is_object() && bucket.value("attempts", 0) >= 2)
+      rows.push_back({name, double(bucket.value("matches", 0)) / bucket.value("attempts", 1)});
+  };
+  if (order.is_array())
+    for (auto &name : order)
+      if (name.is_string())
+        add(name.get<std::string>());
   if (bySize.is_object())
     for (auto it = bySize.begin(); it != bySize.end(); ++it)
-      if (it.value().value("attempts", 0) >= 2)
-        rows.push_back(
-            {it.key(), double(it.value().value("matches", 0)) / it.value().value("attempts", 1)});
+      add(it.key());
   std::stable_sort(rows.begin(), rows.end(),
                    [](const Row &a, const Row &b) { return a.rate > b.rate; });
   if (rows.empty())

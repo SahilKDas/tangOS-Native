@@ -1530,7 +1530,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     if (argc == 6 && std::wstring(argv[1]) == L"--backend") {
       fs::path repository = std::wstring(argv[2]) == L"-" ? fs::path() : fs::path(argv[2]);
       fs::path data = argv[3];
-      auto request = Json::parse(read(fs::path(argv[4])));
+      auto request = parseStatisticsJson(read(fs::path(argv[4])));
       Settings prefs = loadSettings(data / "settings.ini");
       Vault vault(data / "vault");
       auto result = Backend(repository, data, prefs, vault.values())

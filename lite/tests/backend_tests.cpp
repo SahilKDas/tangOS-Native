@@ -254,6 +254,24 @@ int main() {
     image.append(reinterpret_cast<char *>(&imageInfo), sizeof(imageInfo));
     image.append("\x12\x34\x56\0", 4);
     auto screenshot = dir / "fixture screenshot.bmp";
+    auto orderedStats = parseStatisticsJson(
+        R"({"bySize":{">0x800":{"attempts":4,"matches":2},"<=0x40":{"attempts":4,"matches":2}}})");
+    expect(orderedStats.at("bySizeOrder") == Json::array({">0x800", "<=0x40"}) &&
+               sizeRecommendation(orderedStats.at("bySize"), orderedStats.at("bySizeOrder")) ==
+                   "Strongest on >0x800 (50% hit); weakest on <=0x40 (50%).",
+           "equal-rate size recommendation retains original insertion order");
+    expect(sizeRecommendation(orderedStats.at("bySize"),
+                              Json::array({"missing", ">0x800", ">0x800", 42})) ==
+               "Strongest on >0x800 (50% hit); weakest on <=0x40 (50%).",
+           "size recommendation ignores duplicate and invalid order metadata");
+    Json bestOrder = Json::object();
+    auto recordedStats =
+        updateAgentStats(Json::object(),
+                         Json::array({{{"name", "large-order"}, {"size", 4096}, {"matched", false}},
+                                      {{"name", "small-order"}, {"size", 16}, {"matched", false}}}),
+                         bestOrder);
+    expect(recordedStats.at("bySizeOrder") == Json::array({">0x800", "<=0x40"}),
+           "recorded size buckets preserve first-observation order");
     write(screenshot, image);
     expect(dibScreenshotBitmap(image.substr(sizeof(imageHeader))) == image,
            "clipboard DIB converts to a native BMP without changing pixel data");

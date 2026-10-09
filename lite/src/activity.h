@@ -16,7 +16,8 @@ public:
 ActivityBus &activityBus();
 int64_t activityNow();
 Json activityStreams(const std::string &output);
-std::string sizeRecommendation(const Json &bySize);
+Json parseStatisticsJson(const std::string &source);
+std::string sizeRecommendation(const Json &bySize, const Json &order = Json::array());
 Json measuredRole(const Json &stats);
 Json automaticRole(const Json &agent);
 Json effortPolicy(const Json &agent);

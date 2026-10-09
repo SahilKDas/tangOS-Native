@@ -1993,7 +1993,8 @@ struct ConsoleUI::Impl {
         "\n\nBest as: " +
         (role["role"].is_null() ? std::string("not sure yet") : role["role"].get<std::string>()) +
         " — " + role["why"].get<std::string>();
-    out += "\nRecommendation: " + sizeRecommendation(stat.value("bySize", Json::object()));
+    out += "\nRecommendation: " + sizeRecommendation(stat.value("bySize", Json::object()),
+                                                     stat.value("bySizeOrder", Json::array()));
     for (auto &client : presence)
       if (client.value("agentId", std::string()) == id)
         out += "\nMCP connected: " + client.value("name", std::string()) + " (last activity " +
@@ -2377,8 +2378,10 @@ struct ConsoleUI::Impl {
         }
       }
       skin::label(dc, L"RECOMMENDATION", x + 20, line, w - 40, 20, 11, true, true);
-      skin::label(dc, wide(sizeRecommendation(stats.value("bySize", Json::object()))), x + 18,
-                  line + 25, w - 36, 24, 12);
+      skin::label(dc,
+                  wide(sizeRecommendation(stats.value("bySize", Json::object()),
+                                          stats.value("bySizeOrder", Json::array()))),
+                  x + 18, line + 25, w - 36, 24, 12);
       if (detailHasActivity)
         skin::label(
             dc, wide(detailLatest.value("status", std::string()) == "running" ? "Live" : "Latest"),

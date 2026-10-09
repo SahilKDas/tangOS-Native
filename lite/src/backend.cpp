@@ -117,7 +117,7 @@ Json fileJson(const fs::path &p, Json fallback = Json::object()) {
     return fallback;
   if (fs::file_size(p) > 128 * 1024 * 1024)
     throw std::runtime_error("Data file exceeds 128 MiB");
-  return Json::parse(read(p));
+  return p.filename() == "stats.json" ? parseStatisticsJson(read(p)) : Json::parse(read(p));
 }
 void saveJson(const fs::path &p, const Json &j) {
   fs::create_directories(p.parent_path());
@@ -469,7 +469,8 @@ Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
   }
   if (m == "policy.detail")
     return {{"streams", activityStreams(a.value("output", std::string()))},
-            {"recommendation", sizeRecommendation(a.value("bySize", Json::object()))}};
+            {"recommendation", sizeRecommendation(a.value("bySize", Json::object()),
+                                                  a.value("bySizeOrder", Json::array()))}};
   if (m == "policy.role")
     return measuredRole(a.value("stats", Json::object()));
   if (m == "policy.autoRole") {
@@ -886,6 +887,7 @@ Json updateAgentStats(Json entry, const Json &rows, Json &best) {
     entry["nearMisses"] = 0;
     entry["recent"] = Json::array();
     entry["bySize"] = Json::object();
+    entry["bySizeOrder"] = Json::array();
   }
   for (auto field : {"attemptedFuncs", "matchedFuncs", "nearMissFuncs", "recent"})
     if (!entry.contains(field) || !entry[field].is_array())
@@ -946,6 +948,14 @@ Json updateAgentStats(Json entry, const Json &rows, Json &best) {
                                           : ">0x800";
       if (!entry.contains("bySize"))
         entry["bySize"] = Json::object();
+      if (!entry.contains("bySizeOrder") || !entry["bySizeOrder"].is_array()) {
+        entry["bySizeOrder"] = Json::array();
+        for (auto it = entry["bySize"].begin(); it != entry["bySize"].end(); ++it)
+          entry["bySizeOrder"].push_back(it.key());
+      }
+      auto &order = entry["bySizeOrder"];
+      if (std::find(order.begin(), order.end(), Json(bucket)) == order.end())
+        order.push_back(bucket);
       auto &b = entry["bySize"][bucket];
       if (!b.is_object())
         b = Json::object();

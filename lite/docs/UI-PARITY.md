@@ -2,6 +2,14 @@
 
 ## Native report overlay source checkpoint
 
+The following statistics correction preserves first-observation bucket order
+through storage and CLI JSON parsing. All 24 equal-rate bucket permutations now
+match the original JavaScript's stable recommendation order, alongside the
+existing statistics/detail comparisons. Existing explicit order metadata is
+retained. Old native files that already lost their original order cannot have
+that history reconstructed; newly observed buckets retain it going forward.
+This correction follows the verified 0.20.0 package and is not included in it.
+
 The Report action now opens a native modal with the original 520px empty panel,
 482x120 description field and measured attachment/footer positions. Screenshot
 attachments survive local export; modified attachments invalidate the preview.
