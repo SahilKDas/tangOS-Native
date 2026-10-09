@@ -147,8 +147,8 @@
     },
     {
       "contract": "activitySnapshot",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": ["lite/tests/test_activity_reference.py", "lite/src/activity.cpp", "Packaged Controller detail GUI workflow; UTF-16 surrogate-boundary equivalence remains unverified"],
       "kind": "api"
     },
     {

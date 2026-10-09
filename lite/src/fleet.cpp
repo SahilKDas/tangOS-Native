@@ -1,5 +1,6 @@
 #include "fleet.h"
 #include "backend.h"
+#include "activity.h"
 #include <wincrypt.h>
 #include <algorithm>
 #include <fstream>
@@ -58,7 +59,7 @@ static Json specJson(const AgentSpec &s) {
           {"effort", s.effort},   {"model", s.model},       {"base_url", s.baseUrl},
           {"dialect", s.dialect}, {"key", s.key},           {"cli", s.cli},
           {"count", s.count},     {"attempts", s.attempts}, {"jobs", s.jobs},
-          {"loop", s.loop}};
+          {"loop", s.loop},       {"provider", s.provider}};
 }
 Json agentJson(const AgentState &s) {
   return {{"spec", specJson(s.spec)},
@@ -84,7 +85,8 @@ AgentState parseAgent(const Json &j) {
   s.spec.name = v.at("name");
   s.spec.kind = v.value("kind", std::string("api"));
   s.spec.role = v.value("role", std::string("Unassigned"));
-  s.spec.effort = v.value("effort", std::string("high"));
+  s.spec.provider = v.value("provider", std::string());
+  s.spec.effort = v.value("effort", std::string());
   s.spec.model = v.value("model", std::string());
   s.spec.baseUrl = v.value("base_url", std::string());
   s.spec.dialect = v.value("dialect", std::string("openai"));
@@ -753,7 +755,7 @@ static Result git(Runner &r, const fs::path &cwd, Args args) {
   all.insert(all.end(), args.begin(), args.end());
   return r.run({all, cwd});
 }
-Json Fleet::schedule(const std::shared_ptr<Job> &job, const fs::path &cwd) {
+std::string Fleet::chooseRole(const std::shared_ptr<Job> &job) {
   auto role = job->state.spec.role;
   if (role == "Unassigned") {
     role = "Hard matcher";
@@ -771,9 +773,19 @@ Json Fleet::schedule(const std::shared_ptr<Job> &job, const fs::path &cwd) {
       Backend(repository, directory.parent_path().parent_path(), settings)
           .resetRecent(job->state.id);
     job->runtimeRole = rung == "Refiner" ? rung : role;
+    role = automaticRole({{"name", job->state.spec.name},
+                          {"provider", job->state.spec.provider},
+                          {"roles", Json::array()},
+                          {"stats", stats},
+                          {"hiddenRole", job->runtimeRole}})
+               .at("role");
   } else
     job->runtimeRole = role;
   job->executionRole = role;
+  return role;
+}
+Json Fleet::schedule(const std::shared_ptr<Job> &job, const fs::path &cwd) {
+  auto role = chooseRole(job);
   const Tool *tool = descriptor.role(role == "Refiner"  ? "refineScheduler"
                                      : role == "Random" ? "randomScheduler"
                                                         : "scheduler");
@@ -898,6 +910,8 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       }
       if (rows.empty())
         rows = schedule(job, job->state.worktree);
+      else
+        chooseRole(job);
       if (job->runner.isCancelled()) {
         update("cancelled", "Stopped after scheduling; driver was not launched");
         break;
@@ -1070,7 +1084,17 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
                      : std::string("Do not use near-miss tips or nearmiss_* tools. ")) +
                 (policy.value("allowGhidra", false) ? std::string("Ghidra drafts allowed. ")
                                                     : std::string("Do not use Ghidra drafts. ")));
-      c.environment["TANGOS_EFFORT"] = job->state.spec.effort;
+      auto effort = effortPolicy({{"name", job->state.spec.name},
+                                  {"provider", job->state.spec.provider},
+                                  {"effort", job->state.spec.effort}});
+      auto family = effort.at("family").get<std::string>();
+      auto choice = effort.at("current").get<std::string>();
+      c.environment["TANGOS_EFFORT"] =
+          family == "GLM" || family == "DeepSeek" || family == "Nemotron" ? "off" : choice;
+      if (job->state.spec.kind == "api" && family == "DeepSeek")
+        c.environment["GLM_MODEL"] = choice == "chat" ? "deepseek-chat" : "deepseek-reasoner";
+      if (job->state.spec.kind == "api" && family == "Requesty")
+        c.environment["GLM_MODEL"] = choice;
       c.environment["TANGOS_AGENT_INSTRUCTIONS"] = utf8(prompt.wstring());
       c.environment["TANGOS_PORT_ONLY"] = settings.portOnly ? "1" : "0";
       auto connections = backend("connections.get", Json::object());
@@ -1297,7 +1321,8 @@ void Fleet::finishBatch(const std::string &id, Runner *request) {
     std::lock_guard<std::mutex> lock(mutex);
     if (!job->state.observed.empty()) {
       auto rows = driverResultRows(results);
-      for (auto &row : job->state.observed) rows.push_back(row);
+      for (auto &row : job->state.observed)
+        rows.push_back(row);
       results = {{"results", rows}};
     }
     if (job->state.assigned.empty())
@@ -1378,8 +1403,10 @@ Result Fleet::runTool(const std::string &id, const std::string &tool, const Json
         if (candidate.is_absolute())
           candidate = candidate.lexically_relative(job->state.worktree);
         auto path = confinedPath(job->state.worktree, utf8(candidate.wstring()));
-        if (fs::exists(path) && fs::file_size(path) <= 1024 * 1024) source = read(path);
-        else source = "dcd 0x00000000"; // Missing candidate cannot receive match credit.
+        if (fs::exists(path) && fs::file_size(path) <= 1024 * 1024)
+          source = read(path);
+        else
+          source = "dcd 0x00000000"; // Missing candidate cannot receive match credit.
       }
       auto observed = matchObservation(args, result.output, result.code, source);
       auto record = directory / fs::u8path(id) / (uniqueId() + "-observed.json");
@@ -1388,7 +1415,8 @@ Result Fleet::runTool(const std::string &id, const std::string &tool, const Json
           .recordAgent(id, record, "running", 0);
       std::lock_guard<std::mutex> lock(mutex);
       job->state.observed.push_back(observed);
-      if (job->state.observed.size() > 2000) job->state.observed.erase(job->state.observed.begin());
+      if (job->state.observed.size() > 2000)
+        job->state.observed.erase(job->state.observed.begin());
       saveLocked();
     }
     job->externalTask = false;

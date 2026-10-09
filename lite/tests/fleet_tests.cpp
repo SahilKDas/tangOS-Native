@@ -76,6 +76,7 @@ INSTRUCTIONS = 'base driver rules'
 def main():
  p=argparse.ArgumentParser();p.add_argument('--wl');p.add_argument('--out');p.add_argument('--prompt');p.add_argument('--jobs');p.add_argument('--attempts');a=p.parse_args()
  instructions=pathlib.Path(a.prompt).read_text(encoding='utf-8')
+ assert os.environ['TANGOS_EFFORT']=='medium', 'unknown model uses original family default'
  assert 'ROOT_RULE' in instructions and 'NESTED_RULE' in instructions and 'never modify src/' in instructions
  if os.environ['GLM_MODEL']=='exhausted':print('402 payment required',flush=True);return
  if os.environ['GLM_MODEL']=='empty':pathlib.Path(a.out).write_text('{}');return
@@ -118,9 +119,12 @@ if __name__=='__main__':main()
                 Json::array({{{"name", "value"}, {"type", "string"}, {"required", true}}})}}})}};
     write(repo / "tools/land.py",
           "from pathlib import Path\nPath('port/landed.txt').write_text('landed fixture')\n");
-    descriptor["tools"].push_back({{"id", "match"}, {"label", "Verify match"}, {"readOnly", true},
-                                    {"command", "{python} -c {value}"},
-                                    {"args", Json::array({{{"name", "value"}, {"type", "string"}, {"required", true}}})}});
+    descriptor["tools"].push_back(
+        {{"id", "match"},
+         {"label", "Verify match"},
+         {"readOnly", true},
+         {"command", "{python} -c {value}"},
+         {"args", Json::array({{{"name", "value"}, {"type", "string"}, {"required", true}}})}});
     write(repo / "tangos.json", descriptor.dump(2));
     git({"add", "."});
     git({"commit", "-m", "Disposable fleet fixture"});
@@ -189,9 +193,13 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
     {
       Fleet fleet(repo, data / "projects/fixture", desc, settings);
       auto configPath = dir / "client-config.json";
-      write(configPath, Json{{"theme", "keep"}, {"mcpServers", {{"unrelated", {{"command", "keep.exe"}}}}}}.dump());
-      auto plan = previewClientSetup("Claude Desktop", fs::u8path(selfExecutable()), data / "mcp.json", "External fixture", configPath);
-      expect(plan.outcome.at("action") == "added" && !Json::parse(read(configPath))["mcpServers"].contains("tangos-lite"),
+      write(configPath,
+            Json{{"theme", "keep"}, {"mcpServers", {{"unrelated", {{"command", "keep.exe"}}}}}}
+                .dump());
+      auto plan = previewClientSetup("Claude Desktop", fs::u8path(selfExecutable()),
+                                     data / "mcp.json", "External fixture", configPath);
+      expect(plan.outcome.at("action") == "added" &&
+                 !Json::parse(read(configPath))["mcpServers"].contains("tangos-lite"),
              "MCP client preview is side-effect free");
       auto installed = installClientSetup(plan);
       auto merged = Json::parse(read(configPath));
@@ -199,22 +207,35 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
                  merged.at("mcpServers").at("tangos-lite").at("args")[0] == "--mcp-stdio" &&
                  fs::exists(fs::u8path(installed.at("backup").get<std::string>())),
              "native client install preserves unrelated settings and retains a backup");
-      expect(previewClientSetup("Claude Desktop", fs::u8path(selfExecutable()), data / "mcp.json", "External fixture", configPath).outcome.at("action") == "unchanged",
+      expect(previewClientSetup("Claude Desktop", fs::u8path(selfExecutable()), data / "mcp.json",
+                                "External fixture", configPath)
+                     .outcome.at("action") == "unchanged",
              "MCP reconnect detects unchanged native setup");
-      auto changedPlan = previewClientSetup("Claude Desktop", fs::u8path(selfExecutable()), data / "mcp.json", "Different agent", configPath);
+      auto changedPlan = previewClientSetup("Claude Desktop", fs::u8path(selfExecutable()),
+                                            data / "mcp.json", "Different agent", configPath);
       expect(changedPlan.outcome.at("action") == "updated", "MCP changed identity previews update");
       write(configPath, "{\"changedElsewhere\":true}");
-      reject([&] { installClientSetup(changedPlan); }, "MCP config change invalidates reviewed install");
+      reject([&] { installClientSetup(changedPlan); },
+             "MCP config change invalidates reviewed install");
       write(configPath, "{ malformed");
-      reject([&] { previewClientSetup("Claude Desktop", fs::u8path(selfExecutable()), data / "mcp.json", "Agent", configPath); },
-             "MCP installation never replaces malformed client configuration");
-      write(configPath, "{ // retain in backup\n\"servers\":{\"other\":{\"command\":\"https://example.invalid/a/*literal*/\",},},/* block */\"inputs\":[],}");
-      auto vscode = previewClientSetup("VS Code", fs::u8path(selfExecutable()), data / "mcp.json", "Agent", configPath);
+      reject(
+          [&] {
+            previewClientSetup("Claude Desktop", fs::u8path(selfExecutable()), data / "mcp.json",
+                               "Agent", configPath);
+          },
+          "MCP installation never replaces malformed client configuration");
+      write(configPath, "{ // retain in "
+                        "backup\n\"servers\":{\"other\":{\"command\":\"https://example.invalid/a/"
+                        "*literal*/\",},},/* block */\"inputs\":[],}");
+      auto vscode = previewClientSetup("VS Code", fs::u8path(selfExecutable()), data / "mcp.json",
+                                       "Agent", configPath);
       auto vscodeInstall = installClientSetup(vscode);
       auto vscodeMerged = Json::parse(read(configPath));
-      expect(vscodeMerged["servers"]["other"]["command"] == "https://example.invalid/a/*literal*/" &&
-             vscodeMerged["servers"]["tangos-lite"]["type"] == "stdio" &&
-             read(fs::u8path(vscodeInstall["backup"].get<std::string>())).find("retain in backup") != std::string::npos,
+      expect(vscodeMerged["servers"]["other"]["command"] ==
+                     "https://example.invalid/a/*literal*/" &&
+                 vscodeMerged["servers"]["tangos-lite"]["type"] == "stdio" &&
+                 read(fs::u8path(vscodeInstall["backup"].get<std::string>()))
+                         .find("retain in backup") != std::string::npos,
              "VS Code JSONC comments and trailing commas preserve values and exact backup");
       reject([&] { Fleet second(repo, data / "projects/fixture", desc, settings); },
              "cross-instance ownership");
@@ -347,7 +368,7 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
                "isolated output exists");
         expect(read(state.log).find("fixture-secret-123456") == std::string::npos,
                "provider key not logged");
-        expect(read(state.prompt).find("Role: Hard matcher") != std::string::npos,
+        expect(read(state.prompt).find("Role: Random") != std::string::npos,
                "resolved automatic role reaches driver instructions");
         if (state.id == first) {
           bool retained = false;
@@ -447,16 +468,21 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       fleet.clear(external);
       a.count = 3;
       fleet.configure(external, a);
-      fleet.enqueue(external, Json::array({{{"id", "observed-hit"}, {"name", "observed_hit"}},
-                                           {{"id", "observed-miss"}, {"name", "observed_miss"}},
-                                           {{"id", "observed-pending"}, {"name", "observed_pending"}}}));
+      fleet.enqueue(external,
+                    Json::array({{{"id", "observed-hit"}, {"name", "observed_hit"}},
+                                 {{"id", "observed-miss"}, {"name", "observed_miss"}},
+                                 {{"id", "observed-pending"}, {"name", "observed_pending"}}}));
       fleet.start(external);
       wait(fleet);
       fleet.takeBatch(external);
-      auto hit = fleet.runTool(external, "match", {{"value", "print('MATCHING VERSIONS: 1.2')"},
-                                                   {"func", "observed_hit"}, {"size", "0x40"}});
-      auto miss = fleet.runTool(external, "match", {{"value", "print('MATCHING VERSIONS: none; divergences=2')"},
-                                                    {"func", "observed_miss"}, {"size", "0x40"}});
+      auto hit = fleet.runTool(external, "match",
+                               {{"value", "print('MATCHING VERSIONS: 1.2')"},
+                                {"func", "observed_hit"},
+                                {"size", "0x40"}});
+      auto miss = fleet.runTool(external, "match",
+                                {{"value", "print('MATCHING VERSIONS: none; divergences=2')"},
+                                 {"func", "observed_miss"},
+                                 {"size", "0x40"}});
       expect(hit.code == 0 && miss.code == 0, "actual MCP match commands executed");
       auto observedStats = fleet.backend("stats.get", Json::object()).at(external);
       expect(observedStats.at("attempts") == 2 && observedStats.at("declaredMatches") == 1 &&
@@ -587,9 +613,12 @@ assert any(t['name']=='next_batch' for t in responses[2]['result']['tools'])
 assert all(r['result']['resultType']=='complete' for r in responses.values())
 print('modern MCP stdio discovery, per-request metadata, tools, ping and EOF passed')
 )PY");
-      auto modernBridge = setup.run({{"python", utf8((dir / "modern_stdio.py").wstring()),
-                          utf8((fs::u8path(selfExecutable()).parent_path() / "TangOSLite.exe").wstring()),
-                          utf8((data / "mcp.json").wstring())}, dir}, {}, data / "modern-stdio.log");
+      auto modernBridge = setup.run(
+          {{"python", utf8((dir / "modern_stdio.py").wstring()),
+            utf8((fs::u8path(selfExecutable()).parent_path() / "TangOSLite.exe").wstring()),
+            utf8((data / "mcp.json").wstring())},
+           dir},
+          {}, data / "modern-stdio.log");
       expect(modernBridge.code == 0, "Modern MCP stdio integration: " + modernBridge.output);
       fleet.enqueue(external, Json::array({{{"id", "stdio-cancel"}, {"name", "stdio_cancel"}}}));
       fleet.start(external);
@@ -820,10 +849,12 @@ print('UI Stop returns a tool error to the client instead of silently dropping i
                             "os,time,sys\ns=os.environ['TEST_API_KEY'];sys.stdout.write(s[:8]);sys."
                             "stdout.flush();time.sleep(.1);print(s[8:])\n");
     auto secretLog = dir / "split.log";
-    Command secretCommand{{"python", utf8((dir / "split.py").wstring())}, dir,
+    Command secretCommand{{"python", utf8((dir / "split.py").wstring())},
+                          dir,
                           {{"TEST_API_KEY", "fixture-secret-123456"}}};
-    secretCommand.activityArguments = Json{{"nested", {{"apiKey", "fixture-secret-123456"},
-                                         {"note", "fixture-secret-123456"}}}}.dump();
+    secretCommand.activityArguments =
+        Json{{"nested", {{"apiKey", "fixture-secret-123456"}, {"note", "fixture-secret-123456"}}}}
+            .dump();
     auto secretResult = setup.run(secretCommand, {}, secretLog);
     expect(read(secretLog).find("fixture-secret-123456") == std::string::npos &&
                read(secretLog).find("[REDACTED]") != std::string::npos,

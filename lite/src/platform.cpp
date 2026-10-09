@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <algorithm>
 #include <cctype>
+#include <mutex>
 namespace lite {
 namespace {
 struct Handle {
@@ -223,6 +224,31 @@ Result Runner::run(const Command &c, const Sink &sink, const fs::path &log) {
       }
     }
   } activityEnd{activityId, result};
+  if (cancelled) {
+    result.code = ERROR_CANCELLED;
+    store("[CANCELLED] before process launch\n");
+    return result;
+  }
+  // Git can enumerate another worktree's half-written registration during
+  // simultaneous add/list/remove commands. Keep this metadata phase ordered.
+  static std::timed_mutex worktreeMetadata;
+  std::unique_lock<std::timed_mutex> worktreeLock(worktreeMetadata, std::defer_lock);
+  auto executable = fs::u8path(c.argv.front()).filename().string();
+  std::transform(executable.begin(), executable.end(), executable.begin(),
+                 [](unsigned char v) { return char(std::tolower(v)); });
+  if ((executable == "git" || executable == "git.exe") &&
+      std::find(c.argv.begin() + 1, c.argv.end(), "worktree") != c.argv.end()) {
+    if (!worktreeLock.try_lock()) {
+      store("[WAITING] for Git worktree metadata\n");
+      while (!worktreeLock.try_lock_for(std::chrono::milliseconds(50))) {
+        if (cancelled) {
+          result.code = ERROR_CANCELLED;
+          store("[CANCELLED] while waiting for Git worktree metadata\n");
+          return result;
+        }
+      }
+    }
+  }
   if (cancelled) {
     result.code = ERROR_CANCELLED;
     store("[CANCELLED] before process launch\n");

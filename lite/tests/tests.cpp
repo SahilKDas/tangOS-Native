@@ -186,6 +186,57 @@ int main() {
     write(r / ".gitignore", "ignored/\n");
     run({"git", "add", "port/ok.txt", ".gitignore"});
     run({"git", "commit", "-m", "initial"});
+    {
+      std::vector<std::thread> writers;
+      std::vector<Result> results(8);
+      for (int i = 0; i < 8; ++i)
+        writers.emplace_back([&, i] {
+          Runner isolated;
+          auto path = temp / "parallel" / std::to_string(i) / "worktree";
+          results[i] = isolated.run({{"git", "worktree", "add", "-b", "parity-" + std::to_string(i),
+                                      utf8(path.wstring()), "HEAD"},
+                                     r});
+        });
+      for (auto &thread : writers)
+        thread.join();
+      for (int i = 0; i < 8; ++i) {
+        expect(results[i].code == 0,
+               ("parallel worktree registration: " + results[i].output).c_str());
+        run({"git", "worktree", "remove",
+             utf8((temp / "parallel" / std::to_string(i) / "worktree").wstring())});
+        run({"git", "branch", "-D", "parity-" + std::to_string(i)});
+      }
+      auto held = temp / "held-worktree";
+      write(r / ".git/hooks/post-checkout",
+            "#!/bin/sh\nprintf ready > .parity-lock-ready\nsleep 2\n");
+      Runner holder, waiting;
+      Result heldResult, waitResult;
+      std::thread owner([&] {
+        heldResult = holder.run(
+            {{"git", "worktree", "add", "-b", "parity-held", utf8(held.wstring()), "HEAD"}, r});
+      });
+      for (int i = 0; i < 200 && !fs::exists(held / ".parity-lock-ready"); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      if (!fs::exists(held / ".parity-lock-ready")) {
+        owner.join();
+        throw std::runtime_error("Worktree hook did not establish the cancellation fixture: " +
+                                 heldResult.output);
+      }
+      auto start = std::chrono::steady_clock::now();
+      std::thread blocked([&] { waitResult = waiting.run({{"git", "worktree", "list"}, r}); });
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      waiting.cancel();
+      blocked.join();
+      auto cancellationTime = std::chrono::steady_clock::now() - start;
+      owner.join();
+      expect(heldResult.code == 0 && waitResult.code == ERROR_CANCELLED &&
+                 waitResult.output.find("while waiting") != std::string::npos &&
+                 cancellationTime < std::chrono::seconds(1),
+             "waiting worktree metadata operation is cancellable");
+      fs::remove(r / ".git/hooks/post-checkout");
+      run({"git", "worktree", "remove", "--force", utf8(held.wstring())});
+      run({"git", "branch", "-D", "parity-held"});
+    }
     Repository repo(runner, r / "port", s);
     expect(repo.root == fs::canonical(r), "nested repository root detection");
     expect(repo.status().find("main") != std::string::npos, "status reports branch");

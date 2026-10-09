@@ -26,6 +26,8 @@ python "$source/tests/test_statistics_reference.py" --exe "$out/build-a/TangOSLi
 if ($LASTEXITCODE -ne 0) { throw 'Statistics reference tests failed' }
 python "$source/tests/test_activity_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original statistics comparisons failed' }
+python "$source/tests/test_auto_role_reference.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original Simple-mode role comparisons failed' }
 python "$source/tests/test_preflight_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original preflight comparisons failed' }
 python "$source/tests/test_help_reference.py" --exe "$out/build-a/TangOSLite.exe"

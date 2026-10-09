@@ -17,7 +17,7 @@ public:
   std::map<std::string, std::string> values() const;
 };
 struct AgentSpec {
-  std::string name, kind = "api", role = "Unassigned", effort = "high", model, baseUrl,
+  std::string name, kind = "api", role = "Unassigned", effort, model, baseUrl, provider,
                     dialect = "openai", key;
   std::string cli;
   int count = 16, attempts = 4, jobs = 1;
@@ -56,6 +56,7 @@ class Fleet {
   HANDLE controllerOwnership = INVALID_HANDLE_VALUE;
   void saveLocked();
   void drive(const std::shared_ptr<Job> &job, bool execute);
+  std::string chooseRole(const std::shared_ptr<Job> &job);
   Json schedule(const std::shared_ptr<Job> &job, const fs::path &cwd);
   void audit(const std::shared_ptr<Job> &job);
 

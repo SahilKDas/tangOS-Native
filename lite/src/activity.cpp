@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <regex>
 namespace lite {
 Json measuredRole(const Json &stats) {
   auto by = stats.value("bySize", Json::object());
@@ -10,7 +11,8 @@ Json measuredRole(const Json &stats) {
     auto attempts = tally.value("attempts", 0);
     return attempts >= 2 ? double(tally.value("matches", 0)) / attempts : -1.0;
   };
-  if (stats.value("attempts", stats.value("matchAttempts", 0)) >= 4) {
+  if (stats.contains("bySize") && stats["bySize"].is_object() &&
+      stats.value("attempts", stats.value("matchAttempts", 0)) >= 4) {
     if (rate(">0x800") >= .4)
       return {{"role", "Hard matcher"}, {"why", "lands large functions others skip"}};
     if (rate("<=0x40") >= .6)
@@ -22,6 +24,74 @@ Json measuredRole(const Json &stats) {
       return {{"role", "Refiner"}, {"why", "steady, reliable at landing matches"}};
   }
   return {{"role", nullptr}, {"why", "still learning - assign it work to find its strengths"}};
+}
+Json automaticRole(const Json &agent) {
+  auto roles = agent.value("roles", Json::array());
+  if (!roles.empty())
+    return {{"role", roles[0]}, {"why", "you assigned this role"}, {"source", "assigned"}};
+  auto cap = [&](Json pick) {
+    const std::vector<std::string> ladder{"Hard matcher", "Random", "Drafter", "Refiner"};
+    auto hidden = agent.value("hiddenRole", std::string());
+    auto rung = std::find(ladder.begin(), ladder.end(), hidden);
+    auto current = std::find(ladder.begin(), ladder.end(), pick.at("role").get<std::string>());
+    if (rung != ladder.end() && current != ladder.end() && current < rung) {
+      pick["role"] = hidden;
+      pick["why"] = "the pool outgrew its old role - running easier work now";
+    }
+    return pick;
+  };
+  auto measured = measuredRole(agent.value("stats", Json::object()));
+  if (!measured["role"].is_null()) {
+    measured["source"] = "measured";
+    return cap(measured);
+  }
+  struct Fit {
+    std::string role, strength;
+    std::regex names;
+    std::vector<std::string> families;
+  };
+  static const std::vector<Fit> fits{
+      {"Hard matcher", "very high", std::regex(R"(fable|opus|gpt-?5|\bo[34]\b)"), {}},
+      {"Random", "high", std::regex("sonnet|grok"), {"Claude", "Grok", "GPT"}},
+      {"Drafter", "medium", std::regex("deepseek|kimi|moonshot"), {"DeepSeek", "Kimi"}},
+      {"Refiner",
+       "low",
+       std::regex("glm|zhipu|nemotron|nemo|gemma|mistral"),
+       {"GLM", "Nemotron", "Requesty"}}};
+  auto name = agent.value("name", std::string());
+  auto folded = name;
+  std::transform(folded.begin(), folded.end(), folded.begin(),
+                 [](unsigned char c) { return char(std::tolower(c)); });
+  for (auto &fit : fits)
+    if (std::regex_search(folded, fit.names))
+      return cap({{"role", fit.role},
+                  {"why", name + " is a " + fit.strength + " model"},
+                  {"source", "model"}});
+  auto family = agent.value("provider", std::string());
+  const std::vector<std::string> known{"Claude",   "GLM",      "GPT",      "Grok",
+                                       "DeepSeek", "Nemotron", "Requesty", "Kimi"};
+  if (std::find(known.begin(), known.end(), family) == known.end()) {
+    family = "default";
+    for (auto entry : std::vector<std::pair<std::string, std::regex>>{
+             {"Claude", std::regex("claude|opus|sonnet|haiku|fable")},
+             {"GLM", std::regex("glm|zhipu")},
+             {"Grok", std::regex("grok")},
+             {"DeepSeek", std::regex("deepseek")},
+             {"Nemotron", std::regex("nemotron|nemo")},
+             {"Kimi", std::regex("kimi|moonshot")},
+             {"GPT", std::regex("gpt|o1|o3|o4|chatgpt|openai")}})
+      if (std::regex_search(folded, entry.second)) {
+        family = entry.first;
+        break;
+      }
+  }
+  for (auto &fit : fits)
+    if (std::find(fit.families.begin(), fit.families.end(), family) != fit.families.end())
+      return cap(
+          {{"role", fit.role}, {"why", family + " models fit this role"}, {"source", "model"}});
+  return cap({{"role", "Random"},
+              {"why", "unrecognised model - drawing from the whole unmatched pool"},
+              {"source", "fallback"}});
 }
 void ActivityBus::publish(const Json &event) {
   std::lock_guard<std::mutex> lock(mutex);
@@ -153,5 +223,71 @@ std::string sizeRecommendation(const Json &bySize) {
   if (rows.front().name != rows.back().name)
     out += "; weakest on " + rows.back().name + " (" + percent(rows.back().rate) + "%)";
   return out + ".";
+}
+Json effortPolicy(const Json &agent) {
+  static const std::map<std::string, Json> catalog = {
+      {"Claude",
+       {{"options", {"low", "medium", "high", "xhigh", "max"}},
+        {"default", "high"},
+        {"note", "extended-thinking budget"}}},
+      {"GLM",
+       {{"options", {"off"}},
+        {"default", "off"},
+        {"note", "thinking off: the refine driver emits code directly, and reasoning starves its "
+                 "token budget"}}},
+      {"GPT",
+       {{"options", {"minimal", "low", "medium", "high"}},
+        {"default", "high"},
+        {"note", "reasoning_effort"}}},
+      {"Grok",
+       {{"options", {"low", "high"}}, {"default", "high"}, {"note", "grok reasoning_effort"}}},
+      {"DeepSeek",
+       {{"options", {"chat", "reasoner"}},
+        {"default", "reasoner"},
+        {"note", "V3 chat vs R1 reasoner"}}},
+      {"Nemotron",
+       {{"options", {"off"}},
+        {"default", "off"},
+        {"note", "local LM Studio (model nemo): reasons internally, the driver reads the answer"}}},
+      {"Requesty",
+       {{"options",
+         {"nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b",
+          "nvidia/nemotron-3-nano-30b-a3b", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+          "google/gemma-4-31b-it", "mistral/leanstral-1-5", "novita/tencent/hy3",
+          "poolside/laguna-m.1"}},
+        {"default", "nvidia/nemotron-3-super-120b-a12b"},
+        {"note", "which free Requesty model to run"}}},
+      {"Kimi",
+       {{"options", {"off"}},
+        {"default", "off"},
+        {"note", "Moonshot Kimi K3: the driver reads the answer (OpenAI-compatible)"}}}};
+  auto family = agent.value("provider", std::string());
+  if (!catalog.count(family)) {
+    family = "default";
+    auto name = agent.value("name", std::string());
+    std::transform(name.begin(), name.end(), name.begin(),
+                   [](unsigned char c) { return char(std::tolower(c)); });
+    static const std::vector<std::pair<std::regex, std::string>> patterns = {
+        {std::regex("claude|opus|sonnet|haiku|fable"), "Claude"},
+        {std::regex("glm|zhipu"), "GLM"},
+        {std::regex("grok"), "Grok"},
+        {std::regex("deepseek"), "DeepSeek"},
+        {std::regex("nemotron|nemo"), "Nemotron"},
+        {std::regex("kimi|moonshot"), "Kimi"},
+        {std::regex("gpt|o1|o3|o4|chatgpt|openai"), "GPT"}};
+    for (auto &entry : patterns)
+      if (std::regex_search(name, entry.first)) {
+        family = entry.second;
+        break;
+      }
+  }
+  auto spec = catalog.count(family)
+                  ? catalog.at(family)
+                  : Json{{"options", {"low", "medium", "high"}}, {"default", "medium"}};
+  auto selected = agent.value("effort", std::string());
+  auto &options = spec.at("options");
+  if (std::find(options.begin(), options.end(), selected) == options.end())
+    selected = spec.at("default");
+  return {{"family", family}, {"spec", spec}, {"current", selected}};
 }
 } // namespace lite

@@ -18,4 +18,6 @@ int64_t activityNow();
 Json activityStreams(const std::string &output);
 std::string sizeRecommendation(const Json &bySize);
 Json measuredRole(const Json &stats);
+Json automaticRole(const Json &agent);
+Json effortPolicy(const Json &agent);
 } // namespace lite

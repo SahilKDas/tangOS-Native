@@ -364,14 +364,16 @@ Json Backend::catalog() {
        "atlas.history",      "claims.read",       "preflight",          "git.status",
        "git.syncPreview",    "git.sync",          "git.action",         "git.clone",
        "git.backup",         "git.discard",       "tools.list",         "tools.run",
-       "checks.list",        "checks.run",        "policy.presence",    "stats.get", "stats.session",
-       "stats.clear",        "reports.list",      "reports.export",     "queue.adopt",
-       "policy.classify",    "policy.adaptive",   "policy.pool",        "policy.statistics",
-       "policy.layout",      "policy.color",      "policy.batches",     "policy.source",
-       "policy.usage",       "guide.parse",       "guide.tour",         "guide.tips",
-       "projects.get",       "github.credits",    "atlas.cosmetics",    "atlas.counts",
-       "atlas.progress",     "atlas.live",        "update.check",       "update.stage",
-       "bug.report",         "harvest.list", "activity.snapshot", "policy.activity", "policy.detail", "policy.match", "policy.role"});
+       "checks.list",        "checks.run",        "policy.presence",    "stats.get",
+       "stats.session",      "stats.clear",       "reports.list",       "reports.export",
+       "queue.adopt",        "policy.classify",   "policy.adaptive",    "policy.pool",
+       "policy.statistics",  "policy.layout",     "policy.color",       "policy.batches",
+       "policy.source",      "policy.usage",      "guide.parse",        "guide.tour",
+       "guide.tips",         "projects.get",      "github.credits",     "atlas.cosmetics",
+       "atlas.counts",       "atlas.progress",    "atlas.live",         "update.check",
+       "update.stage",       "bug.report",        "harvest.list",       "activity.snapshot",
+       "policy.activity",    "policy.detail",     "policy.match",       "policy.role",
+       "policy.autoRole",    "policy.effort"});
 }
 Json Backend::invoke(const std::string &m, Json a) {
   HANDLE lock = CreateFileW((directory / "backend.lock").c_str(),
@@ -390,7 +392,8 @@ Json Backend::invoke(const std::string &m, Json a) {
     return activityBus().snapshot(utf8(repository.wstring()));
   if (m == "policy.activity") {
     ActivityBus bus;
-    for (auto &event : a.at("events")) bus.publish(event);
+    for (auto &event : a.at("events"))
+      bus.publish(event);
     return bus.snapshot();
   }
   if (m == "policy.detail")
@@ -398,6 +401,18 @@ Json Backend::invoke(const std::string &m, Json a) {
             {"recommendation", sizeRecommendation(a.value("bySize", Json::object()))}};
   if (m == "policy.role")
     return measuredRole(a.value("stats", Json::object()));
+  if (m == "policy.autoRole") {
+    Json out = Json::array();
+    for (auto &agent : a.at("agents"))
+      out.push_back(automaticRole(agent));
+    return out;
+  }
+  if (m == "policy.effort") {
+    Json out = Json::array();
+    for (auto &agent : a.at("agents"))
+      out.push_back(effortPolicy(agent));
+    return out;
+  }
   if (m == "policy.match")
     return matchObservation(a.value("values", Json::object()), a.value("output", std::string()),
                             a.value("exit", 0UL), a.value("source", std::string()));
@@ -814,7 +829,8 @@ Json updateAgentStats(Json entry, const Json &rows, Json &best) {
       matched = false;
     bool firstAttempt = !key.empty() && !seen(entry["attemptedFuncs"], key),
          firstMatch = matched && (key.empty() || !seen(entry["matchedFuncs"], key));
-    if (key.empty() && row.contains("matched") && row["matched"].is_boolean()) firstAttempt = true;
+    if (key.empty() && row.contains("matched") && row["matched"].is_boolean())
+      firstAttempt = true;
     if (firstAttempt) {
       entry["attempts"] = entry.value("attempts", 0) + 1;
       if (!key.empty())
@@ -869,28 +885,42 @@ Json updateAgentStats(Json entry, const Json &rows, Json &best) {
 }
 Json matchObservation(const Json &values, const std::string &output, unsigned long exitCode,
                       const std::string &source) {
-  bool matched = exitCode == 0 && std::regex_search(output, std::regex("MATCHING VERSIONS:\\s*(?!none\\b)\\S", std::regex::icase)) &&
+  bool matched = exitCode == 0 &&
+                 std::regex_search(output, std::regex("MATCHING VERSIONS:\\s*(?!none\\b)\\S",
+                                                      std::regex::icase)) &&
                  classifySource(source) != "transcribed";
   Json row{{"matched", matched}};
-  if (values.contains("func") && values["func"].is_string()) row["name"] = values["func"];
+  if (values.contains("func") && values["func"].is_string())
+    row["name"] = values["func"];
   if (values.contains("size")) {
-    if (values["size"].is_number()) row["size"] = values["size"];
+    if (values["size"].is_number())
+      row["size"] = values["size"];
     else if (values["size"].is_string()) {
       try {
         auto s = trim(values["size"].get<std::string>());
-        row["size"] = std::stoll(s, nullptr, s.size() > 1 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') ? 16 : 10);
-      } catch (...) {}
+        row["size"] = std::stoll(
+            s, nullptr, s.size() > 1 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') ? 16 : 10);
+      } catch (...) {
+      }
     }
   }
   if (!matched) {
-    std::regex div("(\\d+)\\s+word\\(s\\)\\s+differ|divergences?\\s*=\\s*(\\d+)", std::regex::icase);
+    std::regex div("(\\d+)\\s+word\\(s\\)\\s+differ|divergences?\\s*=\\s*(\\d+)",
+                   std::regex::icase);
     int64_t smallest = INT64_MAX;
-    for (auto it = std::sregex_iterator(output.begin(), output.end(), div); it != std::sregex_iterator(); ++it) {
-      try { smallest = std::min<int64_t>(smallest, std::stoll((*it)[1].matched ? (*it)[1].str() : (*it)[2].str())); } catch (...) {}
+    for (auto it = std::sregex_iterator(output.begin(), output.end(), div);
+         it != std::sregex_iterator(); ++it) {
+      try {
+        smallest = std::min<int64_t>(
+            smallest, std::stoll((*it)[1].matched ? (*it)[1].str() : (*it)[2].str()));
+      } catch (...) {
+      }
     }
-    if (smallest != INT64_MAX) row["divergences"] = smallest;
+    if (smallest != INT64_MAX)
+      row["divergences"] = smallest;
   }
-  if (classifySource(source) == "transcribed") row["c_source"] = "dcd 0x00000000";
+  if (classifySource(source) == "transcribed")
+    row["c_source"] = "dcd 0x00000000";
   return row;
 }
 void Backend::resetRecent(const std::string &id) {
@@ -945,7 +975,8 @@ void Backend::recordAgent(const std::string &id, const fs::path &results, const 
   {
     std::lock_guard<std::mutex> sessionLock(sessionStatsMutex);
     auto &session = sessionStats[utf8(directory.wstring())];
-    if (!session.is_object()) session = Json::object();
+    if (!session.is_object())
+      session = Json::object();
     auto sessionBest = best;
     session[id] = updateAgentStats(session.value(id, Json::object()), rows, sessionBest);
   }

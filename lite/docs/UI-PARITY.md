@@ -93,3 +93,17 @@ upper-right minimap follow the original rendering rules. The offline capture
 tool now records the original detail overlay as well as Controller and Viewer.
 The main toolbar, native control styling and other screen composition still
 require exact comparison; these changes do not establish full pixel parity.
+
+Simple-mode role selection now follows the original model-family prior,
+measured recommendation, explicit assignment and adaptive-role ceiling. Both
+scheduled and explicitly queued batches use the same selection. Provider
+families are configurable locally. Advanced-mode effort choices and actual
+driver effort use the original family-specific catalog and validated defaults,
+including DeepSeek, Requesty and providers whose effort is off. The release
+gate compares these policies directly with the retained original TypeScript.
+
+Internal Git worktree metadata operations are serialized with cancellable
+waiting. This fixes a release-gate failure where simultaneous agent creation
+read another worktree's partially written commondir. Regression coverage creates
+eight parallel disposable worktrees and cancels an operation waiting behind a
+controlled checkout hook. External Git processes are outside this local lock.

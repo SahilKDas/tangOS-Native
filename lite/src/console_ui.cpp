@@ -618,12 +618,14 @@ struct ConsoleUI::Impl {
                 at = (int)r;
             profileFields[a.id + "Role"] =
                 combo(roles, base + 2, x + 12, y + h - 126, (w - 32) / 2, at);
-            profileFields[a.id + "Effort"] = combo({"off", "low", "medium", "high"}, base + 3,
-                                                   x + 20 + (w - 32) / 2, y + h - 126, (w - 32) / 2,
-                                                   a.spec.effort == "off"      ? 0
-                                                   : a.spec.effort == "low"    ? 1
-                                                   : a.spec.effort == "medium" ? 2
-                                                                               : 3);
+            auto policy = effortPolicy(
+                {{"name", a.spec.name}, {"provider", a.spec.provider}, {"effort", a.spec.effort}});
+            auto efforts = policy.at("spec").at("options").get<std::vector<std::string>>();
+            auto effortAt = int(
+                std::find(efforts.begin(), efforts.end(), policy.at("current").get<std::string>()) -
+                efforts.begin());
+            profileFields[a.id + "Effort"] = combo(efforts, base + 3, x + 20 + (w - 32) / 2,
+                                                   y + h - 126, (w - 32) / 2, effortAt);
             int third = (w - 40) / 3;
             button("Assign", base + 5, x + 12, y + h - 86, third);
             button("Clear", base + 6, x + 20 + third, y + h - 86, third);
@@ -1155,6 +1157,7 @@ struct ConsoleUI::Impl {
     label("Role", 18, y + 4, 120);
     y += 37;
     field("Model", spec.model);
+    field("Provider", spec.provider);
     field("API base URL", spec.baseUrl);
     field("API dialect", spec.dialect);
     field("Key variable", spec.key);
@@ -3096,6 +3099,7 @@ struct ConsoleUI::Impl {
       s.kind = selected(profileFields.at("Kind"));
       s.role = selected(profileFields.at("Role"));
       s.model = text(profileFields.at("Model"));
+      s.provider = text(profileFields.at("Provider"));
       s.baseUrl = text(profileFields.at("API base URL"));
       s.dialect = text(profileFields.at("API dialect"));
       s.key = text(profileFields.at("Key variable"));
