@@ -13,6 +13,7 @@
   Layout tests exercised attached 125% and 100% monitors and three requested window sizes (including minimum-size clamping), plus a 25,000-function database. Rendering still uses Windows DPI virtualization; sharp per-monitor raster output and other scale factors remain unverified.
 - Global INI check settings apply to the selected repository. Logs/worktrees are retained manually. UI output retains a bounded tail; complete logs remain on disk.
 - Executable repository scripts are trusted code, not OS-sandboxed. Instruction delivery and post-run audits cannot prevent arbitrary code from touching other paths or networking. See SECURITY.md.
+- Descriptor Atlas generation is implemented with command review and protected output paths. Post-land refresh stays inside the agent worktree; it does not publish to the primary checkout. The native result includes exit/log/refreshed metadata, differing from the reference's direct database return. Exact background physics, CSS blur/shadows and animation cadence remain incomplete.
 
 Backend services and user-owned connection configuration are documented in BACKEND.md. Frontend parity remains a separate task.
 

@@ -1,5 +1,26 @@
 # Windows release verification — 2026-10-09
 
+## 0.26.0 verified portable package — 2026-10-09
+
+Code checkpoint **917b54c** produced two identical clean Windows x64 builds:
+**6,789,120 bytes (6.789 decimal MB)**, SHA256
+**A650CD95AC594A4B3A6E29DA80EFDDFFAE66A4AD4FD751BD7C874E8FFEE9386F**.
+All five native suites passed (118.65 seconds), with the official MCP Inspector.
+Packaged backend, adapter, disposable Git/ZIP tests and **12,407 original Console
+comparisons** passed. Valid, missing and invalid descriptor GUI workflows passed
+with 11/12/14 responsive timer ticks. The valid workflow includes descriptor
+Regenerate command review and the two-pixel Controller hover alignment/restoration
+regression, plus retained logs, remote Viewer/cache, large database and display
+checks. Backend/fleet tests exercise confirmed generation, protected outputs,
+changed-script expiry, failed/missing database generation, isolated post-land
+refresh, failure retention and MCP output protection. Sixteen new original-code
+comparisons cover Atlas divergence baseline seeding.
+
+Evidence is retained in `lite/release-0.26.0-verified`. Windows system DLL imports
+only. No browser runtime, credentials or game data are packaged. Exact mesh
+physics, blur/shadow composition, auxiliary presentation, unusual DPI and hosted
+provider/remote-write verification remain open. `fullParity` remains false.
+
 ## 0.25.0 verified portable package — 2026-10-09
 
 Source checkpoint **d7953ab** produced two identical clean Windows x64 builds:
