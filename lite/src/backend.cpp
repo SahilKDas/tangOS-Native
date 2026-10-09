@@ -1252,7 +1252,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       for (auto &known : list)
         if (known.at("id") == id)
           entry = known;
-      for (auto key : {"title", "github", "tagline"})
+      for (auto key : {"title", "github", "tagline", "glyph"})
         if (row.contains(key) && !row[key].is_null()) {
           auto value = row.at(key).get<std::string>();
           if (!value.empty())
@@ -1332,6 +1332,13 @@ Json Backend::execute(const std::string &m, const Json &a) {
         entry["title"] = entry.contains("descriptor")
                              ? parseDescriptor(entry["descriptor"].dump()).title
                              : entry.at("id").get<std::string>();
+      if (!entry.contains("glyph")) {
+        auto title = wide(entry.at("title").get<std::string>());
+        title.resize(std::min(size_t(2), title.size()));
+        if (!title.empty())
+          CharUpperBuffW(title.data(), static_cast<DWORD>(title.size()));
+        entry["glyph"] = title.empty() ? "??" : utf8(title);
+      }
     }
     return rows;
   }
@@ -1410,7 +1417,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       args["connection"] = m;
     auto result = execute("network.read", args);
     if (m == "update.check" && result.value("ok", false))
-      result["update"] = updateStatus("0.22.0", result.at("data"));
+      result["update"] = updateStatus("0.23.0", result.at("data"));
     return result;
   }
   if (m == "git.clone") {
@@ -1528,7 +1535,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto folder = directory / "exports" / ("bug-report-" + uniqueId());
     fs::create_directories(folder);
     Json debug = {{"app", "TangOS Lite"},
-                  {"version", "0.22.0"},
+                  {"version", "0.23.0"},
                   {"portOnly", settings.portOnly},
                   {"project", settings.activeProject},
                   {"connections", Json::array()},

@@ -7,6 +7,7 @@ import argparse
 import json
 import pathlib
 import subprocess
+import re
 
 p = argparse.ArgumentParser()
 p.add_argument('--exe', required=True)
@@ -19,6 +20,11 @@ p.add_argument('--timeout', type=int, default=1800)
 args = p.parse_args()
 exe, repo, output = [pathlib.Path(v).resolve() for v in (args.exe, args.repo, args.output)]
 output.mkdir(parents=True, exist_ok=True)
+def source_snapshot():
+    return subprocess.run(['git', 'diff', '--binary', 'HEAD', '--', 'src'], cwd=repo,
+                          capture_output=True, check=True, timeout=60).stdout
+
+original_source = source_snapshot()
 if args.python:
     state = output / 'state'
     state.mkdir(parents=True, exist_ok=True)
@@ -49,8 +55,18 @@ for n, name in enumerate(args.check):
     result = call('checks.run', arguments, label)
     log = pathlib.Path(result['log'])
     assert log.is_file() and result['output'].replace('\r\n', '\n') in log.read_text(encoding='utf-8')
-    summary.append({'name': name, 'state': 'passed' if result['exit'] == 0 else 'failed',
-                    'exit': result['exit'], 'log': str(log)})
+    state = 'passed' if result['exit'] == 0 else 'failed'
+    if state == 'passed' and name == 'Link checks' and 'nothing to verify' in result['output']:
+        state = 'skipped'
+    existing = re.search(r'(\d+) disagreement\(s\)', result['output'])
+    if state == 'passed' and name == 'Declaration agreement' and existing and int(existing[1]):
+        state = 'passed-with-baseline'
+    summary.append({'name': name, 'state': state, 'exit': result['exit'], 'log': str(log),
+                    'command': preview['details']['command']})
+    if existing:
+        summary[-1]['existingDisagreements'] = int(existing[1])
     print(name + ': ' + summary[-1]['state'] + '; log=' + str(log), flush=True)
 (output / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
+assert source_snapshot() == original_source, 'Checks changed src/; inspect the checkout immediately'
+(output / 'source-safety.json').write_text(json.dumps({'trackedSourceUnchanged': True}), encoding='utf-8')
 print(json.dumps(summary, indent=2))

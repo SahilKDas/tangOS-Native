@@ -183,3 +183,12 @@ presence rather than serving as authentication. HTTP disconnect cancels its
 request-owned tool, while stdio cancellation and EOF retain worker lifetimes.
 The bearer token grants access to this user's enabled tools; the endpoint stays
 loopback-only and rejects browser origins.
+
+Workflow additions retain the same review boundary. Unstage uses exact literal
+paths and `git restore --staged`; it cannot discard working files. Concurrent
+draft edits are preserved and newly reserved targets are filtered before saving.
+The complete reference reads descriptor documentation and local guides only.
+Display validation moves disposable test windows without changing display
+settings. The opt-in actual-provider test hardcodes loopback Ollama, uses an
+existing named model, requires no key, and runs in a disposable Git repository;
+it never downloads a model or sends repository data to an external provider.

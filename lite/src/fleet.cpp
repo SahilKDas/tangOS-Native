@@ -414,8 +414,10 @@ Json Fleet::generateDraft(const std::string &role, int count, Runner &runner, Si
   if (!tool)
     throw std::runtime_error("No scheduler declared; use Viewer cart or import draft JSON");
   std::set<std::string> taken;
+  Json originalDraft;
   {
     std::lock_guard<std::mutex> lock(mutex);
+    originalDraft = batchBook.draft();
     for (auto &b : batchBook.snapshot())
       if (b.at("status") != "done")
         for (auto &row : b.at("items"))
@@ -470,7 +472,32 @@ Json Fleet::generateDraft(const std::string &role, int count, Runner &runner, Si
   Json draft = {{"title", role + " draft"},
                 {"prompt", "Follow repository AGENTS.md; verify every result independently."},
                 {"items", items}};
-  saveDraft(draft);
+  // Generation is asynchronous. Never replace edits or reserve targets that
+  // another agent acquired while the scheduler was running.
+  std::lock_guard<std::mutex> lock(mutex);
+  if (batchBook.draft() != originalDraft)
+    throw std::runtime_error("Draft changed during generation. Your edits were preserved; "
+                             "generated targets remain in " +
+                             utf8(out.wstring()));
+  std::set<std::string> reserved;
+  for (auto &batch : batchBook.snapshot())
+    if (batch.at("status") != "done")
+      for (auto &row : batch.at("items"))
+        if (!row.value("worked", false) && !row.value("removed", false))
+          reserved.insert(batchTarget(row));
+  for (auto &job : jobs)
+    for (auto &row : job.second->state.queue)
+      reserved.insert(batchTarget(row));
+  Json available = Json::array();
+  for (auto &row : items)
+    if (!reserved.count(batchTarget(row)))
+      available.push_back(row);
+  if (available.empty())
+    throw std::runtime_error(
+        "Generated targets were reserved during generation; refresh and retry");
+  draft["items"] = available;
+  batchBook.setDraft(draft);
+  saveLocked();
   return draft;
 }
 void Fleet::clearDoneBatches() {

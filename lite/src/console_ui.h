@@ -25,6 +25,8 @@ public:
   void stop();
   void openPanel(const std::string &panel);
   Json debugState() const;
+  void smokeDisplay(const fs::path &directory,
+                    const std::function<void(const fs::path &)> &capture);
   void smokeRemote(const fs::path &directory, const std::function<void(const fs::path &)> &capture);
   void smokeScreens(const fs::path &directory,
                     const std::function<void(const fs::path &)> &capture);

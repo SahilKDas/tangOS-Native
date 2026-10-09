@@ -1,5 +1,23 @@
 # Console parity audit
 
+## Project / batch / support workflow checkpoint
+
+Discovery retains project glyphs and the project menu shows them. Existing
+registry, descriptor cache, ZIP safety, viewer-only selection and clone-and-open
+flows remain covered by backend and native GUI integration tests.
+Asynchronous generation now preserves concurrent draft edits and excludes new
+reservations before saving. Both cases have disposable scheduler regressions.
+Draft buttons fit narrow windows. Support Tips now opens the correct overlay;
+a complete native reference includes workflows, tool commands and arguments,
+tour and tips. Update responses have actionable text. Git adds working/staged
+differences, history and confirmed unstaging without discarding working files.
+
+Display smoke tests exercise every attached monitor and three window sizes,
+checking the Batches, Help and reference controls for clipping. They record actual
+monitor scaling and explicitly leave unusual DPI unverified when no suitable
+monitor is present. Windows still virtualizes DPI; this is not proof of sharp
+per-monitor TinySkia rendering or exact reference animations.
+
 ## Controller telemetry and compact fields source checkpoint
 
 The native Controller view now uses the original latest-batch selection, worked

@@ -4,6 +4,34 @@
 #include <stdexcept>
 #include <windows.h>
 namespace lite {
+std::string supportResultText(const Json &result) {
+  if (result.empty())
+    return "Check for updates, read the complete reference, or describe a bug to prepare a local "
+           "report.";
+  if (result.contains("error"))
+    return "Operation failed:\n" + result.at("error").dump() +
+           "\n\nReview your Connections and local requirements, then retry.";
+  if (result.value("requiresConfirmation", false))
+    return "Review this preview, then confirm to proceed:\n\n" +
+           result.value("details", Json::object()).dump(2);
+  if (result.value("state", std::string()) == "downloaded")
+    return "Update " + result.value("version", std::string()) +
+           " is downloaded and checksum-verified.\nRestart and update to install. "
+           "A recovery copy is retained.";
+  if (result.contains("update")) {
+    const auto &update = result.at("update");
+    if (update.value("state", std::string()) == "none")
+      return "You are up to date. Running version: " +
+             update.value("currentVersion", std::string());
+    if (update.value("state", std::string()) == "available")
+      return "Version " + update.value("version", std::string()) +
+             " is available.\nOpen the release page or preview a download. "
+             "Downloads require your trusted publisher configuration and a published SHA256.";
+  }
+  if (result.contains("markdown"))
+    return result.at("markdown").get<std::string>();
+  return result.dump(2);
+}
 Json updateStatus(const std::string &current, const Json &release) {
   if (!release.is_object())
     throw std::runtime_error("Update endpoint must return a JSON release object");

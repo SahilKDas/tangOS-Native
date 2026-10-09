@@ -53,6 +53,9 @@ foreach ($image in $images) {
   if (-not (Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -lt 100000) { throw "Missing native window render: $image" }
 }
 if (-not ($MissingDescriptor -or $InvalidDescriptor)) {
+$display = Get-Content -LiteralPath (Join-Path $fixture 'display-validation.json') -Raw | ConvertFrom-Json
+if ($display.monitors.Count -lt 1 -or @($display.layouts | Where-Object state -eq 'passed').Count -ne 9) { throw 'Display layout matrix incomplete' }
+if (-not (Test-Path -LiteralPath (Join-Path $fixture 'help-complete-reference.bmp'))) { throw 'Complete native reference was not rendered' }
 foreach ($image in @('controller-reference-idle', 'controller-cart')) {
   $path = Join-Path $fixture "$image.bmp"
   if (-not (Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -lt 100000) { throw "Missing Controller reference render: $image" }

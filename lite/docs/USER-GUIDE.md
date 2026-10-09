@@ -144,6 +144,23 @@ normalized JSON; the backup retains the original text, including comments.
 
 ## Portable updates
 
+Help's **Complete reference** opens a scrollable native reference containing the
+project, batch, Git, update and connection workflows, every repository tool's
+description, command and arguments, and the complete editable tour and tips.
+The **Tips** button opens the tips overlay directly. Update results distinguish
+available, downloaded, up-to-date and failed checks; a failed request never means
+the installed version is current.
+
+The Git toolbox also offers **Working diff**, **Staged diff**, **Commit history**
+and confirmed **Unstage paths**. Unstaging changes the index and preserves the
+working file. Enter exact relative paths, one per line, in Details.
+
+Generated drafts are reviewed before assignment. If you save edits during
+generation, Lite retains your edits and reports the generated JSONL path instead
+of replacing them. Targets reserved during generation are filtered out before
+the draft is saved. The global queue reserves targets until you hand off or
+remove the batch.
+
 Configure your own `update.check` connection and trusted **Update asset prefix**
 (an HTTPS release directory ending in `/`). Enable downloads on that profile.
 Release metadata must contain `version`, `artifactUrl` and `sha256`, or a GitHub

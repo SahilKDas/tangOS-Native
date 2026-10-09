@@ -2,6 +2,7 @@
 #include "images.h"
 #include "activity.h"
 #include "controller_view.h"
+#include "help.h"
 #include <windows.h>
 #include "repository.h"
 #include <iostream>
@@ -28,6 +29,17 @@ int main() {
     expect(threw, msg);
   };
   try {
+    expect(supportResultText({{"update", {{"state", "none"}, {"currentVersion", "1.2.3"}}}})
+                   .find("up to date") != std::string::npos,
+           "verified current update is shown as up to date");
+    expect(supportResultText({{"error", "offline"}}).find("up to date") == std::string::npos,
+           "failed checks never appear up to date");
+    expect(supportResultText({{"update", {{"state", "available"}, {"version", "2.0.0"}}}})
+                   .find("published SHA256") != std::string::npos,
+           "available update explains required download trust");
+    expect(supportResultText({{"state", "downloaded"}, {"version", "2.0.0"}})
+                   .find("Restart and update") != std::string::npos,
+           "downloaded update has an actionable restart state");
     {
       ActivityBus bus;
       std::string largeOutput(190000, 'x');
@@ -175,6 +187,7 @@ int main() {
                   200, Json{{"projects",
                              Json::array({{{"id", "remote-discovered"},
                                            {"title", "Published project"},
+                                           {"glyph", "DX"},
                                            {"github", "https://github.com/fixture/project.git"}}})}}
                            .dump()};
             }
@@ -194,6 +207,8 @@ int main() {
              "discovery preview makes no external request or registry changes");
       expect(run("projects.discover").at("discovered") == 1,
              "registry discovery merges remote project");
+      expect(discovery.invoke("projects.list")[0].at("glyph") == "DX",
+             "registry discovery retains published project glyph");
       Json target{{"id", "remote-discovered"}};
       expect(!run("projects.download", target).at("cached").get<bool>() && descriptorRequests == 1,
              "download and validate remote descriptor");

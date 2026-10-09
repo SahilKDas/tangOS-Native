@@ -260,7 +260,14 @@ Command Repository::action(const std::string &name, const std::string &remote,
       append({"tag", ref});
     else
       append({"tag", "-d", ref});
-  } else if (name == "Stage paths") {
+  } else if (name == "Working diff" || name == "Staged diff") {
+    append({"diff", "--no-ext-diff", "--no-textconv"});
+    if (name == "Staged diff")
+      append({"--cached"});
+    append({"--"});
+  } else if (name == "Commit history") {
+    append({"log", "-100", "--graph", "--decorate", "--oneline"});
+  } else if (name == "Stage paths" || name == "Unstage paths") {
     Args paths;
     for (auto p : split(text, '\n')) {
       p = trim(p);
@@ -271,7 +278,10 @@ Command Repository::action(const std::string &name, const std::string &remote,
     }
     if (paths.empty())
       throw std::runtime_error("Enter one exact relative path per line in Details.");
-    append({"--literal-pathspecs", "add", "--"});
+    if (name == "Unstage paths")
+      append({"--literal-pathspecs", "restore", "--staged", "--"});
+    else
+      append({"--literal-pathspecs", "add", "--"});
     a.insert(a.end(), paths.begin(), paths.end());
   } else if (name == "Commit staged") {
     if (trim(text).empty())

@@ -369,13 +369,17 @@ int main() {
     expect(result.code == 0 &&
                read(temp / "full.log").find("port/example.cpp:42") != std::string::npos,
            "check execution and durable diagnostics");
-    write(r / "cancel.py", "import "
-                           "subprocess,sys,time\nsubprocess.Popen([sys.executable,'-c','import "
-                           "time;time.sleep(30)'])\nprint('before "
-                           "cancel',flush=True)\ntime.sleep(30)\n");
+    write(r / "cancel.py",
+          "import "
+          "subprocess,sys,time\nfrom pathlib import "
+          "Path\nchild=subprocess.Popen([sys.executable,'-c','import "
+          "time;time.sleep(30)'])\nprint('before "
+          "cancel',flush=True)\nPath('cancel-ready').write_text(str(child.pid))\ntime.sleep(30)\n");
     runner.reset();
     std::thread kill([&] {
-      Sleep(500);
+      auto deadline = GetTickCount64() + 10000;
+      while (!fs::exists(r / "cancel-ready") && GetTickCount64() < deadline)
+        Sleep(20);
       runner.cancel();
     });
     auto cancelled = runner.run({{"python", "cancel.py"}, r}, {}, temp / "cancel.log");
@@ -383,6 +387,14 @@ int main() {
     expect(cancelled.code == ERROR_CANCELLED &&
                read(temp / "cancel.log").find("before cancel") != std::string::npos,
            "cancel descendants and preserve log");
+    expect(fs::exists(r / "cancel-ready"), "cancellation fixture reached a running descendant");
+    HANDLE descendant =
+        OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(std::stoul(read(r / "cancel-ready"))));
+    if (descendant) {
+      auto stopped = WaitForSingleObject(descendant, 5000);
+      CloseHandle(descendant);
+      expect(stopped == WAIT_OBJECT_0, "cancelled descendant process terminated");
+    }
     runner.reset();
     auto guide = parseGuide(
         "# comment\n\n[thinking] @settings\nKeys\nLocal credentials\nonly\n\nPlain title\nBody",

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(TangOSLite VERSION 0.22.0 LANGUAGES CXX RC)
+project(TangOSLite VERSION 0.23.0 LANGUAGES CXX RC)
 if(NOT WIN32)
   message(FATAL_ERROR "TangOS Lite currently targets Windows")
 endif()
@@ -61,3 +61,9 @@ add_executable(lite_update_tests tests/update_tests.cpp)
 target_link_libraries(lite_update_tests PRIVATE lite_core)
 target_link_options(lite_update_tests PRIVATE -static -Wl,--no-insert-timestamp)
 add_test(NAME portable_update_transaction COMMAND lite_update_tests $<TARGET_FILE:TangOSLite>)
+
+# Opt-in actual local provider integration; never runs in ordinary/release tests
+# and never downloads models or reads account credentials.
+add_executable(lite_provider_tests tests/provider_tests.cpp)
+target_link_libraries(lite_provider_tests PRIVATE lite_core)
+target_link_options(lite_provider_tests PRIVATE -static -Wl,--no-insert-timestamp)

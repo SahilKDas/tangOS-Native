@@ -69,19 +69,15 @@ HWND controllerTab, repositoryTab;
 HWND toolbarReport, toolbarRefresh, toolbarSettings, toolbarKeys;
 HWND toolboxButton;
 HBRUSH fieldBrush = nullptr;
-const std::vector<std::string> actions = {"Fetch",           "Pull (fast-forward)",
-                                          "Merge",           "Rebase",
-                                          "Stage paths",     "Commit staged",
-                                          "Push reviewed",   "Compare upstreams",
-                                          "Upstream diff",   "Add remote",
-                                          "PR readiness",    "PR checks",
-                                          "Create draft PR", "Create branch",
-                                          "Switch branch",   "Delete merged branch",
-                                          "Rebase continue", "Rebase abort",
-                                          "Merge continue",  "Merge abort",
-                                          "List stashes",    "Stash selected paths",
-                                          "Apply stash",     "Drop stash",
-                                          "Create tag",      "Delete tag"};
+const std::vector<std::string> actions = {
+    "Fetch",           "Pull (fast-forward)",  "Merge",          "Rebase",
+    "Stage paths",     "Commit staged",        "Push reviewed",  "Compare upstreams",
+    "Upstream diff",   "Add remote",           "PR readiness",   "PR checks",
+    "Create draft PR", "Create branch",        "Switch branch",  "Delete merged branch",
+    "Rebase continue", "Rebase abort",         "Merge continue", "Merge abort",
+    "List stashes",    "Stash selected paths", "Apply stash",    "Drop stash",
+    "Create tag",      "Delete tag",           "Unstage paths",  "Working diff",
+    "Staged diff",     "Commit history"};
 std::string value(HWND h) {
   int n = GetWindowTextLengthW(h);
   std::wstring s(n + 1, 0);
@@ -202,7 +198,7 @@ std::string resourceText(int id) {
 }
 void about() {
   reviewDialog(
-      "TangOS Lite 0.22.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
+      "TangOS Lite 0.23.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
       "for checks and Git; Repository for status.\nAlways read AGENTS.md and review "
       "changes before publication.\n\n" +
           resourceText(204) + "\n\nMinGW-w64 libwinpthread\n" + resourceText(202) +
@@ -393,8 +389,8 @@ void runAction() {
       if (r.pushPreview(remote, ref) != approvedSnapshot)
         throw std::runtime_error("Outgoing commits changed after review. Preview again.");
     } else if (name == "Merge" || name == "Rebase" || name == "Pull (fast-forward)" ||
-               name == "Stage paths" || name == "Add remote" || name == "Create draft PR" ||
-               name == "Create branch" || name == "Switch branch" ||
+               name == "Stage paths" || name == "Unstage paths" || name == "Add remote" ||
+               name == "Create draft PR" || name == "Create branch" || name == "Switch branch" ||
                name == "Delete merged branch" || name == "Rebase continue" ||
                name == "Rebase abort" || name == "Merge continue" || name == "Merge abort" ||
                name == "Stash selected paths" || name == "Apply stash" || name == "Drop stash" ||
@@ -587,7 +583,7 @@ void paintChrome(HDC dc, int w, int h) {
     skin::label(dc, L"Repository status", rail + 16, 345, 308, 24, 14, true);
   skin::label(dc, L"Port-only  ·  Review before push", rail + 16, h - 139, 300, 23, 12, true, true);
   skin::mascot(dc, w - 137, h - 127, 96);
-  skin::label(dc, L"v0.22.0", w - 74, h - 27, 60, 18, 10, false, true);
+  skin::label(dc, L"v0.23.0", w - 74, h - 27, 60, 18, 10, false, true);
 }
 void snapshot(const fs::path &path) {
   skin::invalidateBackdrop(window);
@@ -674,7 +670,7 @@ fs::path saveDebugSnapshot() {
   fs::create_directories(folder);
   snapshot(folder / "window.bmp");
   Json state = {{"app", "TangOS Lite"},
-                {"version", "0.22.0"},
+                {"version", "0.23.0"},
                 {"capturedAt", activityNow()},
                 {"toolboxOpen", toolboxOpen},
                 {"repositoryView", repositoryView},
@@ -772,6 +768,9 @@ void projectMenu() {
   for (auto &entry : projects) {
     auto id = entry.at("id").get<std::string>();
     auto title = entry.value("title", id);
+    auto glyph = entry.value("glyph", std::string());
+    if (!glyph.empty())
+      title = glyph + "  " + title;
     bool cloned = entry.value("cloned", false);
     if (!cloned)
       title += " · viewer only";
@@ -1407,6 +1406,8 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           consoleUI->smokeScreens(config.parent_path(), snapshot);
           if (fs::exists(repo / "tangos.json"))
             consoleUI->smokeRemote(config.parent_path(), snapshot);
+          if (fs::exists(repo / "tangos.json"))
+            consoleUI->smokeDisplay(config.parent_path(), snapshot);
         }
         auto debug = saveDebugSnapshot();
         if (fs::file_size(debug / "window.bmp") < 100000 ||

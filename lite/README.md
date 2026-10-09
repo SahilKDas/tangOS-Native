@@ -1,4 +1,16 @@
-# TangOS Lite 0.22.0
+# TangOS Lite 0.23.0
+
+Optional real local-provider validation, after building and with an existing
+Ollama model available:
+
+```powershell
+lite/out/lite_provider_tests.exe llama3.2:3b lite/out/provider-report.json
+```
+
+This exercises native Fleet instruction delivery and the actual local
+OpenAI-compatible endpoint in a disposable repository. It does not download
+models, use account credentials or establish ROM byte correctness. Ordinary
+tests and release builds do not call a provider.
 
 Click Tango or use **Alt+Space → About** for embedded third-party notices.
 

@@ -146,7 +146,8 @@ enum class Screen {
   batches,
   remoteGate,
   clone,
-  support
+  support,
+  reference
 };
 constexpr int REQUIREMENTS = 4480, REQ_REFRESH = 4481, REQ_TERMINAL = 4482, REQ_GITHUB = 4483,
               REQ_COPY = 4484;
@@ -163,7 +164,7 @@ constexpr int DESC_SCAN = 4610, DESC_PREVIEW = 4611, DESC_CONFIRM = 4612, DESC_R
 constexpr int REMOTE_FOLDER = 4800, REMOTE_CLONE = 4801;
 constexpr int SUPPORT = 4850, SUPPORT_CHECK = 4851, SUPPORT_REPORT = 4852, SUPPORT_CONFIRM = 4853,
               SUPPORT_COPY = 4854, SUPPORT_FOLDER = 4855, SUPPORT_RELEASE = 4856,
-              SUPPORT_DOWNLOAD = 4857, SUPPORT_RESTART = 4858;
+              SUPPORT_DOWNLOAD = 4857, SUPPORT_RESTART = 4858, SUPPORT_REFERENCE = 4859;
 constexpr int MCP_EXPORT = 4830, DETAIL_LOOP = 4840;
 constexpr int MCP_INSTALL = 4831;
 constexpr int CONTROLLER_SESSION = 4900, CONTROLLER_ALL = 4901, CONTROLLER_PICK = 4902;
@@ -1070,6 +1071,50 @@ struct ConsoleUI::Impl {
             "require a separate confirmation of the full preview. Credentials remain on your "
             "computer.",
             width - 332, 62, 310, 180);
+    } else if (screen == Screen::reference) {
+      label("TangOS Lite reference", 18, 60, width - 36, 32);
+      std::string reference =
+          "PROJECTS\nChoose a project in the title bar. Open a local repository, discover public "
+          "projects using your enabled projects.registry connection, add a descriptor, import "
+          "a ZIP, or clone a viewer-only project. ZIP imports require preview and confirmation.\n\n"
+          "BATCHES AND DRAFTS\nPick targets in Viewer, use the cart in Batches, or generate a "
+          "draft "
+          "with the repository scheduler. Review its title and instructions, then enqueue to an "
+          "agent or the global queue. Hand off queued batches between stopped agents or return "
+          "them to the global queue. Export/import JSON preserves draft instructions. Cancel "
+          "preserves the saved draft and complete logs.\n\n"
+          "GIT\nRepository shows branches, remotes, worktrees, changes and conflicts. The Git "
+          "toolbox includes working/staged differences, history, confirmed staging/unstaging, "
+          "branches, tags, selected-path stashes, merge/rebase continuation and abort. Review "
+          "every commit and outgoing push. Resolve conflicts in your editor. Never modify src/ "
+          "for port-only fixes or commit ROMs, extracted assets, credentials or excluded files.\n\n"
+          "UPDATES\nConfigure an enabled update.check connection, trusted asset prefix and "
+          "download permission. Updates require a published SHA256. Check, preview the download, "
+          "confirm, then restart to install. Automatic checks/downloads require your explicit "
+          "Automatic permission. Installation retains a recovery copy.\n\n"
+          "CONNECTIONS AND CHECKS\nGit, gh, Python, compilers and ROMs stay on your machine. "
+          "Configure your own provider/client and vault keys. No provider subscription or ROM "
+          "data is included. Failures show commands and complete log paths; a skipped or missing "
+          "check does not establish correctness.\n\nREPOSITORY TOOL REFERENCE\n";
+      for (auto &tool : descriptor.tools) {
+        reference += "\n" + tool.label + " [" + tool.id + "]\n" + tool.description +
+                     "\nCommand: " + tool.command + "\n";
+        for (auto &arg : tool.args)
+          reference += "  " + arg.name + " (" + arg.type +
+                       (arg.required ? ", required" : ", optional") + "): " + arg.description +
+                       "\n";
+        if (!tool.docs.empty())
+          reference += "Documentation: " + tool.docs + "\n";
+      }
+      for (bool tour : {true, false}) {
+        reference += tour ? "\nTOUR\n" : "\nTIPS\n";
+        for (auto &step : readGuide(data, tour))
+          reference += "\n" + step.value("title", std::string()) + "\n" +
+                       step.value("body", std::string()) + "\n";
+      }
+      body = edit(reference, 0, 18, 106, width - 36, height - 176,
+                  ES_MULTILINE | ES_READONLY | WS_VSCROLL);
+      button("Help", SUPPORT, 18, height - 48, 108);
     } else if (screen == Screen::support) {
       label("Help, updates and reports", 18, 60, cw - 36, 32);
       label("Updates use your enabled update.check connection and require a published checksum. "
@@ -1082,7 +1127,7 @@ struct ConsoleUI::Impl {
       button("Preview report", SUPPORT_REPORT, 166, 304, 140);
       button(activeServiceMethod == "update.stage" ? "Confirm download" : "Save report",
              SUPPORT_CONFIRM, 314, 304, 150);
-      body = edit(serviceResult.dump(2), 0, 18, 354, cw - 36, height - 460,
+      body = edit(supportResultText(serviceResult), 0, 18, 354, cw - 36, height - 460,
                   ES_MULTILINE | ES_READONLY | WS_VSCROLL);
       button("Copy report", SUPPORT_COPY, width - 332, 108, 170);
       button("Open export folder", SUPPORT_FOLDER, width - 332, 154, 210);
@@ -1092,6 +1137,7 @@ struct ConsoleUI::Impl {
       button("Open release page", SUPPORT_RELEASE, width - 332, 354, 190);
       button("Download update", SUPPORT_DOWNLOAD, width - 332, 402, 190);
       button("Restart and update", SUPPORT_RESTART, width - 332, 450, 190);
+      button("Complete reference", SUPPORT_REFERENCE, width - 332, 498, 190);
       EnableWindow(GetDlgItem(window, SUPPORT_RESTART), portableUpdate.contains("receipt"));
       button("Controller", HOME, 18, height - 48, 108);
       EnableWindow(GetDlgItem(window, SUPPORT_CONFIRM),
@@ -1142,9 +1188,13 @@ struct ConsoleUI::Impl {
       button("Down", BATCH_DOWN, 88, height - 134, 70);
       button("Remove", BATCH_REMOVE, 166, height - 134, 98);
       button("Clear done", BATCH_CLEAR_DONE, 18, height - 88, 116);
-      button("Use Viewer cart", BATCH_CART_DRAFT, 291, height - 134, 148);
-      button("Save draft", BATCH_SAVE_DRAFT, 447, height - 134, 104);
-      button("Enqueue draft", BATCH_ENQUEUE, 559, height - 134, 126);
+      auto draftScale = std::min(1.0, double(cw - 325) / 378.0);
+      int cartWidth = int(148 * draftScale), saveWidth = int(104 * draftScale),
+          enqueueWidth = int(126 * draftScale);
+      button("Use Viewer cart", BATCH_CART_DRAFT, 291, height - 134, cartWidth);
+      button("Save draft", BATCH_SAVE_DRAFT, 299 + cartWidth, height - 134, saveWidth);
+      button("Enqueue draft", BATCH_ENQUEUE, 307 + cartWidth + saveWidth, height - 134,
+             enqueueWidth);
       button("Controller", HOME, 18, height - 48, 108);
       button("Viewer", ATLAS, 134, height - 48, 96);
       label("Assign saved draft to", width - 332, 64, 310);
@@ -3610,6 +3660,9 @@ struct ConsoleUI::Impl {
       serviceResult = Json::object();
       navigate(Screen::support);
       break;
+    case SUPPORT_REFERENCE:
+      navigate(Screen::reference);
+      break;
     case SUPPORT_CHECK:
       serviceCall("update.check", Json::object());
       break;
@@ -4183,9 +4236,9 @@ struct ConsoleUI::Impl {
                     nullptr, SW_SHOWNORMAL);
       break;
     case HELP_TIPS:
-      tipsMode = !tipsMode;
+      tipsMode = screen == Screen::tour ? !tipsMode : true;
       tourStep = 0;
-      build();
+      navigate(Screen::tour);
       break;
     case TOUR_CLOSE: {
       auto path = data / "console-ui.json";
@@ -4333,7 +4386,7 @@ struct ConsoleUI::Impl {
         if (activeServiceMethod == "update.stage" &&
             serviceResult.value("state", std::string()) == "downloaded")
           portableUpdate = serviceResult;
-        setText(body, serviceResult.dump(2));
+        setText(body, supportResultText(serviceResult));
         SetWindowTextW(GetDlgItem(window, SUPPORT_CONFIRM), activeServiceMethod == "update.stage"
                                                                 ? L"Confirm download"
                                                                 : L"Save report");
@@ -4927,6 +4980,75 @@ void ConsoleUI::show(bool visible, bool atlas) {
       impl->navigate(screen);
   }
   ShowWindow(impl->window, visible ? SW_SHOW : SW_HIDE);
+}
+void ConsoleUI::smokeDisplay(const fs::path &directory,
+                             const std::function<void(const fs::path &)> &capture) {
+  if (!impl->fleet)
+    return; // Descriptor recovery is verified by its separate GUI workflow.
+  RECT original;
+  GetWindowRect(impl->parent, &original);
+  Json report{{"monitors", Json::array()}, {"layouts", Json::array()}};
+  EnumDisplayMonitors(
+      nullptr, nullptr,
+      [](HMONITOR monitor, HDC, LPRECT, LPARAM raw) -> BOOL {
+        auto &report = *reinterpret_cast<Json *>(raw);
+        MONITORINFO info{sizeof(MONITORINFO)};
+        if (!GetMonitorInfoW(monitor, &info))
+          return TRUE;
+        int scale = 0;
+        auto shcore = LoadLibraryW(L"shcore.dll");
+        if (shcore) {
+          using GetScale = HRESULT(WINAPI *)(HMONITOR, int *);
+          auto getScale =
+              reinterpret_cast<GetScale>(GetProcAddress(shcore, "GetScaleFactorForMonitor"));
+          if (getScale && FAILED(getScale(monitor, &scale)))
+            scale = 0;
+          FreeLibrary(shcore);
+        }
+        report["monitors"].push_back(
+            {{"scalePercent", scale}, {"left", info.rcWork.left}, {"top", info.rcWork.top}});
+        return TRUE;
+      },
+      reinterpret_cast<LPARAM>(&report));
+  bool unusualScale = false;
+  for (auto &monitor : report["monitors"]) {
+    unusualScale |= monitor.at("scalePercent") != 0 && monitor.at("scalePercent") != 100;
+    MoveWindow(impl->parent, monitor.at("left"), monitor.at("top"), 1180, 820, TRUE);
+    impl->navigate(Screen::support);
+    capture(directory /
+            fs::u8path("display-monitor-" + std::to_string(report["layouts"].size()) + ".bmp"));
+    report["layouts"].push_back({{"monitorScalePercent", monitor.at("scalePercent")},
+                                 {"windowDpi", GetDpiForWindow(impl->parent)}});
+  }
+  for (auto size : {std::pair<int, int>{980, 720}, {1475, 1025}, {1770, 1230}}) {
+    MoveWindow(impl->parent, original.left, original.top, size.first, size.second, TRUE);
+    for (auto screen : {Screen::batches, Screen::support, Screen::reference}) {
+      impl->navigate(screen);
+      auto state = debugState();
+      for (auto &control : state.at("layout")) {
+        if (!control.value("visible", false) ||
+            (control.at("class") != "Button" && control.at("class") != "Edit"))
+          continue;
+        int x = control.at("x"), y = control.at("y"), w = control.at("width"),
+            h = control.at("height");
+        if (x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > impl->width || y + h > impl->height)
+          throw std::runtime_error("Display validation clipped control " + control.at("id").dump() +
+                                   " at " + std::to_string(size.first));
+      }
+      report["layouts"].push_back({{"width", size.first},
+                                   {"height", size.second},
+                                   {"screen", int(screen)},
+                                   {"state", "passed"}});
+    }
+    capture(directory / fs::u8path("display-layout-" + std::to_string(size.first) + ".bmp"));
+  }
+  MoveWindow(impl->parent, original.left, original.top, original.right - original.left,
+             original.bottom - original.top, TRUE);
+  impl->navigate(Screen::controller);
+  report["unusualDpi"] =
+      unusualScale ? "exercised on attached monitor" : "unverified: no attached non-100% monitor";
+  report["awareness"] = "Windows DPI virtualization; per-monitor raster sharpness is not verified";
+  write(directory / "display-validation.json", report.dump(2));
 }
 void ConsoleUI::resize(int width, int height) {
   if (width < 800 || height < 650 || (width == impl->width && height == impl->height))
@@ -5553,6 +5675,17 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     impl->action(SUPPORT, BN_CLICKED);
     if (impl->screen != Screen::support)
       throw std::runtime_error("Help opened the agent operations menu instead of Support");
+    impl->action(HELP_TIPS, BN_CLICKED);
+    if (impl->screen != Screen::tour || !impl->tipsMode || impl->guideSteps.empty())
+      throw std::runtime_error("Support Tips did not open the tips overlay");
+    impl->action(SUPPORT, BN_CLICKED);
+    impl->action(SUPPORT_REFERENCE, BN_CLICKED);
+    if (impl->screen != Screen::reference ||
+        text(impl->body).find("REPOSITORY TOOL REFERENCE") == std::string::npos ||
+        text(impl->body).find("Port references") == std::string::npos)
+      throw std::runtime_error("Complete reference omitted repository tool documentation");
+    capture(directory / "help-complete-reference.bmp");
+    impl->tipsMode = false;
     impl->navigate(Screen::controller);
     impl->openSettingsPopover();
     if (!impl->settingsPopover || impl->screen != Screen::controller)

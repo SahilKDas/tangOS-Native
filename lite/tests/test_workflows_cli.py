@@ -16,6 +16,14 @@ with tempfile.TemporaryDirectory(prefix='TangOS-reviewed-git-') as root:
   args={'action':action,**args};preview=call('git.action',args);assert preview['requiresConfirmation'];args['confirmation']=preview['confirmation']
   result=call('git.action',args);assert result['exit']==0,result;return result
  confirmed('Create branch',ref='codex/new');confirmed('Switch branch',ref='codex/new');confirmed('Switch branch',ref='main');confirmed('Delete merged branch',ref='codex/new')
+ (repo/'port/fixture.cpp').write_text('review before commit\n')
+ confirmed('Stage paths',text='port/fixture.cpp')
+ assert 'review before commit' in confirmed('Staged diff')['output']
+ confirmed('Unstage paths',text='port/fixture.cpp')
+ assert not git('diff','--cached') and (repo/'port/fixture.cpp').read_text()=='review before commit\n'
+ assert 'review before commit' in confirmed('Working diff')['output']
+ assert 'base' in confirmed('Commit history')['output']
+ git('restore','port/fixture.cpp')
  confirmed('Create tag',ref='v1.0.0');assert git('tag').strip()=='v1.0.0';confirmed('Delete tag',ref='v1.0.0')
  (repo/'port/fixture.cpp').write_text('stashed\n');confirmed('Stash selected paths',text='port/fixture.cpp');assert (repo/'port/fixture.cpp').read_text()=='base\n'
  assert 'TangOS Lite' in confirmed('List stashes')['output'];confirmed('Apply stash',ref='stash@{0}');assert (repo/'port/fixture.cpp').read_text()=='stashed\n';confirmed('Drop stash',ref='stash@{0}')

@@ -382,6 +382,35 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
              "generation can be cancelled before execution");
       expect(fleet.draft() == generated, "cancelled generation preserves saved draft");
       generation.reset();
+      bool editedDuringGeneration = false;
+      auto editedDraft = Json{{"title", "User edits while generating"},
+                              {"prompt", "Keep my instructions"},
+                              {"items", Json::array()}};
+      reject(
+          [&] {
+            fleet.generateDraft("Hard matcher", 3, generation, [&](const std::string &) {
+              if (!editedDuringGeneration) {
+                editedDuringGeneration = true;
+                fleet.saveDraft(editedDraft);
+              }
+            });
+          },
+          "concurrent draft edits reject stale generation results");
+      expect(editedDuringGeneration && fleet.draft().at("title") == editedDraft.at("title") &&
+                 fleet.draft().at("prompt") == editedDraft.at("prompt"),
+             "generation preserves concurrent user edits");
+      bool reservedDuringGeneration = false;
+      auto refreshed = fleet.generateDraft("Hard matcher", 3, generation, [&](const std::string &) {
+        if (!reservedDuringGeneration) {
+          reservedDuringGeneration = true;
+          fleet.enqueue("", Json::array({{{"id", "0"}, {"name", "target0"}, {"module", "port"}}}),
+                        "Concurrent reservation");
+        }
+      });
+      expect(reservedDuringGeneration && refreshed.at("items").size() == 2 &&
+                 refreshed.at("items")[0].at("id") != "0",
+             "generation drops targets reserved while scheduler ran");
+      fleet.editBatch(fleet.batches().back().at("id").get<std::string>(), 0, true);
       fleet.saveDraft({{"items", Json::array()}});
       for (auto client : {"Claude Code", "Claude Desktop", "Cursor", "VS Code", "Generic"}) {
         auto config = mcpClientConfiguration(client, dir / "TangOSLite.exe", data / "mcp.json",
