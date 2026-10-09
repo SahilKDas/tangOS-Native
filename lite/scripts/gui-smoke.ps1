@@ -58,6 +58,7 @@ foreach ($image in @('controller-reference-idle', 'controller-cart')) {
   if (-not (Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -lt 100000) { throw "Missing Controller reference render: $image" }
 }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'controller-cart-report.txt') -Raw).StartsWith('PASS')) { throw 'Simple-mode cart workflow failed' }
+if (-not (Get-Content -LiteralPath (Join-Path $fixture 'module-window-report.txt') -Raw).StartsWith('PASS')) { throw 'Native module-window layout failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'remote-viewer-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Remote viewer workflow failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'fleet-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Packaged fleet workflow failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'viewer-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Native viewer parity workflow failed' }

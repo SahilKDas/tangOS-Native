@@ -1418,8 +1418,17 @@ struct ConsoleUI::Impl {
       p->window = h;
     }
     if (p) {
+      if (msg == WM_GETMINMAXINFO) {
+        // ConsoleUI starts at (14,72) and requires an 800x650 content viewport.
+        RECT minimum{0, 0, 828, 736};
+        AdjustWindowRectEx(&minimum, WS_OVERLAPPEDWINDOW, FALSE, 0);
+        auto info = reinterpret_cast<MINMAXINFO *>(l);
+        info->ptMinTrackSize = {minimum.right - minimum.left, minimum.bottom - minimum.top};
+        return 0;
+      }
       if (msg == WM_SIZE && p->ui) {
-        p->ui->resize(std::max(800, (int)LOWORD(l)), std::max(600, (int)HIWORD(l)) - 66);
+        if (w != SIZE_MINIMIZED)
+          p->ui->resize(int(LOWORD(l)) - 28, int(HIWORD(l)) - 86);
         return 0;
       }
       if (msg == WM_CLOSE) {
@@ -1473,7 +1482,7 @@ struct ConsoleUI::Impl {
         });
     RECT r;
     GetClientRect(h, &r);
-    popup->ui->resize(r.right - 28, r.bottom - 66);
+    popup->ui->resize(r.right - 28, r.bottom - 86);
     popup->ui->show(true, true);
     popups.push_back(std::move(popup));
     ShowWindow(h, SW_SHOWNORMAL);
@@ -5272,6 +5281,26 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     write(directory / "controller-cart-report.txt",
           "PASS: Simple per-agent cart CTA queues the selected target without provider execution");
   }
+  impl->openModule(impl->atlas.front().module);
+  auto &modulePopup = *impl->popups.back();
+  auto assertModuleBounds = [&] {
+    RECT client{}, child{};
+    GetClientRect(modulePopup.window, &client);
+    GetWindowRect(modulePopup.ui->impl->window, &child);
+    MapWindowPoints(nullptr, modulePopup.window, reinterpret_cast<POINT *>(&child), 2);
+    if (child.left != 14 || child.top != 72 || child.right != client.right - 14 ||
+        child.bottom != client.bottom - 14)
+      throw std::runtime_error("Module Viewer escapes its real native window after resize");
+  };
+  assertModuleBounds();
+  RECT moduleSize{0, 0, 880, 760};
+  AdjustWindowRectEx(&moduleSize, WS_OVERLAPPEDWINDOW, FALSE, 0);
+  SetWindowPos(modulePopup.window, nullptr, 0, 0, moduleSize.right - moduleSize.left,
+               moduleSize.bottom - moduleSize.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+  assertModuleBounds();
+  SendMessageW(modulePopup.window, WM_CLOSE, 0, 0);
+  write(directory / "module-window-report.txt",
+        "PASS: initial and resized native module window contain their Viewer with 14px margins");
   impl->navigate(Screen::atlas);
   capture(directory / "atlas-contributors.bmp");
   if (SendMessageW(impl->functionList, LB_GETCOUNT, 0, 0) != (LRESULT)impl->atlas.size())
