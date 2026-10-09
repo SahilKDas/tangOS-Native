@@ -34,6 +34,8 @@ python "$source/tests/test_preflight_reference.py" --exe "$out/build-a/TangOSLit
 if ($LASTEXITCODE) { throw 'Original preflight comparisons failed' }
 python "$source/tests/test_help_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original help comparisons failed' }
+python "$source/tests/test_rich_text_reference.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original styled help comparisons failed' }
 python "$source/tests/test_layout_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original Atlas geometry comparisons failed' }
 python "$source/tests/test_sort_reference.py" --exe "$out/build-a/TangOSLite.exe"
@@ -66,7 +68,7 @@ if ($size -ge 50000000) { throw 'Executable exceeds strict 50 MB limit' }
 $imports = & objdump -p "$out/TangOSLite.exe" | Select-String 'DLL Name:' | ForEach-Object { $_.Line.Trim() }
 $compiler = (& g++ --version | Select-Object -First 1)
 $cmake = (& cmake --version | Select-Object -First 1)
-$report = "TangOS Lite 0.24.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
+$report = "TangOS Lite 0.25.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
 Set-Content -LiteralPath "$out/SIZE.txt" -Value $report -Encoding utf8
 Copy-Item -LiteralPath "$source/README.md" -Destination "$out/README.md"
 Copy-Item -LiteralPath "$source/../LICENSE" -Destination "$out/LICENSE"
