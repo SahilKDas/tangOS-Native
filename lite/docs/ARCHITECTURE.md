@@ -24,6 +24,9 @@ with a guessed compiler command.
   pipes, Job Object process-tree cancellation, durable logs.
 - `repository`: Git root discovery, status, refs, worktrees, explicit staging,
   staged and outgoing-history review, GitHub CLI adapters, upstream comparison.
+- `controller_view`: pure batch/activity transformation shared by the native
+  Controller and original-source comparison tests. A bounded activity cache
+  keeps complete logs out of the repaint path.
 - `ui`: native controls, background workers, streamed log events and explicit
   approval dialogs. No Git or shell strings assembled by controls.
 

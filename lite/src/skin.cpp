@@ -33,16 +33,16 @@ struct Palette {
 Palette colors{Color(143, 208, 248),      Color(126, 200, 240), Color(142, 200, 65),
                Color(0, 153, 224),        Color(13, 58, 92),    Color(72, 116, 156),
                Color(200, 234, 244, 253), Color(234, 244, 253)};
-std::map<std::tuple<int, int, bool>, HFONT> fonts;
-HFONT uiFont(int size, bool bold, int weight = 0, bool italic = false) {
+std::map<std::tuple<int, int, bool, bool>, HFONT> fonts;
+HFONT uiFont(int size, bool bold, int weight = 0, bool italic = false, bool mono = false) {
   if (!weight)
     weight = bold ? FW_BOLD : FW_NORMAL;
-  auto key = std::make_tuple(size, weight, italic);
+  auto key = std::make_tuple(size, weight, italic, mono);
   auto found = fonts.find(key);
   if (found != fonts.end())
     return found->second;
   auto font = CreateFontW(-size, 0, 0, 0, weight, italic, FALSE, FALSE, DEFAULT_CHARSET, 0, 0,
-                          CLEARTYPE_QUALITY, 0, L"Nunito");
+                          CLEARTYPE_QUALITY, 0, mono ? L"Consolas" : L"Nunito");
   fonts[key] = font;
   return font;
 }
@@ -148,6 +148,142 @@ LRESULT CALLBACK hoverButton(HWND window, UINT message, WPARAM w, LPARAM l, UINT
     RemovePropW(window, L"TangOSHover");
     RemovePropW(window, L"TangOSIcon");
     RemoveWindowSubclass(window, hoverButton, id);
+  }
+  return DefSubclassProc(window, message, w, l);
+}
+void paintCompactCombo(HWND window, HDC dc) {
+  RECT bounds{};
+  GetClientRect(window, &bounds);
+  DRAWITEMSTRUCT background{};
+  background.hwndItem = window;
+  background.hDC = dc;
+  background.rcItem = bounds;
+  buttonBackground(background);
+  static const Color gloss[] = {Color(234, 244, 253), Color(250, 208, 172), Color(20, 44, 70),
+                                Color(252, 214, 240), Color(238, 255, 196)};
+  static const Color borders[] = {Color(217, 255, 255, 255), Color(184, 255, 214, 182),
+                                  Color(56, 120, 190, 230), Color(184, 255, 210, 238),
+                                  Color(184, 214, 238, 168)};
+  auto fill = gloss[paletteIndex];
+  auto edge =
+      GetPropW(window, L"TangOSNeedsRole") ? Color(255, 234, 179, 8) : borders[paletteIndex];
+  Surface surface(dc, 0, 0, bounds.right, bounds.bottom);
+  if (surface.data)
+    tangos_frame(surface.data, bounds.right, bounds.bottom, 8,
+                 Color(140, fill.GetR(), fill.GetG(), fill.GetB()).value, edge.value);
+  std::wstring value(GetWindowTextLengthW(window) + 1, 0);
+  GetWindowTextW(window, value.data(), int(value.size()));
+  auto previous =
+      SelectObject(surface.dc, reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0)));
+  SetBkMode(surface.dc, TRANSPARENT);
+  SetTextColor(surface.dc, rgb(IsWindowEnabled(window) ? colors.ink : colors.muted));
+  RECT textBounds{6, 0, bounds.right - 21, bounds.bottom};
+  DrawTextW(surface.dc, value.c_str(), -1, &textBounds,
+            DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+  SelectObject(surface.dc, previous);
+  auto pen = CreatePen(PS_SOLID, 1, rgb(colors.ink));
+  auto oldPen = SelectObject(surface.dc, pen);
+  MoveToEx(surface.dc, bounds.right - 14, bounds.bottom / 2 - 2, nullptr);
+  LineTo(surface.dc, bounds.right - 10, bounds.bottom / 2 + 2);
+  LineTo(surface.dc, bounds.right - 6, bounds.bottom / 2 - 2);
+  SelectObject(surface.dc, oldPen);
+  DeleteObject(pen);
+}
+LRESULT CALLBACK compactComboProc(HWND window, UINT message, WPARAM w, LPARAM l, UINT_PTR id,
+                                  DWORD_PTR) {
+  if (message == WM_PAINT) {
+    PAINTSTRUCT paint{};
+    auto dc = BeginPaint(window, &paint);
+    paintCompactCombo(window, dc);
+    EndPaint(window, &paint);
+    return 0;
+  }
+  if (message == WM_PRINT || message == WM_PRINTCLIENT) {
+    paintCompactCombo(window, reinterpret_cast<HDC>(w));
+    return 0;
+  }
+  if (message == WM_ERASEBKGND)
+    return 1;
+  if (message == WM_NCDESTROY) {
+    RemovePropW(window, L"TangOSCompactCombo");
+    RemovePropW(window, L"TangOSNeedsRole");
+    RemoveWindowSubclass(window, compactComboProc, id);
+  }
+  auto result = DefSubclassProc(window, message, w, l);
+  if (message == CB_SETCURSEL || message == WM_ENABLE || message == WM_SETFOCUS ||
+      message == WM_KILLFOCUS)
+    InvalidateRect(window, nullptr, FALSE);
+  return result;
+}
+void paintCompactEdit(HWND window, HDC dc) {
+  RECT bounds{};
+  GetWindowRect(window, &bounds);
+  int width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
+  DRAWITEMSTRUCT background{};
+  background.hwndItem = window;
+  background.hDC = dc;
+  background.rcItem = {0, 0, width, height};
+  buttonBackground(background);
+  auto tint = compactField();
+  Surface surface(dc, 0, 0, width, height);
+  if (surface.data)
+    tangos_frame(surface.data, width, height, 8,
+                 Color(166, GetRValue(tint), GetGValue(tint), GetBValue(tint)).value,
+                 paletteIndex == 2 ? Color(56, 120, 190, 230).value
+                                   : Color(217, 255, 255, 255).value);
+}
+LRESULT CALLBACK compactEditProc(HWND window, UINT message, WPARAM w, LPARAM l, UINT_PTR id,
+                                 DWORD_PTR) {
+  if (message == WM_NCCALCSIZE) {
+    auto bounds =
+        w ? &reinterpret_cast<NCCALCSIZE_PARAMS *>(l)->rgrc[0] : reinterpret_cast<RECT *>(l);
+    auto dc = GetDC(window);
+    auto previous =
+        SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0)));
+    TEXTMETRICW metrics{};
+    GetTextMetricsW(dc, &metrics);
+    SelectObject(dc, previous);
+    ReleaseDC(window, dc);
+    int height = bounds->bottom - bounds->top;
+    int top = std::max(1, (height - int(metrics.tmHeight)) / 2);
+    int bottom = std::max(1, height - int(metrics.tmHeight) - top);
+    bounds->left += 6;
+    bounds->right -= 6;
+    bounds->top += top;
+    bounds->bottom -= bottom;
+    return 0;
+  }
+  if (message == WM_NCPAINT) {
+    auto dc = GetWindowDC(window);
+    RECT client{}, bounds{};
+    GetClientRect(window, &client);
+    GetWindowRect(window, &bounds);
+    POINT origin{};
+    ClientToScreen(window, &origin);
+    int saved = SaveDC(dc);
+    ExcludeClipRect(dc, origin.x - bounds.left, origin.y - bounds.top,
+                    origin.x - bounds.left + client.right, origin.y - bounds.top + client.bottom);
+    paintCompactEdit(window, dc);
+    RestoreDC(dc, saved);
+    ReleaseDC(window, dc);
+    return 0;
+  }
+  if (message == WM_PRINT) {
+    auto dc = reinterpret_cast<HDC>(w);
+    paintCompactEdit(window, dc);
+    RECT bounds{};
+    GetWindowRect(window, &bounds);
+    POINT origin{};
+    ClientToScreen(window, &origin);
+    auto saved = SaveDC(dc);
+    OffsetViewportOrgEx(dc, origin.x - bounds.left, origin.y - bounds.top, nullptr);
+    auto result = DefSubclassProc(window, WM_PRINTCLIENT, w, PRF_CLIENT);
+    RestoreDC(dc, saved);
+    return result;
+  }
+  if (message == WM_NCDESTROY) {
+    RemovePropW(window, L"TangOSCompactEdit");
+    RemoveWindowSubclass(window, compactEditProc, id);
   }
   return DefSubclassProc(window, message, w, l);
 }
@@ -364,6 +500,43 @@ void presenceDot(HDC dc, int x, int y, const std::string &state, int size) {
   auto fill = Color(255, GetRValue(tint), GetGValue(tint), GetBValue(tint));
   shape(dc, x, y, size, size, size / 2.f, fill, fill);
 }
+void progressBar(HDC dc, int x, int y, int width, int percent, COLORREF tint) {
+  Surface surface(dc, x, y, width, 6);
+  if (!surface.data)
+    return;
+  tangos_frame(surface.data, width, 6, 3, Color(26, 0, 0, 0).value, 0);
+  int filled = width * std::clamp(percent, 0, 100) / 100;
+  if (filled > 0) {
+    auto clip = SaveDC(surface.dc);
+    IntersectClipRect(surface.dc, 0, 0, filled, 6);
+    auto fill = Color(255, GetRValue(tint), GetGValue(tint), GetBValue(tint));
+    shape(surface.dc, 0, 0, filled, 6, 3, fill, fill);
+    RestoreDC(surface.dc, clip);
+  }
+}
+void taskText(HDC dc, const std::wstring &value, int x, int y, int width, int height, bool live,
+              bool secondary) {
+  if (height <= 0)
+    return;
+  auto previous = SelectObject(dc, uiFont(live ? 11 : 13, false, live ? 400 : 600, false, live));
+  SetTextColor(dc, rgb(secondary ? colors.muted : colors.ink));
+  SetBkMode(dc, TRANSPARENT);
+  auto saved = SaveDC(dc);
+  IntersectClipRect(dc, x, y, x + width, y + height);
+  RECT bounds{x, y, x + width, y + height};
+  DrawTextW(dc, value.c_str(), int(value.size()), &bounds,
+            DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+  RestoreDC(dc, saved);
+  SelectObject(dc, previous);
+}
+void taskNote(HDC dc, const std::wstring &value, int x, int y, int width) {
+  Surface surface(dc, x, y, width, 25);
+  if (surface.data)
+    tangos_frame(surface.data, width, 25, 8, Color(41, 234, 179, 8).value,
+                 Color(115, 234, 179, 8).value);
+  label(surface.dc, value, 9, 5, width - 18, 15, 11, false, false, false, RGB(124, 74, 3), false,
+        600);
+}
 void label(HDC dc, const std::wstring &s, int x, int y, int w, int h, int size, bool bold,
            bool secondary, bool accent, COLORREF tint, bool italic, int weight) {
   auto font = uiFont(size, bold, weight, italic);
@@ -381,6 +554,36 @@ void invalidateBackdrop(HWND parent) {
   auto found = buttonBackdrops.find(parent);
   if (found != buttonBackdrops.end())
     found->second->rendered = 0;
+}
+void compactCombo(HWND window, bool needsRole) {
+  SetPropW(window, L"TangOSCompactCombo", reinterpret_cast<HANDLE>(1));
+  if (needsRole)
+    SetPropW(window, L"TangOSNeedsRole", reinterpret_cast<HANDLE>(1));
+  SendMessageW(window, CB_SETITEMHEIGHT, WPARAM(-1), 20);
+  RECT bounds{};
+  GetClientRect(window, &bounds);
+  auto region = CreateRoundRectRgn(0, 0, bounds.right + 1, bounds.bottom + 1, 16, 16);
+  if (!SetWindowRgn(window, region, TRUE))
+    DeleteObject(region);
+  SetWindowSubclass(window, compactComboProc, 3, 0);
+}
+COLORREF compactField() {
+  static const COLORREF colors[] = {RGB(234, 244, 253), RGB(250, 208, 172), RGB(20, 44, 70),
+                                    RGB(252, 214, 240), RGB(238, 255, 196)};
+  return colors[paletteIndex];
+}
+void compactEdit(HWND window) {
+  SetPropW(window, L"TangOSCompactEdit", reinterpret_cast<HANDLE>(1));
+  SetWindowSubclass(window, compactEditProc, 4, 0);
+  SetWindowLongPtrW(window, GWL_STYLE, GetWindowLongPtrW(window, GWL_STYLE) | WS_BORDER);
+  SetWindowPos(window, nullptr, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+  RECT bounds{};
+  GetWindowRect(window, &bounds);
+  auto region = CreateRoundRectRgn(0, 0, bounds.right - bounds.left + 1,
+                                   bounds.bottom - bounds.top + 1, 16, 16);
+  if (!SetWindowRgn(window, region, TRUE))
+    DeleteObject(region);
 }
 void iconButton(HWND window, Icon icon) {
   SetPropW(window, L"TangOSIcon", (HANDLE)(uintptr_t(unsigned(icon) + 1)));

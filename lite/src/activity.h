@@ -11,6 +11,7 @@ class ActivityBus {
 public:
   void publish(const Json &event);
   Json snapshot(const std::string &repository = {}) const;
+  Json controllerSnapshot(const std::string &repository) const;
   void clear();
 };
 ActivityBus &activityBus();

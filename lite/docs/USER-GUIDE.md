@@ -1,5 +1,11 @@
 # TangOS Lite quick guide
 
+Controller progress tracks targets worked through in the latest batch, including
+non-matching attempts. It retains the latest output line after a run ends. Hit-rate
+and near-miss statistics appear when there is data, with **This session** and
+**All-time** selecting their scope. Completion of a batch does not establish that
+its changes should be landed: inspect the retained checks and review the diff.
+
 The Report toolbar button opens a native modal over the current screen. Describe
 the failure, attach PNG/JPEG/BMP/GIF screenshots, or paste a clipboard bitmap.
 Select **Prepare report** to save a local report folder. The description is

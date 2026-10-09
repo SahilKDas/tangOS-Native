@@ -1,5 +1,28 @@
 # Console parity audit
 
+## Controller telemetry and compact fields source checkpoint
+
+The native Controller view now uses the original latest-batch selection, worked
+target progress, pending queue totals, task precedence and latest output-line
+rules. A new comparison extracts the actual React transformation and checks 138
+combinations, including equal timestamps, Unicode output, empty tasks and other
+agents' activity. The six-pixel progress bar and conditional hit/near statistics
+are rendered in both modes, with statistics taking height from the task panel.
+Task/live text follows the reference's flex shrinking and clipping; notes have
+their yellow frame and live output uses a monospace font.
+
+Controller activity caching selects one latest run per agent and copies at most
+1,600 bytes of output per run. Tests compare it with the complete activity view
+and confirm retained logs are unaffected. Debug snapshots continue to omit logs.
+Compact role/effort fields use rounded TinySkia frames while preserving native
+dropdown and keyboard behavior. Numeric fields retain native editing and caret
+handling with centered text and rounded borders.
+
+These changes follow the verified 0.21.0 package. Exact multiline-note wrapping,
+progress easing, popup-list decoration, tooltips, card hover movement, background
+motion and unusual DPI still need validation or implementation. Full parity is
+not established by these source changes.
+
 ## Advanced Controller source checkpoint
 
 Advanced cards now use measured queue rows, a compact count, continuous toggle,

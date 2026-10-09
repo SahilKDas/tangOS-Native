@@ -28,6 +28,9 @@ void iconTextButton(HWND window, Icon icon);
 void drawIcon(HDC dc, Icon icon, int x, int y, int size);
 void policyButton(HWND window, unsigned state);
 void roleChip(HWND window);
+void compactCombo(HWND window, bool needsRole = false);
+void compactEdit(HWND window);
+COLORREF compactField();
 void rule(HDC dc, int x, int y, int width);
 void buttonFont(HWND window, int size, int weight = 700);
 void controlFont(HWND window, int size, int weight = 400);
@@ -50,6 +53,10 @@ void panel(HDC dc, int x, int y, int width, int height, bool solid = false,
 void scrim(HDC dc, int width, int height);
 void agentCard(HDC dc, int x, int y, int width, int height, COLORREF color);
 void presenceDot(HDC dc, int x, int y, const std::string &state, int size = 12);
+void progressBar(HDC dc, int x, int y, int width, int percent, COLORREF tint);
+void taskText(HDC dc, const std::wstring &value, int x, int y, int width, int height,
+              bool live = false, bool secondary = false);
+void taskNote(HDC dc, const std::wstring &value, int x, int y, int width);
 void label(HDC dc, const std::wstring &text, int x, int y, int width, int height, int size = 13,
            bool bold = false, bool secondary = false, bool accent = false,
            COLORREF tint = CLR_INVALID, bool italic = false, int weight = 0);

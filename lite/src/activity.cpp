@@ -157,6 +157,55 @@ void ActivityBus::clear() {
   runs.clear();
   order.clear();
 }
+Json ActivityBus::controllerSnapshot(const std::string &repository) const {
+  std::lock_guard<std::mutex> lock(mutex);
+  auto normalize = [](const std::string &value) {
+    if (value.empty())
+      return std::wstring();
+    auto path = fs::u8path(value).lexically_normal();
+    path.make_preferred();
+    auto result = path.wstring();
+    std::transform(result.begin(), result.end(), result.begin(),
+                   [](wchar_t c) { return std::towlower(c); });
+    return result;
+  };
+  auto selected = normalize(repository);
+  std::map<std::string, const Json *> latest;
+  for (auto &id : order) {
+    auto found = runs.find(id);
+    if (found == runs.end() ||
+        normalize(found->second.value("repository", std::string())) != selected)
+      continue;
+    auto &run = found->second;
+    auto client = run.value("client", Json::object());
+    if (!client.is_object())
+      client = Json::object();
+    auto owner = run.value("source", std::string()) == "ai"
+                     ? client.value("name", std::string("AI"))
+                     : std::string("You");
+    auto previous = latest.find(owner);
+    if (previous == latest.end() ||
+        run.value("startedAt", int64_t(0)) >= previous->second->value("startedAt", int64_t(0)))
+      latest[owner] = &run;
+  }
+  Json result = Json::array();
+  for (auto &entry : latest) {
+    Json row = Json::object();
+    for (auto key : {"source", "client", "startedAt", "status", "label"})
+      if (entry.second->contains(key))
+        row[key] = entry.second->at(key);
+    if (entry.second->contains("output")) {
+      const auto &output = entry.second->at("output").get_ref<const std::string &>();
+      // Four UTF-8 bytes per UTF-16 unit bounds the conversion work independently of log size.
+      auto at = output.size() > 1600 ? output.size() - 1600 : 0;
+      while (at < output.size() && (uint8_t(output[at]) & 0xc0) == 0x80)
+        ++at;
+      row["output"] = output.substr(at);
+    }
+    result.push_back(std::move(row));
+  }
+  return result;
+}
 ActivityBus &activityBus() {
   static ActivityBus bus;
   return bus;

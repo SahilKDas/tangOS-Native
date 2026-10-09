@@ -1,4 +1,5 @@
 #include "backend.h"
+#include "controller_view.h"
 #include "help.h"
 #include "atlas_layout.h"
 #include "viewer.h"
@@ -434,7 +435,7 @@ Json Backend::catalog() {
        "atlas.counts",       "atlas.progress",    "atlas.live",         "update.check",
        "update.stage",       "bug.report",        "harvest.list",       "activity.snapshot",
        "policy.activity",    "policy.detail",     "policy.match",       "policy.role",
-       "policy.autoRole",    "policy.effort",     "policy.drive"});
+       "policy.autoRole",    "policy.effort",     "policy.drive",       "policy.controllerView"});
 }
 Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
   if (m == "bug.report" && a.contains("description") && a["description"].is_string())
@@ -1409,7 +1410,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       args["connection"] = m;
     auto result = execute("network.read", args);
     if (m == "update.check" && result.value("ok", false))
-      result["update"] = updateStatus("0.21.0", result.at("data"));
+      result["update"] = updateStatus("0.22.0", result.at("data"));
     return result;
   }
   if (m == "git.clone") {
@@ -1527,7 +1528,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto folder = directory / "exports" / ("bug-report-" + uniqueId());
     fs::create_directories(folder);
     Json debug = {{"app", "TangOS Lite"},
-                  {"version", "0.21.0"},
+                  {"version", "0.22.0"},
                   {"portOnly", settings.portOnly},
                   {"project", settings.activeProject},
                   {"connections", Json::array()},
@@ -1582,6 +1583,9 @@ Json Backend::execute(const std::string &m, const Json &a) {
   if (m == "policy.presence")
     return agentPresence(a.at("kind").get<std::string>(), a.value("lastSeen", int64_t(0)),
                          a.value("live", false), a.at("now").get<int64_t>());
+  if (m == "policy.controllerView")
+    return controllerView(a.at("agent"), a.value("batches", Json::array()),
+                          a.value("runs", Json::array()));
   if (m == "policy.classify")
     return {{"classification", classifySource(a.at("source").get<std::string>())}};
   if (m == "policy.statistics") {

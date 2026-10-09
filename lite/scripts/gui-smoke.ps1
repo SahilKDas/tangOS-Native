@@ -59,6 +59,7 @@ foreach ($image in @('controller-reference-idle', 'controller-cart')) {
 }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'controller-cart-report.txt') -Raw).StartsWith('PASS')) { throw 'Simple-mode cart workflow failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'controller-advanced-report.txt') -Raw).StartsWith('PASS')) { throw 'Advanced Controller workflow failed' }
+if (-not (Get-Content -LiteralPath (Join-Path $fixture 'controller-view-report.txt') -Raw).StartsWith('PASS')) { throw 'Controller live telemetry workflow failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'module-window-report.txt') -Raw).StartsWith('PASS')) { throw 'Native module-window layout failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'report-overlay-report.txt') -Raw).StartsWith('PASS')) { throw 'Native report overlay workflow failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'remote-viewer-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Remote viewer workflow failed' }

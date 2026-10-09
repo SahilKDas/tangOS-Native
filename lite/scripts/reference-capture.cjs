@@ -1,6 +1,6 @@
 // Development-only: use an existing browser and externally installed Playwright.
 const path = require('path');
-const [playwrightModule, browserPath, outputDir, baseUrl = 'http://127.0.0.1:8765/'] = process.argv.slice(2);
+const [playwrightModule, browserPath, outputDir, baseUrl = 'http://127.0.0.1:8765/', captureMode = 'all'] = process.argv.slice(2);
 if (!playwrightModule || !browserPath || !outputDir) {
   throw new Error('Usage: node reference-capture.cjs <playwright-module> <browser-executable> <output-dir> [loopback-url]');
 }
@@ -20,7 +20,8 @@ const { chromium } = require(path.resolve(playwrightModule));
     const controllerGeometry = {};
     for (const selector of ['.controller', '.controller .head', '.ctl-grid', '.ai-box', '.aib-task',
                             '.aib-size', '.aib-go', '.aib-idle', '.aib-name', '.aib-top .status-dot',
-                            '.aib-kind', '.ctl-footer', '.ctl-foot-mid', '.ctl-foot-mid .tb-btn']) {
+                            '.aib-kind', '.aib-task-label', '.aib-prog', '.aib-bar', '.aib-note',
+                            '.aib-live', '.aib-stats', '.ctl-footer', '.ctl-foot-mid', '.ctl-foot-mid .tb-btn']) {
       controllerGeometry[selector] = await page.locator(selector).evaluateAll(elements => elements.map(element => {
         const bounds = element.getBoundingClientRect();
         const style = getComputedStyle(element);
@@ -31,6 +32,11 @@ const { chromium } = require(path.resolve(playwrightModule));
     }
     require('fs').writeFileSync(path.resolve(outputDir, 'controller-geometry.json'), JSON.stringify(controllerGeometry, null, 2));
     await page.screenshot({ path: path.resolve(outputDir, 'controller.png') });
+    if (captureMode === 'controller') {
+      console.log(JSON.stringify({ errors, calls: await page.evaluate(() => window.__referenceCalls) }));
+      if (errors.length) throw new Error('Original Controller reference reported errors');
+      return;
+    }
     await page.getByTitle('Report a bug', { exact: true }).click();
     await page.locator('.bug-report').waitFor();
     const reportGeometry = {};

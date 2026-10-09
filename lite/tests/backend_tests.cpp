@@ -1,6 +1,7 @@
 #include "backend.h"
 #include "images.h"
 #include "activity.h"
+#include "controller_view.h"
 #include <windows.h>
 #include "repository.h"
 #include <iostream>
@@ -27,6 +28,41 @@ int main() {
     expect(threw, msg);
   };
   try {
+    {
+      ActivityBus bus;
+      std::string largeOutput(190000, 'x');
+      largeOutput += "\nport/fixture.cpp:42: latest diagnostic\n";
+      for (int i = 0; i < 50; ++i)
+        bus.publish({{"kind", "run-started"},
+                     {"run",
+                      {{"runId", std::to_string(i)},
+                       {"repository", utf8(repo.wstring())},
+                       {"source", "ai"},
+                       {"client", {{"name", "Fixture"}}},
+                       {"startedAt", i / 2},
+                       {"label", std::to_string(i)},
+                       {"status", "finished"},
+                       {"output", largeOutput}}}});
+      bus.publish({{"kind", "run-started"},
+                   {"run",
+                    {{"runId", "other"},
+                     {"repository", utf8((dir / "other").wstring())},
+                     {"source", "ai"},
+                     {"client", {{"name", "Fixture"}}},
+                     {"startedAt", 100},
+                     {"status", "running"},
+                     {"output", "wrong repository"}}}});
+      auto compact = bus.controllerSnapshot(utf8(repo.wstring()));
+      expect(compact.size() == 1 && compact[0].at("label") == "49" &&
+                 compact[0].at("output").get<std::string>().size() <= 1600,
+             "Controller telemetry selects latest tied run and bounds output copying");
+      auto agent = Json{{"name", "Fixture"}, {"stats", Json::object()}};
+      expect(controllerView(agent, Json::array(), compact) ==
+                 controllerView(agent, Json::array(), bus.snapshot(utf8(repo.wstring()))),
+             "bounded Controller cache preserves original latest-line semantics");
+      expect(bus.snapshot(utf8(repo.wstring()))[0].at("output") == largeOutput,
+             "Controller cache does not truncate retained complete activity");
+    }
     Runner git;
     expect(git.run({{"git", "init", "-b", "main"}, repo}).code == 0, "init");
     write(repo / "README.md", "backend fixture\n");

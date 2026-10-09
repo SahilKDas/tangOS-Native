@@ -4,6 +4,7 @@
 #include "viewer.h"
 #include "backend.h"
 #include "activity.h"
+#include "controller_view.h"
 #include "client_setup.h"
 #include "network.h"
 #include "report_dialog.h"
@@ -298,6 +299,7 @@ struct ConsoleUI::Impl {
   std::string cloneUrl, cloneDestination;
   Json cloneArguments;
   Json agentStats = Json::object(), pendingStats;
+  Json controllerViews = Json::object();
   Json sessionAgentStats = Json::object(), pendingSessionStats;
   HWND detailScope = nullptr, detailModel = nullptr, detailRuns = nullptr,
        detailRunOutput = nullptr;
@@ -533,6 +535,15 @@ struct ConsoleUI::Impl {
   void refreshAgents() {
     if (fleet)
       agents = fleet->snapshot();
+    if (fleet && screen == Screen::controller) {
+      auto batches = fleet->batches();
+      auto runs = activityBus().controllerSnapshot(utf8(repository.wstring()));
+      controllerViews = Json::object();
+      for (auto &agent : agents)
+        controllerViews[agent.id] = controllerView(
+            {{"name", agent.spec.name}, {"stats", agentStats.value(agent.id, Json::object())}},
+            batches, runs);
+    }
     if (selectedId.empty() && !agents.empty())
       selectedId = agents[0].id;
   }
@@ -675,6 +686,7 @@ struct ConsoleUI::Impl {
                      base + 4, x + 13, y + h - (advancedMode ? 48 : 55) - cartOffset, 58,
                      advancedMode ? 30 : 44, ES_AUTOHSCROLL | ES_CENTER);
             skin::controlFont(profileFields[a.id + "Count"], 15, 800);
+            skin::compactEdit(profileFields[a.id + "Count"]);
             if (!advancedMode)
               SendMessageW(profileFields[a.id + "Count"], EM_SETCUEBANNER, TRUE,
                            reinterpret_cast<LPARAM>(L"∞"));
@@ -711,6 +723,7 @@ struct ConsoleUI::Impl {
             int roleWidth = w - 26 - (effortVisible ? 93 : api ? 51 : 0);
             profileFields[a.id + "Role"] = combo(roles, base + 2, x + 13, roleY, roleWidth, 0);
             skin::controlFont(profileFields[a.id + "Role"], 11);
+            skin::compactCombo(profileFields[a.id + "Role"], held.empty());
             auto effortAt = int(
                 std::find(efforts.begin(), efforts.end(), policy.at("current").get<std::string>()) -
                 efforts.begin());
@@ -718,17 +731,20 @@ struct ConsoleUI::Impl {
               profileFields[a.id + "Effort"] =
                   combo(efforts, base + 3, x + w - 101, roleY, 88, effortAt);
               skin::controlFont(profileFields[a.id + "Effort"], 11);
+              skin::compactCombo(profileFields[a.id + "Effort"]);
             }
             if (api) {
               profileFields[a.id + "Attempts"] = edit(
                   std::to_string(a.spec.attempts), base + 8, effortVisible ? x + 13 : x + w - 59,
                   roleY + (effortVisible ? 30 : 0), 46, 22, ES_AUTOHSCROLL | ES_CENTER);
               skin::controlFont(profileFields[a.id + "Attempts"], 11, 800);
+              skin::compactEdit(profileFields[a.id + "Attempts"]);
             }
             profileFields[a.id + "Count"] =
                 edit(a.spec.loop ? std::string() : std::to_string(a.spec.count), base + 4, x + 13,
                      rowY, 54, 26, ES_AUTOHSCROLL | ES_CENTER);
             skin::controlFont(profileFields[a.id + "Count"], 11, 800);
+            skin::compactEdit(profileFields[a.id + "Count"]);
             SendMessageW(profileFields[a.id + "Count"], EM_SETCUEBANNER, TRUE,
                          reinterpret_cast<LPARAM>(a.spec.loop ? L"∞" : L"16"));
             EnableWindow(profileFields[a.id + "Count"], !a.spec.loop);
@@ -2532,10 +2548,6 @@ struct ConsoleUI::Impl {
           colorHash = colorHash * 31 + uint16_t(c);
         auto tint = palette[colorHash % 12];
         skin::agentCard(dc, x, y, w, h, tint);
-        bool connected = false;
-        for (auto &client : presence)
-          if (client.value("agentId", std::string()) == a.id)
-            connected = true;
         auto dot = agentPresence(a.spec.kind, lastAgentSignal[a.id], a.active,
                                  std::time(nullptr) * int64_t(1000));
         skin::presenceDot(dc, x + 13, y + 20, dot, 9);
@@ -2566,6 +2578,9 @@ struct ConsoleUI::Impl {
           int rowY = h - (drive ? 76 : 36) - (!cart.empty() ? 33 : 0);
           taskHeight = a.active ? h - 88 : std::max(40, rowY - (extraAttempts ? 60 : 33) - 52);
         }
+        bool hasStats = stat.value("attempts", 0) > 0 || stat.value("nearMisses", 0) > 0;
+        if (hasStats)
+          taskHeight = std::max(40, taskHeight - 23);
         skin::panel(dc, x + 13, y + 44, w - 26, taskHeight, false, skin::PanelStyle::task);
         auto role = automaticRole(
             {{"name", a.spec.name},
@@ -2574,25 +2589,76 @@ struct ConsoleUI::Impl {
              {"stats", agentStats.value(a.id, Json::object())},
              {"hiddenRole",
               agentStats.value(a.id, Json::object()).value("adaptiveRole", std::string())}});
-        bool pristine =
-            !a.active && a.detail.empty() && a.lastLine.empty() && a.total == 0 && a.queue.empty();
+        auto view = controllerViews.value(a.id, Json::object());
+        auto task = view.value("task", std::string());
+        if (task.empty() && !a.detail.empty())
+          task = a.detail;
+        auto liveLine = view.value("liveLine", std::string());
+        if (liveLine.empty())
+          liveLine = a.lastLine;
+        auto batch = view.value("batch", Json::object());
+        auto note = batch.value("note", std::string());
+        int total = view.value("total", 0), analyzed = view.value("analyzed", 0);
+        int percent = total ? int(std::floor(double(analyzed) / total * 100 + .5)) : 0;
+        bool pristine = task.empty();
         int taskClip = SaveDC(dc);
         IntersectClipRect(dc, x + 14, y + 45, x + w - 14, y + 43 + taskHeight);
-        skin::label(dc,
-                    wide(a.detail.empty() ? advancedMode ? "idle - ready to assign"
-                                                         : "idle - will run as " +
-                                                               role.at("role").get<std::string>()
-                                          : a.detail),
-                    x + 24, y + (pristine ? 44 + (taskHeight - 16) / 2 : 54), w - 48,
-                    pristine ? 18 : 56, 12, false, true, false, CLR_INVALID, pristine);
-        skin::label(dc, wide(a.lastLine), x + 22, y + 108, w - 44, 24, 11, false, true);
-        if (!pristine)
-          skin::label(dc,
-                      wide(a.spec.kind + " · " + (connected ? "connected" : a.phase) + " · " +
-                           std::to_string(a.completed) + "/" + std::to_string(a.total) + " · " +
-                           std::to_string(a.queue.size()) + " queued"),
-                      x + 14, y + h - (advancedMode ? 154 : 80), w - 28, 24, 11, false, true);
+        if (pristine) {
+          auto idle = a.phase == "exhausted" ? std::string("⚠ out of usage - auto-stopped")
+                      : dot == "offline" && a.spec.kind != "api" ? std::string("offline")
+                      : advancedMode ? std::string("idle - ready to assign")
+                                     : "idle - will run as " + role.at("role").get<std::string>();
+          skin::label(dc, wide(idle), x + 24, y + 44 + (taskHeight - 16) / 2, w - 48, 18, 12, false,
+                      true, false, CLR_INVALID, true);
+        } else {
+          if (view.value("batchDone", false) && !a.spec.loop)
+            task += " ✓ done";
+          int rows = 1 + (total > 0) + !note.empty() + !liveLine.empty();
+          // The original flex column can shrink its overflow-hidden task/live text to zero;
+          // progress and note retain natural heights, even when that overflows the panel.
+          double labelHeight = 17, liveHeight = liveLine.empty() ? 0 : 13;
+          double fixed = (total > 0 ? 15 : 0) + (note.empty() ? 0 : 25) + (rows - 1) * 6;
+          double available = std::max(0., taskHeight - 18. - fixed);
+          double shrink = std::min(1., available / (labelHeight + liveHeight));
+          labelHeight *= shrink;
+          liveHeight *= shrink;
+          double rowAt = y + 53 + (taskHeight - 18. - fixed - labelHeight - liveHeight) / 2;
+          int rowY = int(std::round(rowAt));
+          skin::taskText(dc, wide(task), x + 24, rowY, w - 48, int(std::round(labelHeight)));
+          rowAt += labelHeight + 6;
+          rowY = int(std::round(rowAt));
+          if (total > 0) {
+            auto tally = wide(std::to_string(analyzed) + "/" + std::to_string(total) +
+                              " analyzed · " + std::to_string(percent) + "%");
+            int tallyWidth = skin::textWidth(dc, tally, 11, 700);
+            int barWidth = std::max(6, w - 48 - tallyWidth - 8);
+            skin::progressBar(dc, x + 24, rowY + 5, barWidth, percent, tint);
+            skin::label(dc, tally, x + 32 + barWidth, rowY, tallyWidth, 16, 11, false, true, false,
+                        CLR_INVALID, false, 700);
+            rowAt += 21;
+            rowY = int(std::round(rowAt));
+          }
+          if (!note.empty()) {
+            skin::taskNote(dc, wide(note), x + 24, rowY, w - 48);
+            rowAt += 31;
+            rowY = int(std::round(rowAt));
+          }
+          if (!liveLine.empty())
+            skin::taskText(dc, wide("▸ " + liveLine), x + 24, rowY, w - 48,
+                           int(std::round(liveHeight)), true, true);
+        }
         RestoreDC(dc, taskClip);
+        if (hasStats) {
+          std::string tally;
+          if (stat.value("attempts", 0) > 0)
+            tally =
+                std::to_string(int(std::floor(stat.value("hitRate", 0.0) * 100 + .5))) + "% hit";
+          if (stat.value("nearMisses", 0) > 0)
+            tally += (tally.empty() ? "" : "   ") + std::to_string(stat.value("nearMisses", 0)) +
+                     " near";
+          skin::label(dc, wide(tally), x + 13, y + 44 + taskHeight + 8, w - 26, 15, 11, false,
+                      false, false, CLR_INVALID, false, 700);
+        }
         hits.push_back({b, int(i)});
       }
       if (controllerNeedsRail()) {
@@ -4603,11 +4669,13 @@ struct ConsoleUI::Impl {
       case WM_CTLCOLOREDIT:
       case WM_CTLCOLORLISTBOX:
         SetTextColor((HDC)w, skin::text());
-        SetBkColor((HDC)w, skin::field());
+        SetBkColor((HDC)w,
+                   GetPropW((HWND)l, L"TangOSCompactEdit") ? skin::compactField() : skin::field());
         SetBkMode((HDC)w, OPAQUE);
         if (self->fieldBrush)
           DeleteObject(self->fieldBrush);
-        self->fieldBrush = CreateSolidBrush(skin::field());
+        self->fieldBrush = CreateSolidBrush(
+            GetPropW((HWND)l, L"TangOSCompactEdit") ? skin::compactField() : skin::field());
         return (LRESULT)self->fieldBrush;
       case WM_MOUSELEAVE:
         self->hoveredFunction = SIZE_MAX;
@@ -5235,6 +5303,29 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
       if (IntersectRect(&overlap, &scope, &mcp))
         throw std::runtime_error("Advanced MCP button overlaps statistics scope");
       capture(directory / "controller-reference-advanced.bmp");
+      auto keyboardCount = impl->profileFields.at(referenceId + "Count");
+      SendMessageW(keyboardCount, EM_SETSEL, 0, -1);
+      SendMessageW(keyboardCount, WM_CHAR, '7', 1);
+      if (text(keyboardCount) != "7")
+        throw std::runtime_error("Compact count lost native keyboard editing");
+      SendMessageW(keyboardCount, WM_KILLFOCUS, 0, 0);
+      bool savedKeyboardCount = false;
+      for (auto &agent : impl->fleet->snapshot())
+        if (agent.id == referenceId)
+          savedKeyboardCount = agent.spec.count == 7;
+      if (!savedKeyboardCount)
+        throw std::runtime_error("Compact count lost native focus-based persistence");
+      setText(keyboardCount, "16");
+      SendMessageW(keyboardCount, WM_KILLFOCUS, 0, 0);
+      auto keyboardRole = impl->profileFields.at(referenceId + "Role");
+      RECT keyboardBounds{};
+      GetWindowRect(keyboardRole, &keyboardBounds);
+      if (keyboardBounds.bottom - keyboardBounds.top != 26)
+        throw std::runtime_error("Compact role field must keep the measured 26-pixel height");
+      SendMessageW(keyboardRole, WM_KEYDOWN, VK_DOWN, 1);
+      if (assignedRoles(impl->activeAgent()->spec) != Args{"Hard matcher"})
+        throw std::runtime_error("Compact role field lost native arrow-key selection");
+      impl->action(5010, BN_CLICKED);
       for (auto &role : Args{"Drafter", "Refiner"}) {
         auto picker = impl->profileFields.at(referenceId + "Role");
         auto index = SendMessageW(picker, CB_FINDSTRINGEXACT, WPARAM(-1),
@@ -5358,6 +5449,31 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     impl->advancedMode = previousMode;
     for (auto &id : extraAgents)
       impl->fleet->remove(id);
+    impl->navigate(Screen::controller);
+    auto selectedView = impl->controllerViews.at(impl->selectedId);
+    if (selectedView.value("total", 0) != 1 || selectedView.value("analyzed", 0) != 1 ||
+        !selectedView.value("batchDone", false) ||
+        selectedView.value("liveLine", std::string()).empty())
+      throw std::runtime_error("Controller did not retain completed batch progress and output");
+    capture(directory / "controller-completed-progress.bmp");
+    auto previousSessionStats = impl->sessionAgentStats;
+    bool previousLifetime = impl->controllerLifetime;
+    impl->controllerLifetime = false;
+    impl->sessionAgentStats[impl->selectedId] = {
+        {"attempts", 2}, {"declaredMatches", 1}, {"hitRate", .5}, {"nearMisses", 1}};
+    for (bool advanced : {false, true}) {
+      impl->advancedMode = advanced;
+      impl->build();
+      capture(directory /
+              (advanced ? "controller-telemetry-advanced.bmp" : "controller-telemetry-simple.bmp"));
+    }
+    impl->sessionAgentStats = previousSessionStats;
+    impl->controllerLifetime = previousLifetime;
+    impl->advancedMode = previousMode;
+    write(directory / "controller-view-report.txt",
+          "PASS: real isolated CLI batch, all attempted targets advance progress, completed batch "
+          "retains its task and output, conditional hit/near statistics in both UI modes, original "
+          "Controller view semantics");
     impl->navigate(Screen::detail);
     impl->detailPoll = 0;
     impl->tick();
