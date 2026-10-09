@@ -987,6 +987,10 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     skin::iconButton(toolbarKeys, skin::Icon::key);
     controllerTab = control(L"BUTTON", L"Chaos Controller", WS_TABSTOP, CONTROLLER_TAB);
     repositoryTab = control(L"BUTTON", L"Chaos Viewer", WS_TABSTOP, REPOSITORY_TAB);
+    SetPropW(h, L"TangOSTourToggleStart", controllerTab);
+    SetPropW(h, L"TangOSTourToggleEnd", repositoryTab);
+    SetPropW(h, L"TangOSTourSettings", toolbarSettings);
+    SetPropW(h, L"TangOSTourKeyVault", toolbarKeys);
     toolboxButton = control(L"BUTTON", L"Encyclopedia", WS_TABSTOP, TOOLBOX);
     fieldBrush = CreateSolidBrush(skin::field());
     SetTimer(h, 1, 200, nullptr);

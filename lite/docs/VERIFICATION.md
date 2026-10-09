@@ -1,5 +1,16 @@
 # Windows release verification — 2026-10-09
 
+## Post-0.23.0 source checkpoint
+
+The native floating helper, root-level guided tour, eased progress, active
+configuration deferral and stopping controls passed all five CTest suites
+(236.85 seconds). The expanded native GUI workflow exited successfully with
+14 responsive timer ticks, retained check logs, centered/spotlight tour captures,
+floating-tip captures and the display/theme matrix. Evidence is under
+`lite/out/gui-tour-final-024`. Development-only original tour captures reported
+no page errors. These source changes have not yet replaced the verified 0.23.0
+portable package below.
+
 ## 0.23.0 verified portable package — 2026-10-09
 
 Release source checkpoint **707b7a7** passed two clean Windows x64 builds with

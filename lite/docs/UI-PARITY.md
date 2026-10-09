@@ -1,5 +1,20 @@
 # Console parity audit
 
+## Floating help, tour and active Controller checkpoint
+
+The native helper now preserves announcement read state, opens floating editable
+tips beside Tango, supports circular navigation and click bounce, and anchors to
+the root window. The first-run/replay tour overlays the existing screen, resolves
+real control spotlights, supports keyboard navigation and preserves focus.
+Simple mode running cards use a full-width Stop button and disable it while
+stopping. Progress follows the reference 300 ms easing. Live role/count/effort
+changes apply to the next batch without replacing the running instructions.
+
+All five native suites and the expanded GUI workflow passed on 2026-10-09.
+Original Controller, helper and tour captures were made with a loopback-only
+development renderer. Exact animation, background and auxiliary layout parity
+remain under comparison; this checkpoint does not establish full pixel parity.
+
 ## Project / batch / support workflow checkpoint
 
 Discovery retains project glyphs and the project menu shows them. Existing

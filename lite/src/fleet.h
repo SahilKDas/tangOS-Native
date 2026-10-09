@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <optional>
 namespace lite {
 class Vault {
   fs::path directory;
@@ -32,6 +33,8 @@ struct AgentState {
   Json observed = Json::array();
   int completed = 0, total = 0;
   bool active = false;
+  bool configurationPending = false;
+  bool stopping = false;
 };
 Json agentJson(const AgentState &agent);
 Args assignedRoles(const AgentSpec &spec);
@@ -40,6 +43,7 @@ class Fleet {
   struct Job {
     AgentState state;
     std::string runtimeRole, executionRole;
+    std::optional<AgentSpec> nextSpec;
     Runner runner;
     std::thread worker;
     std::atomic<bool> active{false};
@@ -57,6 +61,7 @@ class Fleet {
   BatchBook batchBook;
   HANDLE controllerOwnership = INVALID_HANDLE_VALUE;
   void saveLocked();
+  void applyConfigurationLocked(const std::shared_ptr<Job> &job);
   void drive(const std::shared_ptr<Job> &job, bool execute);
   std::string chooseRole(const std::shared_ptr<Job> &job);
   Json schedule(const std::shared_ptr<Job> &job, const fs::path &cwd);

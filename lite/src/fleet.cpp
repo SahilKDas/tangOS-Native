@@ -79,6 +79,8 @@ static Json specJson(const AgentSpec &s) {
 }
 Json agentJson(const AgentState &s) {
   return {{"spec", specJson(s.spec)},
+          {"configuration_pending", s.configurationPending},
+          {"stopping", s.stopping},
           {"id", s.id},
           {"phase", s.phase},
           {"detail", s.detail},
@@ -169,6 +171,11 @@ Fleet::Fleet(fs::path repo, fs::path dir, Descriptor desc, Settings prefs, Sink 
     for (auto &j : persisted.at("agents")) {
       auto job = std::make_shared<Job>();
       job->state = parseAgent(j);
+      if (j.contains("next_spec")) {
+        auto next = j;
+        next["spec"] = j.at("next_spec");
+        job->state.spec = parseAgent(next).spec;
+      }
       if (job->state.results.empty())
         job->state.results = directory / fs::u8path(job->state.id) / "results.output";
       for (auto &path :
@@ -213,8 +220,12 @@ Fleet::~Fleet() {
 }
 void Fleet::saveLocked() {
   Json j = {{"version", 1}, {"repository", utf8(repository.wstring())}, {"agents", Json::array()}};
-  for (auto &item : jobs)
-    j["agents"].push_back(agentJson(item.second->state));
+  for (auto &item : jobs) {
+    auto state = agentJson(item.second->state);
+    if (item.second->nextSpec)
+      state["next_spec"] = specJson(*item.second->nextSpec);
+    j["agents"].push_back(state);
+  }
   j["batchBook"] = batchBook.serialize();
   auto temp = directory / "fleet.tmp";
   write(temp, j.dump(2));
@@ -256,8 +267,6 @@ std::string Fleet::add(AgentSpec spec) {
 void Fleet::configure(const std::string &id, AgentSpec spec) {
   std::lock_guard<std::mutex> lock(mutex);
   auto j = jobs.at(id);
-  if (j->active)
-    throw std::runtime_error("Stop agent before changing configuration");
   spec.name = trim(spec.name);
   for (auto &entry : jobs)
     if (entry.first != id && agentNameKey(entry.second->state.spec.name) == agentNameKey(spec.name))
@@ -265,8 +274,27 @@ void Fleet::configure(const std::string &id, AgentSpec spec) {
   auto s = j->state;
   s.spec = std::move(spec);
   s.spec = parseAgent(agentJson(s)).spec;
+  if (j->active) {
+    auto current = specJson(j->state.spec), next = specJson(s.spec);
+    for (auto key : {"role", "roles", "effort", "count", "attempts", "loop"}) {
+      current.erase(key);
+      next.erase(key);
+    }
+    if (current != next)
+      throw std::runtime_error("Stop agent before changing its driver, identity or connection");
+    j->nextSpec = s.spec;
+    saveLocked();
+    return;
+  }
+  j->nextSpec.reset();
   j->state = s;
   saveLocked();
+}
+void Fleet::applyConfigurationLocked(const std::shared_ptr<Job> &job) {
+  if (job->nextSpec) {
+    job->state.spec = std::move(*job->nextSpec);
+    job->nextSpec.reset();
+  }
 }
 void Fleet::remove(const std::string &id) {
   stop(id);
@@ -287,7 +315,12 @@ std::vector<AgentState> Fleet::snapshot() const {
   std::vector<AgentState> out;
   for (auto &item : jobs) {
     auto s = item.second->state;
+    if (item.second->nextSpec) {
+      s.spec = *item.second->nextSpec;
+      s.configurationPending = true;
+    }
     s.active = item.second->active;
+    s.stopping = s.active && item.second->runner.isCancelled();
     out.push_back(s);
   }
   return out;
@@ -688,6 +721,8 @@ void Fleet::stop(const std::string &id) {
   if (job->requestRunner)
     job->requestRunner->cancel();
   job->state.spec.loop = false;
+  if (job->nextSpec)
+    job->nextSpec->loop = false;
   if (job->state.spec.kind == "mcp" && !job->externalTask) {
     job->active = false;
     job->state.phase = "cancelled";
@@ -706,6 +741,8 @@ void Fleet::stopExternal() {
       job->requestRunner->cancel();
     batchBook.park(item.first, "Stopped; partial work and complete logs retained");
     job->state.spec.loop = false;
+    if (job->nextSpec)
+      job->nextSpec->loop = false;
     if (!job->externalTask && job->active) {
       job->active = false;
       job->state.phase = "cancelled";
@@ -720,6 +757,8 @@ void Fleet::stopAll() {
     if (item.second->requestRunner)
       item.second->requestRunner->cancel();
     item.second->state.spec.loop = false;
+    if (item.second->nextSpec)
+      item.second->nextSpec->loop = false;
     if (item.second->state.spec.kind == "mcp" && !item.second->externalTask) {
       item.second->active = false;
       item.second->state.phase = "cancelled";
@@ -743,6 +782,10 @@ void Fleet::start(const std::string &id, bool execute) {
   }
   if (job->worker.joinable())
     job->worker.join();
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    applyConfigurationLocked(job);
+  }
   job->runner.reset();
   job->executionRole.clear();
   job->active = true;
@@ -973,6 +1016,10 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
     }
     int quickFailStreak = 0;
     do {
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        applyConfigurationLocked(job);
+      }
       update("scheduling", "Preparing instructions and worklist");
       Json rows;
       {
@@ -1238,6 +1285,8 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
           {
             std::lock_guard<std::mutex> lock(mutex);
             job->state.spec.loop = false;
+            if (job->nextSpec)
+              job->nextSpec->loop = false;
             batchBook.park(id, usage.at("reason"));
           }
           update("exhausted", usage.at("reason"));
@@ -1291,6 +1340,8 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
         {
           std::lock_guard<std::mutex> lock(mutex);
           job->state.spec.loop = false;
+          if (job->nextSpec)
+            job->nextSpec->loop = false;
           batchBook.park(job->state.id,
                          "Driver results report no attempted targets; pending work retained");
         }
@@ -1302,7 +1353,8 @@ void Fleet::drive(const std::shared_ptr<Job> &job, bool execute) {
       bool again;
       {
         std::lock_guard<std::mutex> lock(mutex);
-        again = job->state.spec.loop || !job->state.queue.empty();
+        again = (job->nextSpec ? job->nextSpec->loop : job->state.spec.loop) ||
+                !job->state.queue.empty();
       }
       if (!again)
         break;

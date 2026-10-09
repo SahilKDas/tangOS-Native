@@ -1,5 +1,7 @@
 #include "console_ui.h"
 #include "help.h"
+#include "helper_overlay.h"
+#include "tour_overlay.h"
 #include "atlas_layout.h"
 #include "viewer.h"
 #include "backend.h"
@@ -196,6 +198,9 @@ struct ConsoleUI::Impl {
   std::string descriptorError;
   std::unique_ptr<Fleet> fleet;
   std::unique_ptr<ReportDialog> report;
+  std::unique_ptr<HelperOverlay> helper;
+  std::unique_ptr<TourOverlay> tourOverlay;
+  bool initialTourPending = false;
   std::unique_ptr<McpServer> mcp, pendingMcp;
   std::thread mcpWorker;
   std::atomic<bool> mcpBusy{false}, mcpReady{false};
@@ -235,6 +240,11 @@ struct ConsoleUI::Impl {
   std::vector<std::string> cardIds;
   std::map<std::string, bool> cardActive;
   std::map<std::string, size_t> cardQueued;
+  struct ProgressMotion {
+    double from = 0, target = 0;
+    ULONGLONG at = 0;
+  };
+  std::map<std::string, ProgressMotion> progressMotion;
   size_t pickedFunction = SIZE_MAX;
   HWND batchList = nullptr, batchTitle = nullptr, batchPrompt = nullptr;
   Json batchRows = Json::array(), draftRows = Json::array();
@@ -431,9 +441,17 @@ struct ConsoleUI::Impl {
                              14, 66, 800, 720, parent, nullptr, wc.hInstance, this);
     fieldBrush = CreateSolidBrush(skin::field());
     SetTimer(window, 1, 50, nullptr);
+    helper = std::make_unique<HelperOverlay>(parent, window, data, viewerOnly);
+    auto tourPrefs = fs::exists(data / "console-ui.json")
+                         ? Json::parse(read(data / "console-ui.json"), nullptr, false)
+                         : Json::object();
+    initialTourPending = !viewerOnly && !remoteOnly && descriptorError.empty() &&
+                         (!tourPrefs.is_object() || !tourPrefs.value("tourSeen", false));
     build();
   }
   ~Impl() {
+    tourOverlay.reset();
+    helper.reset();
     report.reset();
     if (settingsPopover)
       DestroyWindow(settingsPopover);
@@ -564,6 +582,46 @@ struct ConsoleUI::Impl {
     scroll = 0;
     build();
   }
+  void openTourOverlay() {
+    initialTourPending = false;
+    tourOverlay.reset();
+    if (helper)
+      helper->position(width, height, false);
+    tourOverlay = std::make_unique<TourOverlay>(
+        parent, data, [this](const std::string &selector) -> std::optional<RECT> {
+          std::vector<HWND> targets;
+          if (selector == "[data-tour=\"toggle\"]")
+            targets = {reinterpret_cast<HWND>(GetPropW(parent, L"TangOSTourToggleStart")),
+                       reinterpret_cast<HWND>(GetPropW(parent, L"TangOSTourToggleEnd"))};
+          else if (selector == "[data-tour=\"settings\"]")
+            targets = {reinterpret_cast<HWND>(GetPropW(parent, L"TangOSTourSettings"))};
+          else if (selector == "[data-tour=\"keyvault\"]")
+            targets = {reinterpret_cast<HWND>(GetPropW(parent, L"TangOSTourKeyVault"))};
+          else if (selector == "[data-tour=\"mcp\"]")
+            targets = {GetDlgItem(window, OPEN_MCP)};
+          else if (selector == "[data-tour=\"policies\"]")
+            targets = {GetDlgItem(window, CONTROLLER_WRITES), GetDlgItem(window, CONTROLLER_REVIEW),
+                       GetDlgItem(window, CONTROLLER_PUSH)};
+          else if (selector == "[data-tour=\"controller\"]" && screen == Screen::controller) {
+            POINT origin{};
+            MapWindowPoints(window, parent, &origin, 1);
+            return RECT{origin.x, origin.y, origin.x + controllerWidth(), origin.y + height};
+          }
+          std::optional<RECT> result;
+          for (auto control : targets) {
+            if (!IsWindow(control) || !(GetWindowLongPtrW(control, GWL_STYLE) & WS_VISIBLE))
+              continue;
+            RECT bounds{};
+            GetWindowRect(control, &bounds);
+            MapWindowPoints(nullptr, parent, reinterpret_cast<POINT *>(&bounds), 2);
+            if (result)
+              UnionRect(&*result, &*result, &bounds);
+            else
+              result = bounds;
+          }
+          return result;
+        });
+  }
   bool controllerNeedsRail() const {
     auto req = descriptor.document.value("requirements", Json::object());
     if (!req.empty())
@@ -676,12 +734,11 @@ struct ConsoleUI::Impl {
               auto chip = control(L"BUTTON", roles[role] + " ×", base + 10 + int(role), chipX,
                                   y + 14, chipWidth, 22);
               skin::roleChip(chip);
-              EnableWindow(chip, !a.active);
               chipX += chipWidth + 7;
             }
             ReleaseDC(window, dc);
           }
-          if (!advancedMode) {
+          if (!advancedMode && !a.active) {
             profileFields[a.id + "Count"] =
                 edit(!advancedMode && a.spec.loop ? std::string() : std::to_string(a.spec.count),
                      base + 4, x + 13, y + h - (advancedMode ? 48 : 55) - cartOffset, 58,
@@ -705,9 +762,11 @@ struct ConsoleUI::Impl {
               skin::buttonFont(cartButton, 12);
             }
           } else if (a.active) {
-            auto stop = control(L"BUTTON", "Stop", base, x + 13, y + h - 36, w - 26, 26);
+            auto stop = control(L"BUTTON", a.stopping ? "Stopping…" : "Stop", base, x + 13,
+                                y + h - (advancedMode ? 36 : 55), w - 26, advancedMode ? 26 : 44);
             skin::iconTextButton(stop, skin::Icon::stop);
-            skin::buttonFont(stop, 11);
+            skin::buttonFont(stop, advancedMode ? 11 : 14, advancedMode ? 700 : 800);
+            EnableWindow(stop, !a.stopping);
           } else {
             auto held = assignedRoles(a.spec);
             std::vector<std::string> roles = {held.empty() ? "assign role" : "+ add role"};
@@ -1333,6 +1392,11 @@ struct ConsoleUI::Impl {
           EnableWindow(h, FALSE);
       }
     InvalidateRect(window, nullptr, TRUE);
+    if (helper)
+      helper->position(
+          width, height,
+          !(tourOverlay && tourOverlay->open()) &&
+              (screen == Screen::controller || (screen == Screen::atlas && !fullAtlas)));
   }
   std::string settingsSummary() {
     std::string s = "Project: " + descriptor.title + "\n" + descriptor.tagline + "\n\n";
@@ -1939,7 +2003,8 @@ struct ConsoleUI::Impl {
         break;
       }
       case 7006:
-        navigate(Screen::tour);
+        DestroyWindow(settingsPopover);
+        openTourOverlay();
         break;
       case 7007:
         if (clearStatsArmedUntil > GetTickCount64()) {
@@ -2650,6 +2715,8 @@ struct ConsoleUI::Impl {
           liveLine = a.lastLine;
         auto batch = view.value("batch", Json::object());
         auto note = batch.value("note", std::string());
+        if (a.configurationPending)
+          note += (note.empty() ? "" : "\n") + std::string("Settings apply to the next batch.");
         int total = view.value("total", 0), analyzed = view.value("analyzed", 0);
         int percent = total ? int(std::floor(double(analyzed) / total * 100 + .5)) : 0;
         bool pristine = task.empty();
@@ -2669,7 +2736,8 @@ struct ConsoleUI::Impl {
           // The original flex column can shrink its overflow-hidden task/live text to zero;
           // progress and note retain natural heights, even when that overflows the panel.
           double labelHeight = 17, liveHeight = liveLine.empty() ? 0 : 13;
-          double fixed = (total > 0 ? 15 : 0) + (note.empty() ? 0 : 25) + (rows - 1) * 6;
+          int noteHeight = note.empty() ? 0 : skin::taskNoteHeight(dc, wide(note), w - 48);
+          double fixed = (total > 0 ? 15 : 0) + noteHeight + (rows - 1) * 6;
           double available = std::max(0., taskHeight - 18. - fixed);
           double shrink = std::min(1., available / (labelHeight + liveHeight));
           labelHeight *= shrink;
@@ -2684,7 +2752,15 @@ struct ConsoleUI::Impl {
                               " analyzed · " + std::to_string(percent) + "%");
             int tallyWidth = skin::textWidth(dc, tally, 11, 700);
             int barWidth = std::max(6, w - 48 - tallyWidth - 8);
-            skin::progressBar(dc, x + 24, rowY + 5, barWidth, percent, tint);
+            auto now = GetTickCount64();
+            auto &motion = progressMotion[a.id];
+            double shown = controllerProgress(motion.from, motion.target, double(now - motion.at));
+            if (motion.target != percent) {
+              motion = {shown, double(percent), now};
+            }
+            if (!skin::animationEnabled())
+              shown = percent;
+            skin::progressBar(dc, x + 24, rowY + 5, barWidth, shown, tint);
             skin::label(dc, tally, x + 32 + barWidth, rowY, tallyWidth, 16, 11, false, true, false,
                         CLR_INVALID, false, 700);
             rowAt += 21;
@@ -2692,7 +2768,7 @@ struct ConsoleUI::Impl {
           }
           if (!note.empty()) {
             skin::taskNote(dc, wide(note), x + 24, rowY, w - 48);
-            rowAt += 31;
+            rowAt += noteHeight + 6;
             rowY = int(std::round(rowAt));
           }
           if (!liveLine.empty())
@@ -2727,7 +2803,6 @@ struct ConsoleUI::Impl {
           skin::label(dc, wide("tangos.json: " + descriptorError), width - 322, y2 + 8, 302, 90, 12,
                       false, true);
       }
-      skin::mascot(dc, width - 156, height - 200, 140);
     } else if (screen == Screen::atlas) {
       if (!atlasReady) {
         skin::label(dc, L"Loading atlas…", 18, 108, width - 390, 40, 15, false, true);
@@ -3823,9 +3898,7 @@ struct ConsoleUI::Impl {
       PostMessageW(parent, CONSOLE_PICK_REPO, 0, 0);
       break;
     case GUIDE:
-      tipsMode = false;
-      tourStep = 0;
-      navigate(Screen::tour);
+      openTourOverlay();
       break;
     case GITTOOLS:
       gitTools();
@@ -4255,6 +4328,17 @@ struct ConsoleUI::Impl {
     }
   }
   void tick() {
+    if (tourOverlay && !tourOverlay->open()) {
+      tourOverlay.reset();
+      if (helper)
+        helper->position(width, height,
+                         screen == Screen::controller || (screen == Screen::atlas && !fullAtlas));
+    }
+    if (initialTourPending && IsWindowVisible(parent) && IsWindowVisible(window) &&
+        screen == Screen::controller)
+      openTourOverlay();
+    if (helper)
+      helper->tick();
     if (report)
       report->tick();
     if (screen == Screen::batches && fleet && batchList && GetTickCount64() - batchPoll >= 1000) {
@@ -4523,7 +4607,8 @@ struct ConsoleUI::Impl {
             setText(add, title);
         }
         if (b) {
-          auto title = agents[i].active ? std::string("Stop")
+          auto title = agents[i].stopping ? std::string("Stopping…")
+                       : agents[i].active ? std::string("Stop")
                        : advancedMode
                            ? "Drive queue (" + std::to_string(agents[i].queue.size()) + ")"
                            : "Go";
@@ -4536,6 +4621,8 @@ struct ConsoleUI::Impl {
                                    ? !agents[i].queue.empty() &&
                                          (agents[i].spec.kind == "cli" || descriptor.role("driver"))
                                    : !agents[i].queue.empty() || descriptor.role("scheduler")));
+          if (agents[i].stopping)
+            EnableWindow(b, FALSE);
         }
       }
     std::string out;
@@ -4682,10 +4769,10 @@ struct ConsoleUI::Impl {
                   (item->CtlID == CONTROLLER_SESSION && !self->controllerLifetime) ||
                   (item->CtlID == CONTROLLER_ALL && self->controllerLifetime) ||
                   (item->CtlID >= 5000 && item->CtlID < 5000 + int(self->cardIds.size()) * 16 &&
-                   (item->CtlID - 5000) % 16 == 0 && text(item->hwndItem) != "Stop"),
+                   (item->CtlID - 5000) % 16 == 0 && text(item->hwndItem).rfind("Stop", 0) != 0),
               item->CtlID == STOP || item->CtlID == TOOL_CANCEL ||
                   (item->CtlID >= 5000 && item->CtlID < 5000 + int(self->cardIds.size()) * 16 &&
-                   (item->CtlID - 5000) % 16 == 0 && text(item->hwndItem) == "Stop"));
+                   (item->CtlID - 5000) % 16 == 0 && text(item->hwndItem).rfind("Stop", 0) == 0));
           return TRUE;
         }
         if (item->CtlType == ODT_COMBOBOX) {
@@ -4982,6 +5069,10 @@ void ConsoleUI::show(bool visible, bool atlas) {
       impl->navigate(screen);
   }
   ShowWindow(impl->window, visible ? SW_SHOW : SW_HIDE);
+  if (impl->helper)
+    impl->helper->position(impl->width, impl->height,
+                           visible && (impl->screen == Screen::controller ||
+                                       (impl->screen == Screen::atlas && !impl->fullAtlas)));
 }
 void ConsoleUI::smokeDisplay(const fs::path &directory,
                              const std::function<void(const fs::path &)> &capture) {
@@ -5063,6 +5154,8 @@ void ConsoleUI::resize(int width, int height) {
   impl->height = height;
   MoveWindow(impl->window, 14, 72, width, height, TRUE);
   impl->build();
+  if (impl->tourOverlay)
+    impl->tourOverlay->resize();
 }
 bool ConsoleUI::running() const {
   return (impl->report && impl->report->running()) || impl->manualBusy || impl->serviceBusy ||
@@ -5281,6 +5374,20 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     impl->loader.join();
   if (!fs::exists(impl->repository / ".tangos-lite-test-fixture"))
     throw std::runtime_error("GUI fleet smoke requires an explicit disposable fixture");
+  if (impl->tourOverlay && impl->tourOverlay->open())
+    impl->tourOverlay->close();
+  auto priorScreen = impl->screen;
+  impl->action(GUIDE, BN_CLICKED);
+  impl->tourOverlay->smoke(directory, capture);
+  impl->tourOverlay->close();
+  impl->tick();
+  if (impl->screen != priorScreen || impl->tourOverlay)
+    throw std::runtime_error("Spotlight tour did not preserve its underlying screen");
+  if (impl->helper) {
+    capture(directory / "helper-unread-badge.bmp");
+    impl->helper->smoke(directory);
+    capture(directory / "helper-floating-tips.bmp");
+  }
   HWND logFixture = CreateWindowExW(
       0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY, 0, 0, 400,
       160, impl->window, nullptr, GetModuleHandleW(nullptr), nullptr);
@@ -5522,6 +5629,17 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
                          Json::array({{{"id", "native-fixture"}, {"name", "native-fixture"}}}));
     impl->fleet->start(impl->selectedId);
     impl->navigate(Screen::controller);
+    auto runningAt = std::find(impl->cardIds.begin(), impl->cardIds.end(), impl->selectedId);
+    int runningBase = 5000 + int(runningAt - impl->cardIds.begin()) * 16;
+    if (auto runningAgent = impl->activeAgent(); runningAgent && runningAgent->active) {
+      RECT stopBounds{};
+      GetWindowRect(GetDlgItem(impl->window, runningBase), &stopBounds);
+      MapWindowPoints(nullptr, impl->window, reinterpret_cast<POINT *>(&stopBounds), 2);
+      auto card = impl->agentCardBounds(size_t(runningAt - impl->cardIds.begin()));
+      if (GetDlgItem(impl->window, runningBase + 4) || stopBounds.left != card.left + 13 ||
+          stopBounds.right != card.right - 13 || stopBounds.bottom - stopBounds.top != 44)
+        throw std::runtime_error("Running Simple card must collapse to a full-width Stop control");
+    }
     auto started = GetTickCount64();
     int pumps = 0;
     while (impl->fleet->running()) {

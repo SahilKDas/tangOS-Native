@@ -500,12 +500,12 @@ void presenceDot(HDC dc, int x, int y, const std::string &state, int size) {
   auto fill = Color(255, GetRValue(tint), GetGValue(tint), GetBValue(tint));
   shape(dc, x, y, size, size, size / 2.f, fill, fill);
 }
-void progressBar(HDC dc, int x, int y, int width, int percent, COLORREF tint) {
+void progressBar(HDC dc, int x, int y, int width, double percent, COLORREF tint) {
   Surface surface(dc, x, y, width, 6);
   if (!surface.data)
     return;
   tangos_frame(surface.data, width, 6, 3, Color(26, 0, 0, 0).value, 0);
-  int filled = width * std::clamp(percent, 0, 100) / 100;
+  int filled = int(std::round(width * std::clamp(percent, 0., 100.) / 100.));
   if (filled > 0) {
     auto clip = SaveDC(surface.dc);
     IntersectClipRect(surface.dc, 0, 0, filled, 6);
@@ -529,13 +529,26 @@ void taskText(HDC dc, const std::wstring &value, int x, int y, int width, int he
   RestoreDC(dc, saved);
   SelectObject(dc, previous);
 }
+int taskNoteHeight(HDC dc, const std::wstring &value, int width) {
+  auto previous = SelectObject(dc, uiFont(11, false, 600));
+  RECT bounds{0, 0, std::max(1, width - 18), 0};
+  DrawTextW(dc, value.c_str(), int(value.size()), &bounds,
+            DT_WORDBREAK | DT_NOPREFIX | DT_CALCRECT);
+  SelectObject(dc, previous);
+  return std::max(25, int(bounds.bottom) + 10);
+}
 void taskNote(HDC dc, const std::wstring &value, int x, int y, int width) {
-  Surface surface(dc, x, y, width, 25);
+  int height = taskNoteHeight(dc, value, width);
+  Surface surface(dc, x, y, width, height);
   if (surface.data)
-    tangos_frame(surface.data, width, 25, 8, Color(41, 234, 179, 8).value,
+    tangos_frame(surface.data, width, height, 8, Color(41, 234, 179, 8).value,
                  Color(115, 234, 179, 8).value);
-  label(surface.dc, value, 9, 5, width - 18, 15, 11, false, false, false, RGB(124, 74, 3), false,
-        600);
+  auto previous = SelectObject(surface.dc, uiFont(11, false, 600));
+  SetBkMode(surface.dc, TRANSPARENT);
+  SetTextColor(surface.dc, RGB(124, 74, 3));
+  RECT bounds{9, 5, width - 9, height - 5};
+  DrawTextW(surface.dc, value.c_str(), int(value.size()), &bounds, DT_WORDBREAK | DT_NOPREFIX);
+  SelectObject(surface.dc, previous);
 }
 void label(HDC dc, const std::wstring &s, int x, int y, int w, int h, int size, bool bold,
            bool secondary, bool accent, COLORREF tint, bool italic, int weight) {
@@ -550,10 +563,77 @@ void label(HDC dc, const std::wstring &s, int x, int y, int w, int h, int size, 
   DrawTextW(dc, s.c_str(), (int)s.size(), &r, DT_NOPREFIX | DT_END_ELLIPSIS);
   SelectObject(dc, prev);
 }
+void helperPanel(HDC dc, int x, int y, int width, int height) {
+  Surface surface(dc, x, y, width, height);
+  if (!surface.data)
+    return;
+  tangos_frame(surface.data, width, height, 15, Color(251, 255, 246).value,
+               Color(94, 194, 46).value);
+  auto saved = SaveDC(surface.dc);
+  auto clip = CreateRoundRectRgn(0, 0, width, height, 30, 30);
+  SelectClipRgn(surface.dc, clip);
+  for (int row = 2; row < 35; ++row) {
+    double t = double(row - 2) / 32;
+    auto brush = CreateSolidBrush(
+        RGB(int(134 + (94 - 134) * t), int(224 + (194 - 224) * t), int(90 + (46 - 90) * t)));
+    RECT line{2, row, width - 2, row + 1};
+    FillRect(surface.dc, &line, brush);
+    DeleteObject(brush);
+  }
+  RestoreDC(surface.dc, saved);
+  DeleteObject(clip);
+}
+void tourPanel(HDC dc, int x, int y, int width, int height) {
+  Surface surface(dc, x, y, width, height);
+  if (surface.data)
+    tangos_frame(surface.data, width, height, 14, Color(251, 255, 246).value,
+                 Color(94, 194, 46).value);
+}
+void tourShade(HDC dc, int width, int height, const RECT *spot) {
+  auto saved = SaveDC(dc);
+  HRGN outside = nullptr, hole = nullptr;
+  if (spot) {
+    outside = CreateRectRgn(0, 0, width, height);
+    hole = CreateRoundRectRgn(spot->left, spot->top, spot->right, spot->bottom, 24, 24);
+    CombineRgn(outside, outside, hole, RGN_DIFF);
+    SelectClipRgn(dc, outside);
+  }
+  shape(dc, 0, 0, width, height, 0, Color(140, 10, 20, 30), Color(140, 10, 20, 30));
+  RestoreDC(dc, saved);
+  if (outside)
+    DeleteObject(outside);
+  if (hole)
+    DeleteObject(hole);
+  if (spot && spot->right > spot->left && spot->bottom > spot->top) {
+    Surface border(dc, spot->left, spot->top, spot->right - spot->left, spot->bottom - spot->top);
+    if (border.data)
+      tangos_frame(border.data, border.w, border.h, 12, 0, Color(230, 255, 255, 255).value);
+  }
+}
+void wrappedLabel(HDC dc, const std::wstring &value, int x, int y, int width, int height, int size,
+                  bool bold, COLORREF tint) {
+  auto previous = SelectObject(dc, uiFont(size, bold));
+  auto saved = SaveDC(dc);
+  SetBkMode(dc, TRANSPARENT);
+  SetTextColor(dc, tint);
+  IntersectClipRect(dc, x, y, x + width, y + height);
+  RECT bounds{x, y, x + width, y + height};
+  DrawTextW(dc, value.c_str(), int(value.size()), &bounds, DT_WORDBREAK | DT_NOPREFIX);
+  RestoreDC(dc, saved);
+  SelectObject(dc, previous);
+}
 void invalidateBackdrop(HWND parent) {
   auto found = buttonBackdrops.find(parent);
   if (found != buttonBackdrops.end())
     found->second->rendered = 0;
+}
+int wrappedLabelHeight(HDC dc, const std::wstring &value, int width, int size, bool bold) {
+  auto previous = SelectObject(dc, uiFont(size, bold));
+  RECT bounds{0, 0, std::max(1, width), 0};
+  DrawTextW(dc, value.c_str(), int(value.size()), &bounds,
+            DT_WORDBREAK | DT_NOPREFIX | DT_CALCRECT);
+  SelectObject(dc, previous);
+  return bounds.bottom;
 }
 void compactCombo(HWND window, bool needsRole) {
   SetPropW(window, L"TangOSCompactCombo", reinterpret_cast<HANDLE>(1));
@@ -678,6 +758,10 @@ void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
   danger = danger || (hover && icon == unsigned(Icon::close) + 1);
   if (danger)
     base = Color(225, 29, 72);
+  bool stopControl = danger && iconText && icon == unsigned(Icon::stop) + 1;
+  bool stopping = stopControl && (i.itemState & ODS_DISABLED);
+  if (stopControl)
+    base = stopping ? Color(176, 69, 63) : Color(239, 83, 80);
   bool flat = icon >= unsigned(Icon::minimize) + 1 && icon <= unsigned(Icon::close) + 1;
   if (policy) {
     static const Color gloss[] = {Color(234, 244, 253), Color(250, 208, 172), Color(20, 44, 70),
@@ -701,6 +785,12 @@ void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
     if (surface.data)
       tangos_frame(surface.data, w, h, h / 2.f, Color(hover ? 55 : 36, 59, 130, 246).value,
                    Color(102, 59, 130, 246).value);
+  } else if (stopControl) {
+    Surface surface(i.hDC, x, y, w, h);
+    if (surface.data) {
+      auto fill = Color(stopping ? 230 : 255, base.GetR(), base.GetG(), base.GetB());
+      tangos_frame(surface.data, w, h, h / 2.f, fill.value, fill.value);
+    }
   } else if ((i.itemState & ODS_DISABLED) && primary) {
     Surface surface(i.hDC, x, y, w, h);
     if (surface.data)
@@ -734,9 +824,9 @@ void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
   auto fontWeight = uintptr_t(GetPropW(i.hwndItem, L"TangOSFontWeight"));
   auto font = uiFont(fontSize ? int(fontSize) : 13, true, int(fontWeight));
   auto prev = SelectObject(i.hDC, font);
-  SetTextColor(i.hDC, (i.itemState & ODS_DISABLED) ? rgb(colors.muted)
-                      : (primary || danger)        ? RGB(255, 255, 255)
-                                                   : rgb(colors.ink));
+  SetTextColor(i.hDC, (i.itemState & ODS_DISABLED) && !stopControl ? rgb(colors.muted)
+                      : (primary || danger)                        ? RGB(255, 255, 255)
+                                                                   : rgb(colors.ink));
   SetBkMode(i.hDC, TRANSPARENT);
   RECT r{x + 4, y, w + x - 4, y + h};
   if (icon && iconText) {
@@ -746,9 +836,9 @@ void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
     Surface surface(i.hDC, left, y + (h - 14) / 2, 14, 14);
     if (surface.data)
       tangos_icon(surface.data, 14, 14, unsigned(icon - 1),
-                  (i.itemState & ODS_DISABLED) ? colors.muted.value
-                  : primary || danger          ? 0xffffffff
-                                               : colors.ink.value);
+                  (i.itemState & ODS_DISABLED) && !stopControl ? colors.muted.value
+                  : primary || danger                          ? 0xffffffff
+                                                               : colors.ink.value);
     r.left = left + 21;
   }
   DrawTextW(i.hDC, title, -1, &r,

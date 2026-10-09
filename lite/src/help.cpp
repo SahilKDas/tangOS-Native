@@ -4,6 +4,51 @@
 #include <stdexcept>
 #include <windows.h>
 namespace lite {
+Json currentAnnouncement() {
+  return {{"id", "match-logging-2026-07"},
+          {"title", "New update!"},
+          {"body", "The console now logs what model + effort tried each function, so nobody "
+                   "re-grinds the same fails."}};
+}
+HelperState::HelperState(const Json &preferences, Json messages, Json announcement, bool firstRun)
+    : open(firstRun), unread(firstRun), tips(std::move(messages)) {
+  if (announcement.is_object() && announcement.contains("id") &&
+      announcement.value("id", std::string()) !=
+          preferences.value("updateNoteSeen", std::string())) {
+    note = std::move(announcement);
+    unread = true;
+  }
+}
+Json HelperState::messages() const {
+  Json all = Json::array();
+  if (!note.empty())
+    all.push_back(note);
+  for (auto &tip : tips)
+    all.push_back(tip);
+  return all;
+}
+void HelperState::markRead(Json &preferences) {
+  if (!unread)
+    return;
+  unread = false;
+  preferences["tourSeen"] = true;
+  if (!note.empty())
+    preferences["updateNoteSeen"] = note.at("id");
+}
+void HelperState::toggle(Json &preferences) {
+  if (!open)
+    markRead(preferences);
+  open = !open;
+}
+void HelperState::close(Json &preferences) {
+  open = false;
+  markRead(preferences);
+}
+void HelperState::next(int direction) {
+  auto count = messages().size();
+  if (count)
+    index = direction < 0 ? (index + count - 1) % count : (index + 1) % count;
+}
 Json updatePresentation(const Json &downloaded, const Json &current) {
   auto update = current.value("update", Json::object());
   if (downloaded.value("state", std::string()) == "downloaded" && downloaded.contains("receipt") &&

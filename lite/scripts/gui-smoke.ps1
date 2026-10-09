@@ -40,7 +40,9 @@ $ini = Join-Path $fixture 'settings.ini'
 # Quoting is required because both the executable and repository paths can contain spaces.
 $arguments = '--smoke-test "{0}" "{1}"' -f $repo, $ini
 $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru -WindowStyle Hidden
-if (-not $process.WaitForExit(120000)) { Stop-Process -Id $process.Id; throw 'GUI workflow timed out' }
+# The expanded matrix captures overlays, three window sizes, every attached monitor
+# and a 25,000-function fixture. Bound the whole run separately from individual checks.
+if (-not $process.WaitForExit(240000)) { Stop-Process -Id $process.Id; throw 'GUI workflow timed out' }
 $report = Join-Path $fixture 'gui-smoke-report.txt'
 if (-not (Test-Path -LiteralPath $report)) { throw "GUI workflow failed without a report: exit $($process.ExitCode)" }
 if ($process.ExitCode -ne 0) { throw (Get-Content -LiteralPath $report -Raw) }
@@ -56,6 +58,9 @@ if (-not ($MissingDescriptor -or $InvalidDescriptor)) {
 $display = Get-Content -LiteralPath (Join-Path $fixture 'display-validation.json') -Raw | ConvertFrom-Json
 if ($display.monitors.Count -lt 1 -or @($display.layouts | Where-Object state -eq 'passed').Count -ne 9) { throw 'Display layout matrix incomplete' }
 if (-not (Test-Path -LiteralPath (Join-Path $fixture 'help-complete-reference.bmp'))) { throw 'Complete native reference was not rendered' }
+foreach ($overlay in @('helper-floating-tips', 'tour-overlay-centered', 'tour-overlay-spotlight')) {
+  if (-not (Test-Path -LiteralPath (Join-Path $fixture "$overlay.bmp"))) { throw "Native overlay missing: $overlay" }
+}
 foreach ($image in @('controller-reference-idle', 'controller-cart')) {
   $path = Join-Path $fixture "$image.bmp"
   if (-not (Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -lt 100000) { throw "Missing Controller reference render: $image" }

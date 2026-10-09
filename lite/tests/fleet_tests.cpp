@@ -313,6 +313,29 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
           std::this_thread::sleep_for(std::chrono::milliseconds(20));
         expect(state().active && fs::exists(state().worktree / "port/queue-started.flag"),
                "controlled CLI assignment is running");
+        auto runningInstructions = read(state().prompt);
+        auto nextWork = state().spec;
+        nextWork.roles = {"Drafter", "Refiner"};
+        nextWork.role = "Drafter";
+        nextWork.count = 2;
+        nextWork.attempts = 7;
+        fleet.configure(id, nextWork);
+        expect(state().configurationPending && state().spec.roles == nextWork.roles &&
+                   state().spec.count == 2 && state().spec.attempts == 7,
+               "running work settings are visible as deferred configuration");
+        expect(read(state().prompt) == runningInstructions && state().active,
+               "live configuration preserves current instructions and running driver");
+        auto unsafeConfiguration = nextWork;
+        unsafeConfiguration.cli = "different executable";
+        reject([&] { fleet.configure(id, unsafeConfiguration); },
+               "running driver replacement remains prohibited");
+        auto persistedConfiguration = Json::parse(read(data / "projects/fixture/fleet.json"));
+        bool savedNext = false;
+        for (auto &saved : persistedConfiguration.at("agents"))
+          if (saved.at("id") == id)
+            savedNext = saved.at("next_spec").at("roles") == Json(nextWork.roles) &&
+                        saved.at("spec").at("count") == 1;
+        expect(savedNext, "pending settings persist without overwriting in-flight configuration");
         auto assigned = state().assigned;
         expect(assigned.size() == 1 && assigned[0].at("id") == "active-queue-a",
                "controlled assignment protects its first target");
@@ -338,6 +361,13 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
         wait(fleet);
         expect(!state().active && state().queue.empty() && state().completed == 1,
                "retained current target completes without resurrecting cleared work");
+        fleet.enqueue(id, Json::array({{{"id", "next-settings-a"}}, {{"id", "next-settings-b"}}}));
+        fleet.start(id);
+        wait(fleet);
+        expect(!state().configurationPending && state().spec.roles == nextWork.roles &&
+                   state().spec.attempts == 7 && state().queue.empty() &&
+                   read(state().prompt).find("Role: Drafter") != std::string::npos,
+               "deferred configuration reaches the next actual two-target driver run");
         fleet.remove(id);
       }
       auto statePath = data / "projects/fixture/fleet.json";

@@ -53,10 +53,17 @@ void panel(HDC dc, int x, int y, int width, int height, bool solid = false,
 void scrim(HDC dc, int width, int height);
 void agentCard(HDC dc, int x, int y, int width, int height, COLORREF color);
 void presenceDot(HDC dc, int x, int y, const std::string &state, int size = 12);
-void progressBar(HDC dc, int x, int y, int width, int percent, COLORREF tint);
+void progressBar(HDC dc, int x, int y, int width, double percent, COLORREF tint);
+int taskNoteHeight(HDC dc, const std::wstring &value, int width);
 void taskText(HDC dc, const std::wstring &value, int x, int y, int width, int height,
               bool live = false, bool secondary = false);
 void taskNote(HDC dc, const std::wstring &value, int x, int y, int width);
+void helperPanel(HDC dc, int x, int y, int width, int height);
+void tourPanel(HDC dc, int x, int y, int width, int height);
+void tourShade(HDC dc, int width, int height, const RECT *spot);
+void wrappedLabel(HDC dc, const std::wstring &text, int x, int y, int width, int height, int size,
+                  bool bold, COLORREF tint);
+int wrappedLabelHeight(HDC dc, const std::wstring &text, int width, int size, bool bold);
 void label(HDC dc, const std::wstring &text, int x, int y, int width, int height, int size = 13,
            bool bold = false, bool secondary = false, bool accent = false,
            COLORREF tint = CLR_INVALID, bool italic = false, int weight = 0);

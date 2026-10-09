@@ -2,6 +2,23 @@
 #include <algorithm>
 #include <cmath>
 namespace lite {
+double controllerProgress(double from, double to, double elapsedMilliseconds) {
+  // CSS ease = cubic-bezier(.25,.1,.25,1), over the reference's 300 ms.
+  double elapsed = std::clamp(elapsedMilliseconds / 300., 0., 1.);
+  double low = 0, high = 1;
+  auto curve = [](double t, double first, double second) {
+    return 3 * (1 - t) * (1 - t) * t * first + 3 * (1 - t) * t * t * second + t * t * t;
+  };
+  for (int i = 0; i < 24; ++i) {
+    double t = (low + high) / 2;
+    if (curve(t, .25, .25) < elapsed)
+      low = t;
+    else
+      high = t;
+  }
+  double eased = elapsed == 0 ? 0 : elapsed == 1 ? 1 : curve((low + high) / 2, .1, 1);
+  return from + (to - from) * eased;
+}
 namespace {
 bool javascriptSpace(wchar_t c) {
   return (c >= 0x09 && c <= 0x0d) || c == 0x20 || c == 0xa0 || c == 0x1680 ||

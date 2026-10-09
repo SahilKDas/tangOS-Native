@@ -7,6 +7,9 @@ def main():
     deps=args.dependencies.resolve();out=args.output.resolve();out.mkdir(parents=True,exist_ok=True)
     values=json.loads(args.fixture.read_text(encoding='utf-8'))
     values['uiPrefsGet']['mode']=args.interface_mode
+    if values.get('getState', {}).get('tourSeen') is False:
+        values['markTourSeen'] = None
+        values['getTour'] = []
     bridge='window.__referenceCalls=[];const values='+json.dumps(values)+';window.tangos=new Proxy({}, {get:(_,name)=>{if(typeof name!=="string")return undefined;if(name.startsWith("on"))return ()=>()=>{};return ()=>{window.__referenceCalls.push(name);if(Object.hasOwn(values,name))return Promise.resolve(structuredClone(values[name]));return Promise.reject(new Error("Read-only visual fixture has no handler: "+name));};}});\n'
     (out/'fixture.js').write_text(bridge,encoding='utf-8')
     (out/'entry.tsx').write_text("import './fixture.js';import "+json.dumps((root/'console/src/renderer/src/main.tsx').as_posix())+';\n',encoding='utf-8')

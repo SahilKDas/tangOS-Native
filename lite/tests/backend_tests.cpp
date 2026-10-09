@@ -8,6 +8,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <cmath>
 using namespace lite;
 int main() {
   auto dir = fs::temp_directory_path() / fs::u8path("lite-backend-" + uniqueId());
@@ -29,6 +30,45 @@ int main() {
     expect(threw, msg);
   };
   try {
+    expect(controllerProgress(0, 100, 0) == 0 && controllerProgress(0, 100, 300) == 100,
+           "Controller CSS progress endpoints");
+    expect(std::abs(controllerProgress(0, 100, 150) - 80.2403) < .001,
+           "Controller CSS ease midpoint matches cubic-bezier");
+    expect(controllerProgress(80, 20, -1) == 80 && controllerProgress(80, 20, 301) == 20,
+           "progress reset and clamped transition duration");
+    {
+      Json prefs = Json::object();
+      auto tips = Json::array(
+          {{{"title", "One"}, {"body", "First"}}, {{"title", "Two"}, {"body", "Second"}}});
+      HelperState helper(prefs, tips, currentAnnouncement(), true);
+      expect(helper.open && helper.unread && helper.messages().size() == 3,
+             "first-run helper opens with announcement before tips");
+      helper.close(prefs);
+      expect(!helper.open && !helper.unread && prefs.value("tourSeen", false),
+             "closing marks first-run helper read");
+      expect(prefs.at("updateNoteSeen") == currentAnnouncement().at("id"),
+             "announcement read ID persists");
+      expect(helper.messages().size() == 3,
+             "read announcement remains available during same session");
+      helper.next(-1);
+      expect(helper.index == 2, "helper previous wraps to final tip");
+      helper.next(1);
+      expect(helper.index == 0, "helper next wraps to announcement");
+      helper.toggle(prefs);
+      expect(helper.open && !helper.unread, "reopening preserves read state");
+      HelperState restarted(prefs, tips, currentAnnouncement(), false);
+      expect(!restarted.open && !restarted.unread && restarted.messages().size() == 2,
+             "read announcement does not nag after restart");
+      auto newNote = currentAnnouncement();
+      newNote["id"] = "future-release";
+      HelperState updated(prefs, tips, newNote, false);
+      expect(!updated.open && updated.unread && updated.messages().size() == 3,
+             "new release restores unread badge without opening overlay");
+      HelperState empty(Json::object(), Json::array(), Json::object(), false);
+      empty.next(-1);
+      empty.next(1);
+      expect(empty.index == 0 && empty.messages().empty(), "empty tips navigation is safe");
+    }
     auto downloaded = Json{{"state", "downloaded"}, {"version", "2.0.0"}, {"receipt", "fixture"}};
     auto available = Json{{"update", {{"state", "available"}, {"version", "2.0.0"}}}};
     expect(updatePresentation(downloaded, available) == downloaded,
