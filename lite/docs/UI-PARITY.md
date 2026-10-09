@@ -107,3 +107,16 @@ waiting. This fixes a release-gate failure where simultaneous agent creation
 read another worktree's partially written commondir. Regression coverage creates
 eight parallel disposable worktrees and cancels an operation waiting behind a
 controlled checkout hook. External Git processes are outside this local lock.
+
+The next UI source checkpoint uses native TinySkia toolbar icons, hover states,
+tooltips, selected tabs, reference toolbar spacing and accurate owner-drawn
+button captures. Theme selection is in Settings. Controller cards expose
+session/all-time totals, resolved idle roles and chart buttons. Pick in Viewer
+keeps the parent tab synchronized, and Escape closes detail even from a focused
+log control. `lite/out/gui-toolbar-017-d` passes the full native workflow and
+these interactions; the 25,000-function fixture rendered in 1,672 ms. An earlier
+attempt timed out because every translucent button repainted the large Viewer;
+the corrected cache shares one backdrop per parent paint. Raster tests pass.
+This source work follows the verified 0.17.0 package; it has not yet replaced
+that package. Glass composition, footer layout and remaining overlays still
+need comparison and implementation.

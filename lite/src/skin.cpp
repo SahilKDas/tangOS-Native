@@ -1,4 +1,5 @@
 #include "skin.h"
+#include <commctrl.h>
 #include <algorithm>
 #include <cstdint>
 #include <chrono>
@@ -9,6 +10,7 @@
 extern "C" void tangos_shape(unsigned char *, unsigned, unsigned, float, uint32_t, uint32_t);
 extern "C" void tangos_image(unsigned char *, unsigned, unsigned, const unsigned char *, size_t);
 extern "C" void tangos_mesh(unsigned char *, unsigned, unsigned, float, unsigned);
+extern "C" void tangos_icon(unsigned char *, unsigned, unsigned, unsigned, uint32_t);
 namespace skin {
 namespace {
 struct Color {
@@ -68,6 +70,79 @@ struct Surface {
     DeleteDC(dc);
   }
 };
+struct Backdrop {
+  HDC dc = nullptr;
+  HBITMAP bitmap = nullptr;
+  HGDIOBJ previous = nullptr;
+  int width = 0, height = 0;
+  ULONGLONG rendered = 0;
+  ~Backdrop() {
+    if (dc) {
+      SelectObject(dc, previous);
+      DeleteObject(bitmap);
+      DeleteDC(dc);
+    }
+  }
+};
+std::map<HWND, std::unique_ptr<Backdrop>> buttonBackdrops;
+struct IconTooltip {
+  HWND window = nullptr;
+  std::wstring text;
+  ~IconTooltip() {
+    if (window)
+      DestroyWindow(window);
+  }
+};
+std::map<HWND, std::unique_ptr<IconTooltip>> iconTooltips;
+void buttonBackground(const DRAWITEMSTRUCT &item) {
+  HWND parent = GetParent(item.hwndItem);
+  RECT parentBounds{}, bounds{};
+  if (!parent || !GetClientRect(parent, &parentBounds) || !GetWindowRect(item.hwndItem, &bounds))
+    return;
+  MapWindowPoints(nullptr, parent, reinterpret_cast<POINT *>(&bounds), 2);
+  auto &cached = buttonBackdrops[parent];
+  if (!cached || cached->width != parentBounds.right || cached->height != parentBounds.bottom) {
+    cached = std::make_unique<Backdrop>();
+    cached->width = parentBounds.right;
+    cached->height = parentBounds.bottom;
+    cached->dc = CreateCompatibleDC(item.hDC);
+    cached->bitmap = CreateCompatibleBitmap(item.hDC, cached->width, cached->height);
+    cached->previous = SelectObject(cached->dc, cached->bitmap);
+  }
+  if (!cached->rendered) {
+    SetPropW(parent, L"TangOSBackdropRendering", reinterpret_cast<HANDLE>(1));
+    SendMessageW(parent, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(cached->dc), PRF_CLIENT);
+    RemovePropW(parent, L"TangOSBackdropRendering");
+    cached->rendered = 1;
+  }
+  BitBlt(item.hDC, item.rcItem.left, item.rcItem.top, item.rcItem.right - item.rcItem.left,
+         item.rcItem.bottom - item.rcItem.top, cached->dc, bounds.left, bounds.top, SRCCOPY);
+  for (auto it = buttonBackdrops.begin(); it != buttonBackdrops.end();)
+    if (!IsWindow(it->first))
+      it = buttonBackdrops.erase(it);
+    else
+      ++it;
+}
+LRESULT CALLBACK hoverButton(HWND window, UINT message, WPARAM w, LPARAM l, UINT_PTR id,
+                             DWORD_PTR) {
+  if (message == WM_MOUSEMOVE) {
+    if (!GetPropW(window, L"TangOSHover")) {
+      SetPropW(window, L"TangOSHover", reinterpret_cast<HANDLE>(1));
+      TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window, 0};
+      TrackMouseEvent(&tracking);
+      InvalidateRect(window, nullptr, FALSE);
+    }
+  } else if (message == WM_MOUSELEAVE) {
+    RemovePropW(window, L"TangOSHover");
+    InvalidateRect(window, nullptr, FALSE);
+  } else if (message == WM_NCDESTROY) {
+    iconTooltips.erase(window);
+    RemovePropW(window, L"TangOSHover");
+    RemovePropW(window, L"TangOSIcon");
+    RemoveWindowSubclass(window, hoverButton, id);
+  }
+  return DefSubclassProc(window, message, w, l);
+}
 void shape(HDC dc, int x, int y, int w, int h, float radius, Color top, Color bottom) {
   if (w <= 0 || h <= 0)
     return;
@@ -89,6 +164,8 @@ void initialize() {
 }
 void clearBackgroundFrames();
 void shutdown() {
+  iconTooltips.clear();
+  buttonBackdrops.clear();
   clearBackgroundFrames();
   for (auto &font : fonts)
     DeleteObject(font.second);
@@ -97,6 +174,7 @@ void shutdown() {
     RemoveFontMemResourceEx(fontResource);
 }
 void theme(int i) {
+  buttonBackdrops.clear();
   paletteIndex = std::clamp(i, 0, 4);
   switch (i) {
   case 1:
@@ -256,25 +334,75 @@ void presenceDot(HDC dc, int x, int y, const std::string &state) {
   shape(dc, x, y, 12, 12, 6, fill, fill);
 }
 void label(HDC dc, const std::wstring &s, int x, int y, int w, int h, int size, bool bold,
-           bool secondary, bool accent) {
+           bool secondary, bool accent, COLORREF tint) {
   auto font = uiFont(size, bold);
   auto prev = SelectObject(dc, font);
-  SetTextColor(dc, rgb(accent ? colors.primary : secondary ? colors.muted : colors.ink));
+  SetTextColor(dc, tint == CLR_INVALID ? rgb(accent      ? colors.primary
+                                             : secondary ? colors.muted
+                                                         : colors.ink)
+                                       : tint);
   SetBkMode(dc, TRANSPARENT);
   RECT r{x, y, x + w, y + h};
   DrawTextW(dc, s.c_str(), (int)s.size(), &r, DT_NOPREFIX | DT_END_ELLIPSIS);
   SelectObject(dc, prev);
 }
+void invalidateBackdrop(HWND parent) {
+  auto found = buttonBackdrops.find(parent);
+  if (found != buttonBackdrops.end())
+    found->second->rendered = 0;
+}
+void iconButton(HWND window, Icon icon) {
+  SetPropW(window, L"TangOSIcon", (HANDLE)(uintptr_t(unsigned(icon) + 1)));
+  SetWindowSubclass(window, hoverButton, 1, 0);
+  auto tooltip = std::make_unique<IconTooltip>();
+  tooltip->text.resize(GetWindowTextLengthW(window) + 1);
+  GetWindowTextW(window, tooltip->text.data(), int(tooltip->text.size()));
+  tooltip->window = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr,
+                                    WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX, CW_USEDEFAULT,
+                                    CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, GetParent(window),
+                                    nullptr, GetModuleHandleW(nullptr), nullptr);
+  TOOLINFOW info{sizeof(info)};
+  info.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+  info.hwnd = GetParent(window);
+  info.uId = reinterpret_cast<UINT_PTR>(window);
+  info.lpszText = tooltip->text.data();
+  SendMessageW(tooltip->window, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&info));
+  iconTooltips[window] = std::move(tooltip);
+}
 void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
+  buttonBackground(i);
   int x = i.rcItem.left + 1, y = i.rcItem.top + 1, w = i.rcItem.right - i.rcItem.left - 2,
       h = i.rcItem.bottom - i.rcItem.top - 2;
   Color base = danger ? Color(220, 76, 70) : primary ? colors.primary : colors.field;
-  shape(i.hDC, x, y, w, h, 10,
-        Color(245, std::min(255, base.GetR() + 25), std::min(255, base.GetG() + 20),
-              std::min(255, base.GetB() + 15)),
-        base);
+  bool hover = GetPropW(i.hwndItem, L"TangOSHover") != nullptr;
+  auto icon = uintptr_t(GetPropW(i.hwndItem, L"TangOSIcon"));
+  danger = danger || (hover && icon == unsigned(Icon::close) + 1);
+  if (danger)
+    base = Color(225, 29, 72);
+  bool flat = icon >= unsigned(Icon::minimize) + 1 && icon <= unsigned(Icon::close) + 1;
+  if (!flat || hover || (i.itemState & ODS_SELECTED)) {
+    int alpha = primary || danger ? 255 : hover ? 140 : 80;
+    shape(i.hDC, x, y, w, h, flat ? 8 : h / 2.f,
+          Color(alpha, std::min(255, base.GetR() + 25), std::min(255, base.GetG() + 20),
+                std::min(255, base.GetB() + 15)),
+          Color(primary || danger ? 245 : 30, base.GetR(), base.GetG(), base.GetB()));
+  }
   wchar_t title[256];
   GetWindowTextW(i.hwndItem, title, 256);
+  if (icon) {
+    int size = 15;
+    Surface surface(i.hDC, x + (w - size) / 2, y + (h - size) / 2, size, size);
+    if (surface.data)
+      tangos_icon(surface.data, size, size, unsigned(icon - 1),
+                  (i.itemState & ODS_DISABLED) ? colors.muted.value
+                  : danger || primary          ? 0xffffffff
+                                               : colors.ink.value);
+    if (i.itemState & ODS_FOCUS) {
+      RECT focus{x + 3, y + 3, x + w - 3, y + h - 3};
+      DrawFocusRect(i.hDC, &focus);
+    }
+    return;
+  }
   auto font = uiFont(13, true);
   auto prev = SelectObject(i.hDC, font);
   SetTextColor(i.hDC, (i.itemState & ODS_DISABLED) ? rgb(colors.muted)

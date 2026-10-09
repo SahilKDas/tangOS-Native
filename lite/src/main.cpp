@@ -3,6 +3,7 @@
 #include "console_ui.h"
 #include "backend.h"
 #include "updater.h"
+#include <algorithm>
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <fstream>
@@ -50,7 +51,11 @@ enum {
   PROJECT_MENU,
   SELECT_PROJECT,
   DISCOVER_PROJECTS,
-  AUTO_UPDATE
+  AUTO_UPDATE,
+  TOOLBAR_REPORT,
+  TOOLBAR_REFRESH,
+  TOOLBAR_SETTINGS,
+  TOOLBAR_KEYS
 };
 bool workspaceReady = false, workspaceRemote = false;
 bool discoveryPending = false;
@@ -60,6 +65,7 @@ bool repositoryView = false;
 bool toolboxOpen = false;
 HWND themeCombo, minimizeButton, maximizeButton, closeButton, projectButton;
 HWND controllerTab, repositoryTab;
+HWND toolbarReport, toolbarRefresh, toolbarSettings, toolbarKeys;
 HWND toolboxButton;
 HBRUSH fieldBrush = nullptr;
 const std::vector<std::string> actions = {"Fetch",           "Pull (fast-forward)",
@@ -426,19 +432,27 @@ void layout(int w, int h) {
        {checkCombo, runButton, cancelButton, actionCombo, remoteEdit, refEdit, detailsEdit,
         actionButton, agentsButton, statusEdit, logEdit, logsButton, refreshButton, configButton})
     ShowWindow(item, workspaceReady ? SW_SHOW : SW_HIDE);
+  ShowWindow(themeCombo, workspaceReady ? SW_HIDE : SW_SHOW);
   MoveWindow(themeCombo, w - 275, 12, 128, 200, TRUE);
+  for (auto item : {toolbarReport, toolbarRefresh, toolbarSettings, toolbarKeys})
+    ShowWindow(item, workspaceReady ? SW_SHOW : SW_HIDE);
+  MoveWindow(toolbarReport, w - 320, 13, 34, 30, TRUE);
+  MoveWindow(toolbarRefresh, w - 278, 13, 34, 30, TRUE);
+  MoveWindow(toolbarSettings, w - 236, 13, 34, 30, TRUE);
+  MoveWindow(toolbarKeys, w - 194, 13, 34, 30, TRUE);
   MoveWindow(minimizeButton, w - 137, 11, 38, 30, TRUE);
   MoveWindow(maximizeButton, w - 97, 11, 38, 30, TRUE);
   MoveWindow(closeButton, w - 57, 11, 38, 30, TRUE);
   ShowWindow(controllerTab, workspaceReady ? SW_SHOW : SW_HIDE);
   ShowWindow(repositoryTab, workspaceReady ? SW_SHOW : SW_HIDE);
   ShowWindow(toolboxButton, workspaceReady ? SW_SHOW : SW_HIDE);
-  MoveWindow(controllerTab, w / 2 - 149, 11, 142, 30, TRUE);
-  MoveWindow(repositoryTab, w / 2 - 4, 11, 130, 30, TRUE);
+  MoveWindow(controllerTab, w / 2 - 135, 14, 134, 30, TRUE);
+  MoveWindow(repositoryTab, w / 2, 14, 134, 30, TRUE);
   if (!workspaceReady) {
     ShowWindow(repoEdit, SW_SHOW);
     ShowWindow(projectButton, SW_SHOW);
-    MoveWindow(projectButton, 144, 13, std::max(90, w / 2 - 308), 30, TRUE);
+    MoveWindow(projectButton, 100, 13,
+               std::clamp(int(value(projectButton).size()) * 7 + 32, 144, 260), 32, TRUE);
     int x = (w - 760) / 2, y = (h - 420) / 2;
     MoveWindow(repoEdit, x + 72, y + 174, 494, 34, TRUE);
     MoveWindow(selectButton, x + 578, y + 174, 110, 34, TRUE);
@@ -450,10 +464,12 @@ void layout(int w, int h) {
     int rail = w - 354, cw = w - 382;
     ShowWindow(repoEdit, SW_HIDE);
     ShowWindow(projectButton, SW_SHOW);
-    MoveWindow(projectButton, 144, 13, std::max(90, w / 2 - 308), 30, TRUE);
+    MoveWindow(projectButton, 100, 13,
+               std::clamp(int(value(projectButton).size()) * 7 + 32, 144, 260), 32, TRUE);
     MoveWindow(browseButton, w - 416, 12, 124, 30, TRUE);
     ShowWindow(selectButton, SW_HIDE);
     set(browseButton, "Change repo");
+    ShowWindow(browseButton, SW_HIDE);
     MoveWindow(checkCombo, 44, 168, cw - 196, 240, TRUE);
     MoveWindow(runButton, 44, 210, 100, 34, TRUE);
     MoveWindow(cancelButton, 154, 210, 86, 34, TRUE);
@@ -503,7 +519,6 @@ void paintChrome(HDC dc, int w, int h) {
   skin::background(dc, w, h);
   skin::label(dc, L"tang", 24, 14, 52, 28, 19, true);
   skin::label(dc, L"OS", 66, 14, 40, 28, 19, true, false, true);
-  skin::label(dc, L"Lite", 103, 17, 34, 24, 13, true, true);
   if (!workspaceReady) {
     int x = (w - 760) / 2, y = (h - 420) / 2;
     skin::panel(dc, x, y, 760, 420, true);
@@ -521,7 +536,7 @@ void paintChrome(HDC dc, int w, int h) {
     return;
   }
   int cw = w - 382, rail = w - 354;
-  skin::panel(dc, w / 2 - 153, 8, 284, 36, true);
+  skin::panel(dc, w / 2 - 138, 10, 276, 38);
   skin::panel(dc, 14, 66, cw, h - 86);
   skin::label(dc, toolboxOpen && !repositoryView ? L"Encyclopedia" : L"Chaos Controller", 30, 83,
               200, 25, 15, true);
@@ -570,6 +585,7 @@ void paintChrome(HDC dc, int w, int h) {
   skin::label(dc, L"v0.17.0", w - 74, h - 27, 60, 18, 10, false, true);
 }
 void snapshot(const fs::path &path) {
+  skin::invalidateBackdrop(window);
   RECT rect;
   GetClientRect(window, &rect);
   int w = rect.right, h = rect.bottom;
@@ -592,11 +608,26 @@ void snapshot(const fs::path &path) {
         auto state = SaveDC(dc);
         SetViewportOrgEx(dc, bounds.left, bounds.top, nullptr);
         IntersectClipRect(dc, 0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top);
-        SendMessageW(child, WM_PRINT, (WPARAM)dc,
-                     PRF_CLIENT | PRF_NONCLIENT | PRF_ERASEBKGND | PRF_CHILDREN);
-        // ComboBox WM_PRINT omits its owner-drawn selection on hidden windows.
         wchar_t className[32];
         GetClassNameW(child, className, 32);
+        bool ownerButton = std::wstring(className) == L"Button" &&
+                           (GetWindowLongW(child, GWL_STYLE) & BS_TYPEMASK) == BS_OWNERDRAW;
+        if (ownerButton) {
+          // Hidden WM_PRINT does not reliably invoke native owner drawing. Keep
+          // the already painted parent surface and render the actual button.
+          DRAWITEMSTRUCT item{};
+          item.CtlType = ODT_BUTTON;
+          item.CtlID = GetDlgCtrlID(child);
+          item.itemAction = ODA_DRAWENTIRE;
+          item.itemState = IsWindowEnabled(child) ? 0 : ODS_DISABLED;
+          item.hwndItem = child;
+          item.hDC = dc;
+          item.rcItem = {0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top};
+          SendMessageW(GetParent(child), WM_DRAWITEM, item.CtlID, (LPARAM)&item);
+        } else
+          SendMessageW(child, WM_PRINT, (WPARAM)dc,
+                       PRF_CLIENT | PRF_NONCLIENT | PRF_ERASEBKGND | PRF_CHILDREN);
+        // ComboBox WM_PRINT omits its owner-drawn selection on hidden windows.
         if (std::wstring(className) == L"ComboBox") {
           DRAWITEMSTRUCT selection{};
           selection.CtlType = ODT_COMBOBOX;
@@ -916,6 +947,17 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     minimizeButton = control(L"BUTTON", L"−", WS_TABSTOP, MINIMIZE);
     maximizeButton = control(L"BUTTON", L"□", WS_TABSTOP, MAXIMIZE);
     closeButton = control(L"BUTTON", L"×", WS_TABSTOP, CLOSE);
+    skin::iconButton(minimizeButton, skin::Icon::minimize);
+    skin::iconButton(maximizeButton, skin::Icon::maximize);
+    skin::iconButton(closeButton, skin::Icon::close);
+    toolbarReport = control(L"BUTTON", L"Report a bug", WS_TABSTOP, TOOLBAR_REPORT);
+    toolbarRefresh = control(L"BUTTON", L"Refresh project", WS_TABSTOP, TOOLBAR_REFRESH);
+    toolbarSettings = control(L"BUTTON", L"Settings", WS_TABSTOP, TOOLBAR_SETTINGS);
+    toolbarKeys = control(L"BUTTON", L"API key vault", WS_TABSTOP, TOOLBAR_KEYS);
+    skin::iconButton(toolbarReport, skin::Icon::report);
+    skin::iconButton(toolbarRefresh, skin::Icon::refresh);
+    skin::iconButton(toolbarSettings, skin::Icon::settings);
+    skin::iconButton(toolbarKeys, skin::Icon::key);
     controllerTab = control(L"BUTTON", L"Chaos Controller", WS_TABSTOP, CONTROLLER_TAB);
     repositoryTab = control(L"BUTTON", L"Chaos Viewer", WS_TABSTOP, REPOSITORY_TAB);
     toolboxButton = control(L"BUTTON", L"Encyclopedia", WS_TABSTOP, TOOLBOX);
@@ -961,6 +1003,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   case WM_ERASEBKGND:
     return 1;
   case WM_PAINT: {
+    skin::invalidateBackdrop(h);
     PAINTSTRUCT ps;
     HDC dc = BeginPaint(h, &ps);
     RECT r;
@@ -977,6 +1020,8 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return 0;
   }
   case WM_PRINTCLIENT: {
+    if (!GetPropW(h, L"TangOSBackdropRendering"))
+      skin::invalidateBackdrop(h);
     RECT r;
     GetClientRect(h, &r);
     paintChrome((HDC)w, r.right, r.bottom);
@@ -985,7 +1030,10 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   case WM_DRAWITEM: {
     auto *i = (DRAWITEMSTRUCT *)l;
     if (i->CtlType == ODT_BUTTON) {
-      skin::button(*i, i->CtlID == RUN || i->CtlID == ACTION || i->CtlID == SELECT,
+      skin::button(*i,
+                   i->CtlID == RUN || i->CtlID == ACTION || i->CtlID == SELECT ||
+                       (i->CtlID == CONTROLLER_TAB && !repositoryView) ||
+                       (i->CtlID == REPOSITORY_TAB && repositoryView),
                    i->CtlID == CANCEL);
       return TRUE;
     }
@@ -1119,6 +1167,23 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
       try {
         switch (id) {
+        case TOOLBAR_REPORT:
+        case TOOLBAR_SETTINGS:
+        case TOOLBAR_KEYS:
+          if (consoleUI) {
+            toolboxOpen = false;
+            RECT bounds;
+            GetClientRect(h, &bounds);
+            layout(bounds.right, bounds.bottom);
+            consoleUI->openPanel(id == TOOLBAR_REPORT ? "report"
+                                 : id == TOOLBAR_KEYS ? "keys"
+                                                      : "settings");
+          }
+          break;
+        case TOOLBAR_REFRESH:
+          SendMessageW(h, CONSOLE_RELOAD, 0, 0);
+          automaticUpdate();
+          break;
         case SELECT_PROJECT:
           selectProject(settings.activeProject);
           break;
@@ -1209,6 +1274,14 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   }
   case CONSOLE_PICK_REPO:
     PostMessageW(h, WM_COMMAND, MAKEWPARAM(BROWSE, BN_CLICKED), 0);
+    return 0;
+  case CONSOLE_TAB_STATE:
+    repositoryView = w != 0;
+    InvalidateRect(controllerTab, nullptr, FALSE);
+    InvalidateRect(repositoryTab, nullptr, FALSE);
+    return 0;
+  case CONSOLE_PICK_VIEWER:
+    SendMessageW(h, WM_COMMAND, MAKEWPARAM(REPOSITORY_TAB, BN_CLICKED), 0);
     return 0;
   case STATE: {
     auto *s = (std::string *)l;

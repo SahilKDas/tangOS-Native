@@ -2,6 +2,9 @@
 #include <string>
 #include <windows.h>
 namespace skin {
+enum class Icon { report, refresh, settings, key, minimize, maximize, close, chart, document };
+void iconButton(HWND window, Icon icon);
+void invalidateBackdrop(HWND parent);
 void initialize();
 void shutdown();
 void theme(int index);
@@ -17,7 +20,8 @@ void scrim(HDC dc, int width, int height);
 void agentCard(HDC dc, int x, int y, int width, int height, COLORREF color);
 void presenceDot(HDC dc, int x, int y, const std::string &state);
 void label(HDC dc, const std::wstring &text, int x, int y, int width, int height, int size = 13,
-           bool bold = false, bool secondary = false, bool accent = false);
+           bool bold = false, bool secondary = false, bool accent = false,
+           COLORREF tint = CLR_INVALID);
 void button(const DRAWITEMSTRUCT &item, bool primary = false, bool danger = false);
 void mascot(HDC dc, int x, int y, int size, const std::string &emotion = "idle");
 } // namespace skin

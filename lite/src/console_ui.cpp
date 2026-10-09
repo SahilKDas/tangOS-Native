@@ -162,6 +162,7 @@ constexpr int SUPPORT = 4850, SUPPORT_CHECK = 4851, SUPPORT_REPORT = 4852, SUPPO
               SUPPORT_DOWNLOAD = 4857, SUPPORT_RESTART = 4858;
 constexpr int MCP_EXPORT = 4830, DETAIL_LOOP = 4840;
 constexpr int MCP_INSTALL = 4831;
+constexpr int CONTROLLER_SESSION = 4900, CONTROLLER_ALL = 4901, CONTROLLER_PICK = 4902;
 constexpr int DETAIL_SCOPE = 4841, DETAIL_MODEL = 4842, DETAIL_COPY = 4843, DETAIL_RECENT = 4844,
               DETAIL_REVEAL = 4845, DETAIL_LIVE = 4846;
 constexpr int CLONE_DEST = 4810, CLONE_PREVIEW = 4811, CLONE_CONFIRM = 4812, CLONE_CANCEL = 4813;
@@ -286,7 +287,7 @@ struct ConsoleUI::Impl {
   Json sessionAgentStats = Json::object(), pendingSessionStats;
   HWND detailScope = nullptr, detailModel = nullptr, detailRuns = nullptr,
        detailRunOutput = nullptr;
-  bool detailLifetime = false;
+  bool detailLifetime = false, controllerLifetime = false;
   std::string detailTab = "all", detailRunId, detailRunsEncoded;
   Json detailActivity = Json::array(), detailStreams = Json::object(),
        detailLatest = Json::object();
@@ -443,6 +444,17 @@ struct ConsoleUI::Impl {
     if (fieldBrush)
       DeleteObject(fieldBrush);
   }
+  static LRESULT CALLBACK childKeyboard(HWND child, UINT message, WPARAM w, LPARAM l, UINT_PTR id,
+                                        DWORD_PTR context) {
+    auto self = reinterpret_cast<Impl *>(context);
+    if (message == WM_KEYDOWN && w == VK_ESCAPE && self->screen == Screen::detail) {
+      PostMessageW(self->window, WM_KEYDOWN, VK_ESCAPE, 0);
+      return 0;
+    }
+    if (message == WM_NCDESTROY)
+      RemoveWindowSubclass(child, childKeyboard, id);
+    return DefSubclassProc(child, message, w, l);
+  }
   HWND control(const wchar_t *kind, const std::string &title, int id, int x, int y, int w, int h,
                DWORD style = 0) {
     if (std::wstring(kind) == L"BUTTON" && !(style & BS_AUTOCHECKBOX))
@@ -457,6 +469,7 @@ struct ConsoleUI::Impl {
                              WS_CHILD | WS_VISIBLE | WS_TABSTOP | style, x, y, w, h, window,
                              (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr);
     SendMessageW(c, WM_SETFONT, (WPARAM)font, TRUE);
+    SetWindowSubclass(c, childKeyboard, 2, reinterpret_cast<DWORD_PTR>(this));
     controls.push_back(c);
     return c;
   }
@@ -517,6 +530,8 @@ struct ConsoleUI::Impl {
     if (screen == Screen::batches && next != screen && batchTitle)
       storeBatchDraft();
     screen = next;
+    if (next == Screen::controller || next == Screen::atlas)
+      SendMessageW(parent, CONSOLE_TAB_STATE, next == Screen::atlas, 0);
     scroll = 0;
     build();
   }
@@ -539,6 +554,7 @@ struct ConsoleUI::Impl {
     return {x, y, x + cardWidth, y + cardHeight};
   }
   void build() {
+    skin::invalidateBackdrop(window);
     struct BuildGuard {
       bool &flag;
       BuildGuard(bool &f) : flag(f) { flag = true; }
@@ -604,7 +620,9 @@ struct ConsoleUI::Impl {
         int x = bounds.left, y = bounds.top, w = bounds.right - x, h = bounds.bottom - y;
         if (y >= 62 && y + h <= height - 100) {
           int base = 5000 + (int)i * 16;
-          button("Details", base + 1, x + w - 70, y + 8, 58);
+          auto details = button("Open detailed stats, history, and recommendation", base + 1,
+                                x + w - 36, y + 8, 24);
+          skin::iconButton(details, skin::Icon::chart);
           profileFields[a.id + "Count"] =
               edit(!advancedMode && a.spec.loop ? std::string() : std::to_string(a.spec.count),
                    base + 4, x + 12, y + h - 48, 54);
@@ -633,6 +651,9 @@ struct ConsoleUI::Impl {
           }
         }
       }
+      button("Pick in Viewer", CONTROLLER_PICK, 145, 18, 112);
+      button("This session", CONTROLLER_SESSION, cw - 430, 18, 96);
+      button("All-time", CONTROLLER_ALL, cw - 330, 18, 78);
       button("Add AI", ADD_AGENT, cw - 108, 16, 92);
       if (!agents.empty()) {
         std::vector<std::string> names;
@@ -765,6 +786,8 @@ struct ConsoleUI::Impl {
       button("Store key", VAULT_SAVE, 18, 460, 108);
       button("Remove key", VAULT_REMOVE, 136, 460, 118);
       button("Save settings", SAVE_SETTINGS, 18, height - 98, 136);
+      profileFields["Theme"] = combo({"aero", "sunset", "deepsea", "bubblegum", "lemonlime"}, 0,
+                                     cw - 200, height - 98, 182, settings.themeIndex);
       button("Close", HOME, 18, height - 48, 90);
       int py = 58;
       for (auto entry : std::vector<std::pair<std::string, std::string>>{
@@ -1973,7 +1996,8 @@ struct ConsoleUI::Impl {
       title = "Clone project";
     if (screen == Screen::support)
       title = "Help and updates";
-    skin::label(dc, wide(title), 16, 17, width - 390, 28, 16, true);
+    skin::label(dc, wide(title), 16, 17, width - 390, 28, screen == Screen::controller ? 14 : 16,
+                true);
     hits.clear();
     if (screen == Screen::controller) {
       if (agents.empty())
@@ -1991,7 +2015,8 @@ struct ConsoleUI::Impl {
         uint32_t colorHash = 0;
         for (auto c : wide(a.spec.name))
           colorHash = colorHash * 31 + uint16_t(c);
-        skin::agentCard(dc, x, y, w, h, palette[colorHash % 12]);
+        auto tint = palette[colorHash % 12];
+        skin::agentCard(dc, x, y, w, h, tint);
         bool connected = false;
         for (auto &client : presence)
           if (client.value("agentId", std::string()) == a.id)
@@ -1999,10 +2024,25 @@ struct ConsoleUI::Impl {
         auto dot = agentPresence(a.spec.kind, lastAgentSignal[a.id], a.active,
                                  std::time(nullptr) * int64_t(1000));
         skin::presenceDot(dc, x + 12, y + 16, dot);
-        skin::label(dc, wide(a.spec.name), x + 32, y + 9, w - 112, 26, 15, true, false, true);
+        skin::label(dc, wide(a.spec.name), x + 32, y + 9, w - 154, 26, 15, true, false, false,
+                    tint);
+        auto stat =
+            (controllerLifetime ? agentStats : sessionAgentStats).value(a.id, Json::object());
+        skin::label(dc, wide(std::to_string(stat.value("declaredMatches", 0)) + " matched"),
+                    x + w - 112, y + 12, 72, 22, 11, true, false, false, RGB(34, 197, 94));
         skin::panel(dc, x + 12, y + 46, w - 24, advancedMode ? 90 : 104);
-        skin::label(dc, wide(a.detail.empty() ? "idle · " + a.spec.role : a.detail), x + 22, y + 54,
-                    w - 44, 56, 12, false, true);
+        auto role = automaticRole(
+            {{"name", a.spec.name},
+             {"provider", a.spec.provider},
+             {"roles", a.spec.role == "Unassigned" ? Json::array() : Json::array({a.spec.role})},
+             {"stats", agentStats.value(a.id, Json::object())},
+             {"hiddenRole",
+              agentStats.value(a.id, Json::object()).value("adaptiveRole", std::string())}});
+        skin::label(dc,
+                    wide(a.detail.empty()
+                             ? "idle - will run as " + role.at("role").get<std::string>()
+                             : a.detail),
+                    x + 22, y + 54, w - 44, 56, 12, false, true);
         skin::label(dc, wide(a.lastLine), x + 22, y + 108, w - 44, 24, 11, false, true);
         skin::label(dc,
                     wide(a.spec.kind + " · " + (connected ? "connected" : a.phase) + " · " +
@@ -2505,6 +2545,17 @@ struct ConsoleUI::Impl {
     fleet->commitReviewed(selectedId, "Reviewed agent work: " + agentName, tree);
   }
   void action(int id, int notification) {
+    if (id == CONTROLLER_SESSION || id == CONTROLLER_ALL) {
+      controllerLifetime = id == CONTROLLER_ALL;
+      InvalidateRect(window, nullptr, FALSE);
+      for (auto command : {CONTROLLER_SESSION, CONTROLLER_ALL})
+        InvalidateRect(GetDlgItem(window, command), nullptr, FALSE);
+      return;
+    }
+    if (id == CONTROLLER_PICK) {
+      SendMessageW(parent, CONSOLE_PICK_VIEWER, 0, 0);
+      return;
+    }
     if (id == DETAIL_OPERATIONS) {
       auto menu = CreatePopupMenu();
       for (auto entry :
@@ -3135,6 +3186,8 @@ struct ConsoleUI::Impl {
     case SAVE_SETTINGS: {
       if (fleet && fleet->running())
         throw std::runtime_error("Stop agents before changing safety settings");
+      settings.themeIndex = choice(profileFields.at("Theme"));
+      skin::theme(settings.themeIndex);
       Json nextPolicy = Json::object();
       for (auto field : {"animateBackground", "allowNearMiss", "allowGhidra", "safeMode", "reports",
                          "useAgents", "autoLand", "liveRefresh"})
@@ -3787,6 +3840,7 @@ struct ConsoleUI::Impl {
       case WM_ERASEBKGND:
         return 1;
       case WM_PAINT: {
+        skin::invalidateBackdrop(h);
         PAINTSTRUCT ps;
         auto dc = BeginPaint(h, &ps);
         HDC buffer = CreateCompatibleDC(dc);
@@ -3804,6 +3858,8 @@ struct ConsoleUI::Impl {
         return 0;
       }
       case WM_PRINTCLIENT: {
+        if (!GetPropW(h, L"TangOSBackdropRendering"))
+          skin::invalidateBackdrop(h);
         POINT origin{};
         MapWindowPoints(h, self->parent, &origin, 1);
         skin::background((HDC)w, self->width, self->height, origin.y, self->height + origin.y);
@@ -3859,9 +3915,16 @@ struct ConsoleUI::Impl {
           return TRUE;
         }
         if (item->CtlType == ODT_BUTTON) {
-          skin::button(*item,
-                       item->CtlID == GO || item->CtlID == TOOL_RUN || item->CtlID == SAVE_PROFILE,
-                       item->CtlID == STOP || item->CtlID == TOOL_CANCEL);
+          skin::button(
+              *item,
+              item->CtlID == GO || item->CtlID == TOOL_RUN || item->CtlID == SAVE_PROFILE ||
+                  (item->CtlID == CONTROLLER_SESSION && !self->controllerLifetime) ||
+                  (item->CtlID == CONTROLLER_ALL && self->controllerLifetime) ||
+                  (item->CtlID >= 5000 && item->CtlID < 5000 + int(self->cardIds.size()) * 16 &&
+                   (item->CtlID - 5000) % 16 == 0 && text(item->hwndItem) == "Go"),
+              item->CtlID == STOP || item->CtlID == TOOL_CANCEL ||
+                  (item->CtlID >= 5000 && item->CtlID < 5000 + int(self->cardIds.size()) * 16 &&
+                   (item->CtlID - 5000) % 16 == 0 && text(item->hwndItem) == "Stop"));
           return TRUE;
         }
         if (item->CtlType == ODT_COMBOBOX) {
@@ -4154,6 +4217,18 @@ void ConsoleUI::stop() {
   impl->serviceRunner.cancel();
   if (impl->fleet)
     impl->fleet->stopAll();
+}
+void ConsoleUI::openPanel(const std::string &panel) {
+  if (panel == "settings" || panel == "keys")
+    impl->navigate(Screen::settings);
+  else if (panel == "help" || panel == "report")
+    impl->navigate(Screen::support);
+  else if (panel == "batches")
+    impl->navigate(Screen::batches);
+  else
+    throw std::runtime_error("Unknown native panel: " + panel);
+  if (panel == "keys" && impl->keyChoice)
+    SetFocus(impl->keyChoice);
 }
 void ConsoleUI::smokeRemote(const fs::path &directory,
                             const std::function<void(const fs::path &)> &capture) {
@@ -4470,6 +4545,25 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
           "retained log, full diff review. UI messages=" +
               std::to_string(pumps));
     capture(directory / "console-4.bmp");
+    SetFocus(impl->logBox);
+    SendMessageW(impl->logBox, WM_KEYDOWN, VK_ESCAPE, 0);
+    MSG escapeMessage;
+    while (PeekMessageW(&escapeMessage, nullptr, 0, 0, PM_REMOVE)) {
+      TranslateMessage(&escapeMessage);
+      DispatchMessageW(&escapeMessage);
+    }
+    if (impl->screen != Screen::controller)
+      throw std::runtime_error("Escape from focused detail log did not close the overlay");
+    impl->action(CONTROLLER_ALL, BN_CLICKED);
+    if (!impl->controllerLifetime)
+      throw std::runtime_error("Controller all-time scope did not switch");
+    impl->action(CONTROLLER_SESSION, BN_CLICKED);
+    impl->action(CONTROLLER_PICK, BN_CLICKED);
+    if (impl->controllerLifetime || impl->screen != Screen::atlas)
+      throw std::runtime_error("Controller session scope or Pick in Viewer failed");
+    impl->navigate(Screen::controller);
+    write(directory / "controller-navigation-report.txt",
+          "PASS: session/all-time controls, Pick in Viewer, and Escape from focused detail log");
   }
   for (auto screen :
        {Screen::controller, Screen::atlas, Screen::encyclopedia, Screen::settings, Screen::profile,

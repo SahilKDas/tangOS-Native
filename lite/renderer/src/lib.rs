@@ -22,6 +22,58 @@ fn color(c: u32) -> Color {
     Color::from_rgba8((c >> 16) as u8, (c >> 8) as u8, c as u8, (c >> 24) as u8)
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn tangos_icon(data: *mut u8, w: u32, h: u32, icon: u32, ink: u32) {
+    if data.is_null() || w == 0 || h == 0 || w > 256 || h > 256 { return; }
+    let bytes = std::slice::from_raw_parts_mut(data, w as usize * h as usize * 4);
+    for pixel in bytes.chunks_exact_mut(4) { pixel.swap(0, 2); pixel[3] = 255; }
+    let mut pixmap = PixmapMut::from_bytes(bytes, w, h).unwrap();
+    let mut path = PathBuilder::new();
+    let line = |p: &mut PathBuilder, x: f32, y: f32, xx: f32, yy: f32| {
+        p.move_to(x, y); p.line_to(xx, yy);
+    };
+    match icon {
+        0 => { // Bug / report.
+            path.move_to(8., 8.); path.cubic_to(8., 3., 16., 3., 16., 8.);
+            path.move_to(7., 9.); path.line_to(17., 9.); path.line_to(17., 14.);
+            path.cubic_to(17., 23., 7., 23., 7., 14.); path.close();
+            for y in [10., 14., 18.] { line(&mut path, 3., y, 7., y); line(&mut path, 17., y, 21., y); }
+            line(&mut path, 12., 9., 12., 20.);
+            line(&mut path, 8., 5., 6., 3.); line(&mut path, 16., 5., 18., 3.);
+        }
+        1 => { // Refresh.
+            path.move_to(20., 10.); path.cubic_to(19., 2., 7., 1., 4., 9.);
+            path.move_to(4., 14.); path.cubic_to(5., 22., 17., 23., 20., 15.);
+            path.move_to(20., 4.); path.line_to(20., 10.); path.line_to(14., 10.);
+            path.move_to(4., 20.); path.line_to(4., 14.); path.line_to(10., 14.);
+        }
+        2 => { // Settings sliders.
+            for y in [5., 12., 19.] { line(&mut path, 3., y, 21., y); }
+            for (x, y) in [(8., 5.), (16., 12.), (10., 19.)] { path.push_circle(x, y, 2.5); }
+        }
+        3 => { // Key vault.
+            path.push_circle(15.5, 7.5, 5.5);
+            path.move_to(11.5, 11.5); path.line_to(3., 20.); path.line_to(3., 22.);
+            path.line_to(7., 22.); path.line_to(7., 18.); path.line_to(10., 18.);
+            path.line_to(10., 15.); path.line_to(12.5, 12.5);
+            path.push_circle(17., 6., 0.5);
+        }
+        4 => line(&mut path, 6., 12., 18., 12.),
+        5 => { path.move_to(6., 6.); path.line_to(18., 6.); path.line_to(18., 18.); path.line_to(6., 18.); path.close(); }
+        6 => { line(&mut path, 6., 6., 18., 18.); line(&mut path, 18., 6., 6., 18.); }
+        7 => { line(&mut path, 5., 19., 5., 12.); line(&mut path, 12., 19., 12., 5.); line(&mut path, 19., 19., 19., 9.); }
+        _ => { path.move_to(6., 3.); path.line_to(14., 3.); path.line_to(19., 8.); path.line_to(19., 21.); path.line_to(6., 21.); path.close();
+               path.move_to(14., 3.); path.line_to(14., 8.); path.line_to(19., 8.);
+               for y in [12., 16.] { line(&mut path, 9., y, 16., y); } }
+    }
+    if let Some(path) = path.finish() {
+        let mut paint = Paint::default(); paint.set_color(color(ink));
+        let stroke = Stroke { width: 2., line_cap: LineCap::Round, line_join: LineJoin::Round, ..Stroke::default() };
+        pixmap.stroke_path(&path, &paint, &stroke, Transform::from_scale(w as f32 / 24., h as f32 / 24.), None);
+    }
+    for pixel in bytes.chunks_exact_mut(4) { pixel.swap(0, 2); }
+}
+
 // The caller owns a width*height BGRA DIB. No pointers are retained across calls.
 #[no_mangle]
 pub unsafe extern "C" fn tangos_shape(
