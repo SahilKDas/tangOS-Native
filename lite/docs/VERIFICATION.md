@@ -1,5 +1,22 @@
 # Windows release verification — 2026-10-09
 
+## 0.25.0 verified portable package — 2026-10-09
+
+Source checkpoint **d7953ab** produced two identical clean Windows x64 builds:
+**6,752,768 bytes (6.753 decimal MB)**, SHA256
+**76CBA327C0DA1DB6402E376A30AE451D62AB2304BC942F503D5B4A9840164823**.
+All five native suites passed (139.28 seconds), with the official MCP Inspector.
+Packaged backend, adapter, disposable Git/ZIP tests and **12,391 original Console
+comparisons** passed. Valid, missing and invalid descriptor GUI workflows passed
+with 11/11/12 responsive timer ticks. The valid workflow also passed the new
+captured-helper header pixel check, all ten tour steps, styled text, cache reuse,
+offline cache retention and the display/theme matrix. Windows system DLL imports
+only; no browser runtime, credentials or game data are packaged.
+
+Build evidence is retained in `lite/release-0.25.0-verified`. Exact background
+motion/composition, auxiliary overlays, unusual DPI and hosted-service/write
+integration parity remain open; the parity inventory remains `fullParity: false`.
+
 ## 0.24.0 verified portable package — 2026-10-09
 
 Source checkpoint **66a04e4** produced two identical clean Windows x64 builds:
