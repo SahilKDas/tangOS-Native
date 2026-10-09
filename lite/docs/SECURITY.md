@@ -1,5 +1,11 @@
 # Security and destructive-operation review
 
+The reference-shaped Controller footer retains the native safety policy: Writes
+is explicit and defaults OFF; Review remains ON; Push remains OFF and opens the
+reviewed Git workflow. These last two controls intentionally do not enable the
+original Console's unattended rolling-PR pipeline, because every commit and push
+must retain its own preview. MCP also defaults OFF until the user opts in.
+
 Native debug snapshots are saved locally, with no upload. Their JSON contains
 UI geometry, reviewed policy flags, agent identifiers/phases and queue counts;
 it omits key values, driver commands, prompts and log bodies. Known vault values

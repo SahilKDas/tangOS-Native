@@ -164,6 +164,8 @@ constexpr int SUPPORT = 4850, SUPPORT_CHECK = 4851, SUPPORT_REPORT = 4852, SUPPO
 constexpr int MCP_EXPORT = 4830, DETAIL_LOOP = 4840;
 constexpr int MCP_INSTALL = 4831;
 constexpr int CONTROLLER_SESSION = 4900, CONTROLLER_ALL = 4901, CONTROLLER_PICK = 4902;
+constexpr int CONTROLLER_WRITES = 4903, CONTROLLER_REVIEW = 4904, CONTROLLER_PUSH = 4905;
+constexpr int CONTROLLER_CLEAR_CART = 4906;
 constexpr int DETAIL_SCOPE = 4841, DETAIL_MODEL = 4842, DETAIL_COPY = 4843, DETAIL_RECENT = 4844,
               DETAIL_REVEAL = 4845, DETAIL_LIVE = 4846;
 constexpr int CLONE_DEST = 4810, CLONE_PREVIEW = 4811, CLONE_CONFIRM = 4812, CLONE_CANCEL = 4813;
@@ -192,7 +194,7 @@ struct ConsoleUI::Impl {
   std::unique_ptr<McpServer> mcp, pendingMcp;
   std::thread mcpWorker;
   std::atomic<bool> mcpBusy{false}, mcpReady{false};
-  bool mcpDesired = true;
+  bool mcpDesired = false;
   std::string mcpError, pendingMcpError;
   Vault vault;
   Screen screen = Screen::controller;
@@ -366,7 +368,7 @@ struct ConsoleUI::Impl {
                          : "status";
       if (atlasColorBy != "author")
         atlasColorBy = "status";
-      mcpDesired = !j.contains("mcpDesired") || j["mcpDesired"] != false;
+      mcpDesired = j.contains("mcpDesired") && j["mcpDesired"] == true;
       atlasDrafts = !j.contains("atlasDrafts") || !j["atlasDrafts"].is_boolean() ||
                     j["atlasDrafts"].get<bool>();
     }
@@ -554,13 +556,14 @@ struct ConsoleUI::Impl {
       return true;
     }
   }
-  int controllerWidth() const { return width - (controllerNeedsRail() ? 356 : 0); }
+  int controllerWidth() const { return width - (controllerNeedsRail() ? 354 : 14); }
   RECT agentCardBounds(size_t index) const {
-    int cardWidth = std::max(60, (controllerWidth() - 60) / 3);
+    double cardWidth = std::max(60., (controllerWidth() - 62) / 3.);
     int cardHeight = advancedMode ? 272 : 210;
-    int x = 18 + int(index % 3) * (cardWidth + 12);
-    int y = 64 + int(index / 3) * (cardHeight + 12) - scroll;
-    return {x, y, x + cardWidth, y + cardHeight};
+    int x = 19 + int(std::round((index % 3) * (cardWidth + 12)));
+    int y = 62 + int(index / 3) * (cardHeight + 12) - scroll;
+    int right = 19 + int(std::round((index % 3) * (cardWidth + 12) + cardWidth));
+    return {x, y, right, y + cardHeight};
   }
   void build() {
     skin::invalidateBackdrop(window);
@@ -629,13 +632,31 @@ struct ConsoleUI::Impl {
         int x = bounds.left, y = bounds.top, w = bounds.right - x, h = bounds.bottom - y;
         if (y >= 62 && y + h <= height - 100) {
           int base = 5000 + (int)i * 16;
-          auto details = button("Open detailed stats, history, and recommendation", base + 1,
-                                x + w - 36, y + 8, 24);
+          int cartOffset = !advancedMode && !a.active && !cart.empty() ? 38 : 0;
+          auto details = control(L"BUTTON", "Open detailed stats, history, and recommendation",
+                                 base + 1, x + w - 37, y + 12, 24, 24);
           skin::iconButton(details, skin::Icon::chart);
           profileFields[a.id + "Count"] =
               edit(!advancedMode && a.spec.loop ? std::string() : std::to_string(a.spec.count),
-                   base + 4, x + 12, y + h - 48, 54);
-          button(a.active ? "Stop" : "Go", base, x + 74, y + h - 48, w - 86);
+                   base + 4, x + 13, y + h - (advancedMode ? 48 : 55) - cartOffset, 58,
+                   advancedMode ? 30 : 44, ES_AUTOHSCROLL | ES_CENTER);
+          skin::controlFont(profileFields[a.id + "Count"], 15, 800);
+          if (!advancedMode)
+            SendMessageW(profileFields[a.id + "Count"], EM_SETCUEBANNER, TRUE,
+                         reinterpret_cast<LPARAM>(L"∞"));
+          auto go = control(L"BUTTON", a.active ? "Stop" : "Go", base, x + 78,
+                            y + h - (advancedMode ? 48 : 55) - cartOffset, w - 91,
+                            advancedMode ? 30 : 44);
+          skin::buttonFont(go, 14, 800);
+          skin::iconTextButton(go, a.active ? skin::Icon::stop : skin::Icon::play);
+          EnableWindow(go, a.active || !a.queue.empty() || descriptor.role("scheduler"));
+          if (cartOffset) {
+            auto cartButton =
+                control(L"BUTTON", "Add chosen functions (" + std::to_string(cart.size()) + ")",
+                        base + 7, x + 13, y + h - 41, w - 26, 30);
+            skin::iconTextButton(cartButton, skin::Icon::cart);
+            skin::buttonFont(cartButton, 12);
+          }
           if (advancedMode) {
             std::vector<std::string> roles = {"Unassigned", "Hard matcher", "Drafter", "Refiner",
                                               "Random"};
@@ -660,29 +681,45 @@ struct ConsoleUI::Impl {
           }
         }
       }
-      button("Pick in Viewer", CONTROLLER_PICK, 145, 18, 112);
-      button("This session", CONTROLLER_SESSION, cw - 430, 18, 96);
-      button("All-time", CONTROLLER_ALL, cw - 330, 18, 78);
-      button("Add AI", ADD_AGENT, cw - 108, 16, 92);
-      if (!agents.empty()) {
-        std::vector<std::string> names;
-        int sel = 0;
-        for (size_t i = 0; i < agents.size(); ++i) {
-          names.push_back(agents[i].spec.name);
-          if (agents[i].id == selectedId)
-            sel = int(i);
-        }
-        agentChoice = combo(names, DETAIL, cw - 300, height - 48, 184, sel);
-        button("Review", REVIEW_AGENT, cw - 108, height - 48, 92);
+      control(L"BUTTON", "Pick in Viewer", CONTROLLER_PICK, 143, 20, 112, 25);
+      control(L"BUTTON", "This session", CONTROLLER_SESSION, cw - (advancedMode ? 430 : 284),
+              advancedMode ? 18 : 23, advancedMode ? 96 : 88, advancedMode ? 30 : 20);
+      control(L"BUTTON", "All-time", CONTROLLER_ALL, cw - (advancedMode ? 330 : 196),
+              advancedMode ? 18 : 23, advancedMode ? 78 : 62, advancedMode ? 30 : 20);
+      skin::buttonFont(GetDlgItem(window, CONTROLLER_PICK), 12);
+      skin::iconTextButton(GetDlgItem(window, CONTROLLER_PICK), skin::Icon::cart);
+      if (!cart.empty()) {
+        auto clear = control(L"BUTTON", std::to_string(cart.size()) + " in cart · Clear",
+                             CONTROLLER_CLEAR_CART, 265, 20, 154, 25);
+        skin::iconTextButton(clear, skin::Icon::cart);
+        skin::buttonFont(clear, 12);
       }
-      button("Tools", ENCYCLOPEDIA, 16, height - 48, 70);
-      button("Settings", SETTINGS, 94, height - 48, 76);
-      button("Git", GITTOOLS, 178, height - 48, 56);
-      button("Tango", GUIDE, 242, height - 48, 60);
-      button("Batches", BATCHES, 310, height - 48, 76);
-      button("Help", SUPPORT, 394, height - 48, 94);
+      skin::buttonFont(GetDlgItem(window, CONTROLLER_SESSION), 11);
+      skin::buttonFont(GetDlgItem(window, CONTROLLER_ALL), 11);
+      if (advancedMode)
+        button("Add AI", ADD_AGENT, cw - 108, 16, 92);
+      int footerY = height - 61;
+      auto encyclopedia = control(L"BUTTON", "Encyclopedia; right-click for Git, Batches and Help",
+                                  ENCYCLOPEDIA, 23, footerY, 32, 30);
+      skin::iconButton(encyclopedia, skin::Icon::document);
+      int policyX = (cw - 355) / 2;
+      auto writePolicy = control(L"BUTTON", allowWrites ? "Writes: ON" : "Writes: OFF",
+                                 CONTROLLER_WRITES, policyX, footerY, 115, 30);
+      skin::iconTextButton(writePolicy, skin::Icon::shield);
+      skin::policyButton(writePolicy, allowWrites ? 2 : 0);
+      auto reviewPolicy =
+          control(L"BUTTON", "Review: ON", CONTROLLER_REVIEW, policyX + 125, footerY, 114, 30);
+      skin::iconTextButton(reviewPolicy, skin::Icon::branch);
+      skin::policyButton(reviewPolicy, 1);
+      auto pushPolicy =
+          control(L"BUTTON", "Push: OFF", CONTROLLER_PUSH, policyX + 249, footerY, 106, 30);
+      skin::iconTextButton(pushPolicy, skin::Icon::pullRequest);
+      skin::policyButton(pushPolicy, 0);
+      auto github = control(L"BUTTON", "GitHub sign-in", REQ_GITHUB, cw - 164, footerY, 141, 30);
+      skin::iconTextButton(github, skin::Icon::github);
+      skin::policyButton(github, 0);
       button(mcp && mcp->state().value("running", false) ? "MCP: ON" : "MCP: OFF", OPEN_MCP,
-             cw - 240, 16, 108);
+             cw - (advancedMode ? 240 : 118), 16, 108);
       if (controllerNeedsRail()) {
         button("This repo needs", REQUIREMENTS, width - 332, 16, 188);
         button("Run logs", OPEN_LOG, width - 180, height - 116, 116);
@@ -2347,7 +2384,13 @@ struct ConsoleUI::Impl {
       }
       skin::panel(dc, 8, mapTop() - 8, mapWidth() + 20, mapHeight() + 16);
     } else
-      skin::panel(dc, 0, 0, fullController ? width : width - 356, height);
+      skin::panel(dc, 0, 0,
+                  screen == Screen::controller ? controllerWidth()
+                  : fullController             ? width
+                                               : width - 356,
+                  height, false,
+                  screen == Screen::controller ? skin::PanelStyle::controller
+                                               : skin::PanelStyle::glass);
     if (!fullController && screen != Screen::atlas)
       skin::panel(dc, width - 340, 0, 340, height, true);
     std::string title = screen == Screen::remoteGate       ? "Viewer-only project"
@@ -2371,10 +2414,11 @@ struct ConsoleUI::Impl {
       title = "Clone project";
     if (screen == Screen::support)
       title = "Help and updates";
-    skin::label(dc, wide(title), 16, 17, width - 390, 28, screen == Screen::controller ? 14 : 16,
-                true);
+    skin::label(dc, wide(title), screen == Screen::controller ? 17 : 16, 17, width - 390, 28,
+                screen == Screen::controller ? 15 : 16, true);
     hits.clear();
     if (screen == Screen::controller) {
+      skin::rule(dc, 17, height - 78, controllerWidth() - 34);
       if (agents.empty())
         skin::label(dc, L"No AIs connected yet.", width / 4 - 105, 105, 360, 28, 15, false, true);
       for (size_t i = 0; i < agents.size(); i++) {
@@ -2398,14 +2442,24 @@ struct ConsoleUI::Impl {
             connected = true;
         auto dot = agentPresence(a.spec.kind, lastAgentSignal[a.id], a.active,
                                  std::time(nullptr) * int64_t(1000));
-        skin::presenceDot(dc, x + 12, y + 16, dot);
-        skin::label(dc, wide(a.spec.name), x + 32, y + 9, w - 154, 26, 15, true, false, false,
-                    tint);
+        skin::presenceDot(dc, x + 13, y + 20, dot, 9);
+        int nameWidth = std::min(skin::textWidth(dc, wide(a.spec.name), 15, 800), w - 180);
+        skin::label(dc, wide(a.spec.name), x + 29, y + 14, nameWidth + 4, 22, 15, true, false,
+                    false, tint, false, 800);
+        if (a.spec.kind == "api")
+          skin::badge(dc, L"API", x + 29 + nameWidth + 7, y + 16, 31, 16);
         auto stat =
             (controllerLifetime ? agentStats : sessionAgentStats).value(a.id, Json::object());
-        skin::label(dc, wide(std::to_string(stat.value("declaredMatches", 0)) + " matched"),
-                    x + w - 112, y + 12, 72, 22, 11, true, false, false, RGB(34, 197, 94));
-        skin::panel(dc, x + 12, y + 46, w - 24, advancedMode ? 90 : 104);
+        auto matches = wide(std::to_string(stat.value("declaredMatches", 0)));
+        int matchesWidth = skin::textWidth(dc, matches, 16, 800);
+        int suffixWidth = skin::textWidth(dc, L" matched", 10, 600);
+        int matchesX = x + w - 44 - matchesWidth - suffixWidth;
+        skin::label(dc, matches, matchesX, y + 14, matchesWidth, 22, 16, true, false, false,
+                    skin::matched(), false, 800);
+        skin::label(dc, L" matched", matchesX + matchesWidth, y + 19, suffixWidth, 16, 10, false,
+                    true, false, CLR_INVALID, false, 600);
+        int taskHeight = advancedMode ? 90 : !a.active && !cart.empty() ? 65 : 103;
+        skin::panel(dc, x + 13, y + 44, w - 26, taskHeight, false, skin::PanelStyle::task);
         auto role = automaticRole(
             {{"name", a.spec.name},
              {"provider", a.spec.provider},
@@ -2413,17 +2467,24 @@ struct ConsoleUI::Impl {
              {"stats", agentStats.value(a.id, Json::object())},
              {"hiddenRole",
               agentStats.value(a.id, Json::object()).value("adaptiveRole", std::string())}});
+        bool pristine =
+            !a.active && a.detail.empty() && a.lastLine.empty() && a.total == 0 && a.queue.empty();
+        int taskClip = SaveDC(dc);
+        IntersectClipRect(dc, x + 14, y + 45, x + w - 14, y + 43 + taskHeight);
         skin::label(dc,
                     wide(a.detail.empty()
                              ? "idle - will run as " + role.at("role").get<std::string>()
                              : a.detail),
-                    x + 22, y + 54, w - 44, 56, 12, false, true);
+                    x + 24, y + (pristine ? 44 + (taskHeight - 16) / 2 : 54), w - 48,
+                    pristine ? 18 : 56, 12, false, true, false, CLR_INVALID, pristine);
         skin::label(dc, wide(a.lastLine), x + 22, y + 108, w - 44, 24, 11, false, true);
-        skin::label(dc,
-                    wide(a.spec.kind + " · " + (connected ? "connected" : a.phase) + " · " +
-                         std::to_string(a.completed) + "/" + std::to_string(a.total) + " · " +
-                         std::to_string(a.queue.size()) + " queued"),
-                    x + 14, y + h - (advancedMode ? 154 : 80), w - 28, 24, 11, false, true);
+        if (!pristine)
+          skin::label(dc,
+                      wide(a.spec.kind + " · " + (connected ? "connected" : a.phase) + " · " +
+                           std::to_string(a.completed) + "/" + std::to_string(a.total) + " · " +
+                           std::to_string(a.queue.size()) + " queued"),
+                      x + 14, y + h - (advancedMode ? 154 : 80), w - 28, 24, 11, false, true);
+        RestoreDC(dc, taskClip);
         hits.push_back({b, int(i)});
       }
       if (controllerNeedsRail()) {
@@ -2920,6 +2981,33 @@ struct ConsoleUI::Impl {
     fleet->commitReviewed(selectedId, "Reviewed agent work: " + agentName, tree);
   }
   void action(int id, int notification) {
+    if (id == CONTROLLER_CLEAR_CART && notification == BN_CLICKED) {
+      cart.clear();
+      build();
+      return;
+    }
+    if (id == CONTROLLER_WRITES && notification == BN_CLICKED) {
+      auto path = data / "console-ui.json";
+      auto preferences = fs::exists(path) ? Json::parse(read(path)) : Json::object();
+      preferences["writes"] = !allowWrites;
+      write(path, preferences.dump(2));
+      allowWrites = !allowWrites;
+      build();
+      return;
+    }
+    if (id == CONTROLLER_REVIEW && notification == BN_CLICKED) {
+      if (selectedId.empty() && !agents.empty())
+        selectedId = agents.front().id;
+      if (!selectedId.empty())
+        navigate(Screen::detail);
+      else
+        gitTools();
+      return;
+    }
+    if (id == CONTROLLER_PUSH && notification == BN_CLICKED) {
+      gitTools();
+      return;
+    }
     if (id == CONTROLLER_SESSION || id == CONTROLLER_ALL) {
       controllerLifetime = id == CONTROLLER_ALL;
       InvalidateRect(window, nullptr, FALSE);
@@ -4149,8 +4237,15 @@ struct ConsoleUI::Impl {
     if (screen == Screen::controller)
       for (size_t i = 0; i < agents.size(); ++i) {
         auto b = GetDlgItem(window, 5000 + (int)i * 16);
-        if (b)
-          SetWindowTextW(b, agents[i].active ? L"Stop" : L"Go");
+        if (b) {
+          auto title = agents[i].active ? "Stop" : "Go";
+          if (text(b) != title) {
+            setText(b, title);
+            skin::iconTextButton(b, agents[i].active ? skin::Icon::stop : skin::Icon::play);
+          }
+          EnableWindow(b, agents[i].active || !agents[i].queue.empty() ||
+                              descriptor.role("scheduler"));
+        }
       }
     std::string out;
     {
@@ -4405,6 +4500,26 @@ struct ConsoleUI::Impl {
           return SendMessageW(h, WM_LBUTTONUP, w, l);
         return 0;
       case WM_CONTEXTMENU:
+        if (self->screen == Screen::controller &&
+            reinterpret_cast<HWND>(w) == GetDlgItem(h, ENCYCLOPEDIA)) {
+          auto menu = CreatePopupMenu();
+          for (auto entry : std::vector<std::pair<int, const wchar_t *>>{
+                   {ENCYCLOPEDIA, L"Encyclopedia"},
+                   {GITTOOLS, L"Git controls"},
+                   {BATCHES, L"Batches"},
+                   {SETTINGS, L"Settings"},
+                   {GUIDE, L"Tango guide"},
+                   {SUPPORT, L"Help, updates and reports"}})
+            AppendMenuW(menu, MF_STRING, entry.first, entry.second);
+          RECT bounds{};
+          GetWindowRect(GetDlgItem(h, ENCYCLOPEDIA), &bounds);
+          auto selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, bounds.left,
+                                         bounds.top, 0, h, nullptr);
+          DestroyMenu(menu);
+          if (selected)
+            self->action(selected, BN_CLICKED);
+          return 0;
+        }
         if (self->screen == Screen::atlas)
           return 0;
         break;
@@ -4867,6 +4982,59 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     return;
   }
   if (impl->fleet) {
+    if (!impl->mcpDesired && impl->mcp)
+      throw std::runtime_error("MCP started without a persisted user opt-in");
+    AgentSpec referenceAgent;
+    referenceAgent.name = "Fixture API";
+    referenceAgent.kind = "api";
+    referenceAgent.model = "fixture";
+    referenceAgent.baseUrl = "http://127.0.0.1:1";
+    referenceAgent.loop = true;
+    auto referenceId = impl->fleet->add(referenceAgent);
+    impl->navigate(Screen::controller);
+    auto priorWrites = impl->allowWrites;
+    impl->action(CONTROLLER_WRITES, BN_CLICKED);
+    if (impl->allowWrites == priorWrites ||
+        Json::parse(read(impl->data / "console-ui.json")).value("writes", priorWrites) ==
+            priorWrites)
+      throw std::runtime_error("Footer Writes toggle did not persist");
+    impl->action(CONTROLLER_WRITES, BN_CLICKED);
+    if (impl->allowWrites != priorWrites)
+      throw std::runtime_error("Footer Writes toggle did not restore");
+    auto card = impl->agentCardBounds(0);
+    for (auto entry : std::vector<std::pair<int, RECT>>{
+             {5001, {card.right - 37, card.top + 12, card.right - 13, card.top + 36}},
+             {CONTROLLER_WRITES,
+              {(impl->controllerWidth() - 355) / 2, impl->height - 61,
+               (impl->controllerWidth() - 355) / 2 + 115, impl->height - 31}}}) {
+      RECT actual{};
+      GetWindowRect(GetDlgItem(impl->window, entry.first), &actual);
+      MapWindowPoints(nullptr, impl->window, reinterpret_cast<POINT *>(&actual), 2);
+      if (!EqualRect(&actual, &entry.second))
+        throw std::runtime_error("Controller control differs from reference geometry");
+    }
+    capture(directory / "controller-reference-idle.bmp");
+    auto badgeDC = CreateCompatibleDC(nullptr);
+    auto windowDC = GetDC(impl->window);
+    auto badgeBitmap = CreateCompatibleBitmap(windowDC, 31, 16);
+    ReleaseDC(impl->window, windowDC);
+    auto previousBitmap = SelectObject(badgeDC, badgeBitmap);
+    RECT badgeBounds{0, 0, 31, 16};
+    FillRect(badgeDC, &badgeBounds, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
+    skin::badge(badgeDC, L"API", 0, 0, 31, 16);
+    int inkPixels = 0;
+    for (int y = 4; y < 12; ++y)
+      for (int x = 6; x < 25; ++x) {
+        auto pixel = GetPixel(badgeDC, x, y);
+        if (GetRValue(pixel) < 100 && GetGValue(pixel) < 210 && GetBValue(pixel) > 150)
+          ++inkPixels;
+      }
+    SelectObject(badgeDC, previousBitmap);
+    DeleteObject(badgeBitmap);
+    DeleteDC(badgeDC);
+    if (inkPixels < 5)
+      throw std::runtime_error("API badge compositing erased its text");
+    impl->fleet->remove(referenceId);
     AgentSpec agent;
     agent.name = "Native CLI fixture";
     agent.kind = "cli";
@@ -4915,6 +5083,9 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
           throw std::runtime_error("Grid card lost Go/Stop control");
         MapWindowPoints(nullptr, impl->window, (POINT *)&actual, 2);
         auto card = impl->agentCardBounds(i);
+        if (!advanced && actual.bottom - actual.top != 44)
+          throw std::runtime_error(
+              "Simple Go/Stop control does not match the 44-pixel reference height");
         if (actual.left < card.left || actual.right > card.right || actual.top < card.top ||
             actual.bottom > card.bottom)
           throw std::runtime_error("Grid control escapes card");
@@ -5069,6 +5240,38 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     throw std::runtime_error("Tour completion did not persist");
   if (impl->atlas.empty())
     throw std::runtime_error("GUI viewer fixture has no functions");
+  if (impl->fleet) {
+    auto previousCart = impl->cart;
+    auto previousSelected = impl->selectedId;
+    auto previousAdvanced = impl->advancedMode;
+    AgentSpec cartAgent;
+    cartAgent.name = "Native cart fixture";
+    cartAgent.kind = "mcp";
+    auto id = impl->fleet->add(cartAgent);
+    auto target = impl->atlas.size() > 1 ? 1u : 0u;
+    impl->cart = {target};
+    impl->advancedMode = false;
+    impl->navigate(Screen::controller);
+    auto at = std::find(impl->cardIds.begin(), impl->cardIds.end(), id);
+    int command = 5000 + int(at - impl->cardIds.begin()) * 16 + 7;
+    if (!GetDlgItem(impl->window, command) || !GetDlgItem(impl->window, CONTROLLER_CLEAR_CART))
+      throw std::runtime_error("Simple mode has no direct cart assignment controls");
+    capture(directory / "controller-cart.bmp");
+    impl->action(command, BN_CLICKED);
+    auto queued = impl->fleet->snapshot();
+    auto assigned =
+        std::find_if(queued.begin(), queued.end(), [&](const auto &a) { return a.id == id; });
+    if (!impl->cart.empty() || assigned == queued.end() || assigned->queue.size() != 1 ||
+        assigned->queue.at(0).value("id", std::string()) != impl->atlas[target].id ||
+        assigned->active)
+      throw std::runtime_error("Simple cart did not queue the chosen target without executing it");
+    impl->fleet->remove(id);
+    impl->selectedId = previousSelected;
+    impl->advancedMode = previousAdvanced;
+    impl->cart = previousCart;
+    write(directory / "controller-cart-report.txt",
+          "PASS: Simple per-agent cart CTA queues the selected target without provider execution");
+  }
   impl->navigate(Screen::atlas);
   capture(directory / "atlas-contributors.bmp");
   if (SendMessageW(impl->functionList, LB_GETCOUNT, 0, 0) != (LRESULT)impl->atlas.size())
@@ -5162,6 +5365,10 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     impl->tick();
   };
   impl->navigate(Screen::mcpConnection);
+  if (!impl->mcp) {
+    impl->action(MCP_TOGGLE, BN_CLICKED);
+    waitFor([&] { return impl->mcpBusy.load() || impl->mcpReady.load(); });
+  }
   if (!impl->mcp || impl->mcpSummary().find("Status: running") == std::string::npos ||
       impl->mcpPrompt().find("AGENTS.md") == std::string::npos)
     throw std::runtime_error("MCP connection screen/prompt missing");

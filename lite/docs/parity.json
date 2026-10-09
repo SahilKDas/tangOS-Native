@@ -18,8 +18,8 @@
     },
     {
       "contract": "allowMutations",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": ["lite/src/console_ui.cpp:CONTROLLER_WRITES", "lite/src/console_ui.cpp:smokeScreens", "Native tool permission defaults OFF and is remembered; complete reference execution semantics are not verified"],
       "kind": "state"
     },
     {

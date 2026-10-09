@@ -6,12 +6,17 @@
 #include <cmath>
 #include <map>
 #include <memory>
+#include <tuple>
 #include <vector>
 extern "C" void tangos_shape(unsigned char *, unsigned, unsigned, float, uint32_t, uint32_t);
+extern "C" void tangos_frame(unsigned char *, unsigned, unsigned, float, uint32_t, uint32_t);
+extern "C" void tangos_gradient_frame(unsigned char *, unsigned, unsigned, float, uint32_t,
+                                      uint32_t, uint32_t);
 extern "C" void tangos_image(unsigned char *, unsigned, unsigned, const unsigned char *, size_t);
 extern "C" void tangos_mesh(unsigned char *, unsigned, unsigned, float, unsigned);
 extern "C" void tangos_icon(unsigned char *, unsigned, unsigned, unsigned, uint32_t);
-extern "C" void tangos_glass(unsigned char *, unsigned, unsigned, uint32_t, uint32_t, uint32_t);
+extern "C" void tangos_glass(unsigned char *, unsigned, unsigned, uint32_t, uint32_t, uint32_t,
+                             unsigned);
 namespace skin {
 namespace {
 struct Color {
@@ -28,14 +33,16 @@ struct Palette {
 Palette colors{Color(143, 208, 248),      Color(126, 200, 240), Color(142, 200, 65),
                Color(0, 153, 224),        Color(13, 58, 92),    Color(72, 116, 156),
                Color(200, 234, 244, 253), Color(234, 244, 253)};
-std::map<std::pair<int, bool>, HFONT> fonts;
-HFONT uiFont(int size, bool bold) {
-  auto key = std::make_pair(size, bold);
+std::map<std::tuple<int, int, bool>, HFONT> fonts;
+HFONT uiFont(int size, bool bold, int weight = 0, bool italic = false) {
+  if (!weight)
+    weight = bold ? FW_BOLD : FW_NORMAL;
+  auto key = std::make_tuple(size, weight, italic);
   auto found = fonts.find(key);
   if (found != fonts.end())
     return found->second;
-  auto font = CreateFontW(-size, 0, 0, 0, bold ? FW_BOLD : FW_NORMAL, FALSE, FALSE, FALSE,
-                          DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Nunito");
+  auto font = CreateFontW(-size, 0, 0, 0, weight, italic, FALSE, FALSE, DEFAULT_CHARSET, 0, 0,
+                          CLEARTYPE_QUALITY, 0, L"Nunito");
   fonts[key] = font;
   return font;
 }
@@ -277,7 +284,7 @@ void background(HDC dc, int w, int h, int offsetY, int totalHeight) {
   }
   BitBlt(dc, 0, 0, w, h, frame->dc, 0, std::max(0, offsetY), SRCCOPY);
 }
-void panel(HDC dc, int x, int y, int w, int h, bool solid) {
+void panel(HDC dc, int x, int y, int w, int h, bool solid, PanelStyle style) {
   if (w <= 0 || h <= 0)
     return;
   static const Color gloss[] = {Color(234, 244, 253), Color(250, 208, 172), Color(20, 44, 70),
@@ -290,13 +297,14 @@ void panel(HDC dc, int x, int y, int w, int h, bool solid) {
                                Color(184, 214, 238, 168)};
   static const Color base[] = {Color(124, 196, 242), Color(255, 178, 128), Color(5, 22, 38),
                                Color(255, 179, 217), Color(212, 242, 126)};
-  shape(dc, x, y + 4, w, h, 18, Color(20, 0, 0, 0), Color(20, 0, 0, 0));
+  if (style != PanelStyle::task)
+    shape(dc, x, y + 4, w, h, 18, Color(20, 0, 0, 0), Color(20, 0, 0, 0));
   if (solid)
     shape(dc, x, y, w, h, 18, base[paletteIndex], base[paletteIndex]);
   Surface surface(dc, x, y, w, h);
   if (surface.data)
     tangos_glass(surface.data, w, h, gloss[paletteIndex].value, tint[paletteIndex].value,
-                 edge[paletteIndex].value);
+                 edge[paletteIndex].value, unsigned(style));
 }
 void scrim(HDC dc, int w, int h) {
   if (w <= 0 || h <= 0)
@@ -331,26 +339,34 @@ void scrim(HDC dc, int w, int h) {
 }
 void agentCard(HDC dc, int x, int y, int w, int h, COLORREF tint) {
   shape(dc, x, y + 4, w, h, 14, Color(18, 0, 0, 0), Color(18, 0, 0, 0));
-  auto edge = Color(220, GetRValue(tint), GetGValue(tint), GetBValue(tint));
-  shape(dc, x, y, w, h, 14, edge, edge);
-  auto fill = Color(230, colors.field.GetR(), colors.field.GetG(), colors.field.GetB());
-  shape(dc, x + 1, y + 1, w - 2, h - 2, 13, fill, fill);
+  static const Color gloss[] = {Color(234, 244, 253), Color(250, 208, 172), Color(20, 44, 70),
+                                Color(252, 214, 240), Color(238, 255, 196)};
+  auto fill = gloss[paletteIndex];
+  Surface surface(dc, x, y, w, h);
+  if (surface.data)
+    tangos_frame(surface.data, w, h, 14, Color(230, fill.GetR(), fill.GetG(), fill.GetB()).value,
+                 Color(255, GetRValue(tint), GetGValue(tint), GetBValue(tint)).value);
 }
-void presenceDot(HDC dc, int x, int y, const std::string &state) {
-  auto tint = state == "stale"     ? RGB(230, 170, 20)
-              : state == "offline" ? RGB(215, 63, 67)
-                                   : RGB(30, 165, 87);
+COLORREF matched() {
+  static const COLORREF values[] = {RGB(63, 196, 95), RGB(61, 186, 122), RGB(45, 224, 138),
+                                    RGB(52, 199, 123), RGB(79, 176, 0)};
+  return values[paletteIndex % 5];
+}
+void presenceDot(HDC dc, int x, int y, const std::string &state, int size) {
+  auto tint = state == "stale"     ? RGB(234, 179, 8)
+              : state == "offline" ? RGB(220, 76, 46)
+                                   : matched();
   if (state == "online live") {
     int alpha = animationEnabled() ? int(50 + 30 * std::sin(phase * 6)) : 60;
     auto glow = Color(alpha, GetRValue(tint), GetGValue(tint), GetBValue(tint));
-    shape(dc, x - 4, y - 4, 20, 20, 10, glow, glow);
+    shape(dc, x - 4, y - 4, size + 8, size + 8, (size + 8) / 2.f, glow, glow);
   }
   auto fill = Color(255, GetRValue(tint), GetGValue(tint), GetBValue(tint));
-  shape(dc, x, y, 12, 12, 6, fill, fill);
+  shape(dc, x, y, size, size, size / 2.f, fill, fill);
 }
 void label(HDC dc, const std::wstring &s, int x, int y, int w, int h, int size, bool bold,
-           bool secondary, bool accent, COLORREF tint) {
-  auto font = uiFont(size, bold);
+           bool secondary, bool accent, COLORREF tint, bool italic, int weight) {
+  auto font = uiFont(size, bold, weight, italic);
   auto prev = SelectObject(dc, font);
   SetTextColor(dc, tint == CLR_INVALID ? rgb(accent      ? colors.primary
                                              : secondary ? colors.muted
@@ -368,6 +384,10 @@ void invalidateBackdrop(HWND parent) {
 }
 void iconButton(HWND window, Icon icon) {
   SetPropW(window, L"TangOSIcon", (HANDLE)(uintptr_t(unsigned(icon) + 1)));
+  if (iconTooltips.count(window)) {
+    InvalidateRect(window, nullptr, FALSE);
+    return;
+  }
   SetWindowSubclass(window, hoverButton, 1, 0);
   auto tooltip = std::make_unique<IconTooltip>();
   tooltip->text.resize(GetWindowTextLengthW(window) + 1);
@@ -384,6 +404,56 @@ void iconButton(HWND window, Icon icon) {
   SendMessageW(tooltip->window, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&info));
   iconTooltips[window] = std::move(tooltip);
 }
+void iconTextButton(HWND window, Icon icon) {
+  iconButton(window, icon);
+  SetPropW(window, L"TangOSIconText", reinterpret_cast<HANDLE>(1));
+}
+void policyButton(HWND window, unsigned state) {
+  SetPropW(window, L"TangOSPolicy", reinterpret_cast<HANDLE>(uintptr_t(state + 1)));
+  buttonFont(window, 12);
+}
+void rule(HDC dc, int x, int y, int width) {
+  static const COLORREF values[] = {RGB(255, 255, 255), RGB(255, 214, 182), RGB(120, 190, 230),
+                                    RGB(255, 210, 238), RGB(214, 238, 168)};
+  auto pen = CreatePen(PS_SOLID, 1, values[paletteIndex]);
+  auto previous = SelectObject(dc, pen);
+  MoveToEx(dc, x, y, nullptr);
+  LineTo(dc, x + width, y);
+  SelectObject(dc, previous);
+  DeleteObject(pen);
+}
+void buttonFont(HWND window, int size, int weight) {
+  SetPropW(window, L"TangOSFontSize", reinterpret_cast<HANDLE>(uintptr_t(std::clamp(size, 8, 24))));
+  SetPropW(window, L"TangOSFontWeight",
+           reinterpret_cast<HANDLE>(uintptr_t(std::clamp(weight, 100, 900))));
+}
+void controlFont(HWND window, int size, int weight) {
+  SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(uiFont(size, false, weight)), TRUE);
+}
+int textWidth(HDC dc, const std::wstring &text, int size, int weight) {
+  auto previous = SelectObject(dc, uiFont(size, false, weight));
+  SIZE extent{};
+  GetTextExtentPoint32W(dc, text.c_str(), int(text.size()), &extent);
+  SelectObject(dc, previous);
+  return extent.cx;
+}
+void badge(HDC dc, const std::wstring &text, int x, int y, int width, int height) {
+  {
+    Surface surface(dc, x, y, width, height);
+    if (surface.data)
+      tangos_frame(
+          surface.data, width, height, height / 2.f,
+          Color(36, colors.primary.GetR(), colors.primary.GetG(), colors.primary.GetB()).value,
+          Color(77, colors.primary.GetR(), colors.primary.GetG(), colors.primary.GetB()).value);
+  }
+  auto previous = SelectObject(dc, uiFont(9, true, 800));
+  SetTextColor(dc, rgb(colors.primary));
+  SetBkMode(dc, TRANSPARENT);
+  RECT bounds{x, y, x + width, y + height};
+  DrawTextW(dc, text.c_str(), int(text.size()), &bounds,
+            DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_NOPREFIX);
+  SelectObject(dc, previous);
+}
 void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
   buttonBackground(i);
   int x = i.rcItem.left + 1, y = i.rcItem.top + 1, w = i.rcItem.right - i.rcItem.left - 2,
@@ -391,11 +461,36 @@ void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
   Color base = danger ? Color(220, 76, 70) : primary ? colors.primary : colors.field;
   bool hover = GetPropW(i.hwndItem, L"TangOSHover") != nullptr;
   auto icon = uintptr_t(GetPropW(i.hwndItem, L"TangOSIcon"));
+  bool iconText = GetPropW(i.hwndItem, L"TangOSIconText") != nullptr;
+  auto policy = uintptr_t(GetPropW(i.hwndItem, L"TangOSPolicy"));
   danger = danger || (hover && icon == unsigned(Icon::close) + 1);
   if (danger)
     base = Color(225, 29, 72);
   bool flat = icon >= unsigned(Icon::minimize) + 1 && icon <= unsigned(Icon::close) + 1;
-  if (!flat || hover || (i.itemState & ODS_SELECTED)) {
+  if (policy) {
+    static const Color gloss[] = {Color(234, 244, 253), Color(250, 208, 172), Color(20, 44, 70),
+                                  Color(252, 214, 240), Color(238, 255, 196)};
+    auto top = gloss[paletteIndex];
+    auto bottom = policy == 3 ? Color(234, 179, 8) : policy == 2 ? colors.primary : top;
+    auto border = policy == 1 ? Color(255, 255, 255) : bottom;
+    Surface surface(i.hDC, x, y, w, h);
+    if (surface.data)
+      tangos_gradient_frame(
+          surface.data, w, h, h / 2.f,
+          Color(hover         ? 160
+                : policy == 1 ? 128
+                              : 115,
+                top.GetR(), top.GetG(), top.GetB())
+              .value,
+          Color(policy == 1 ? 36 : 77, bottom.GetR(), bottom.GetG(), bottom.GetB()).value,
+          Color(policy == 1 ? 217 : 153, border.GetR(), border.GetG(), border.GetB()).value);
+  } else if ((i.itemState & ODS_DISABLED) && primary) {
+    Surface surface(i.hDC, x, y, w, h);
+    if (surface.data)
+      tangos_frame(surface.data, w, h, h / 2.f,
+                   Color(26, base.GetR(), base.GetG(), base.GetB()).value,
+                   Color(56, base.GetR(), base.GetG(), base.GetB()).value);
+  } else if (!flat || hover || (i.itemState & ODS_SELECTED)) {
     int alpha = primary || danger ? 255 : hover ? 140 : 80;
     shape(i.hDC, x, y, w, h, flat ? 8 : h / 2.f,
           Color(alpha, std::min(255, base.GetR() + 25), std::min(255, base.GetG() + 20),
@@ -404,7 +499,7 @@ void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
   }
   wchar_t title[256];
   GetWindowTextW(i.hwndItem, title, 256);
-  if (icon) {
+  if (icon && !iconText) {
     int size = 15;
     Surface surface(i.hDC, x + (w - size) / 2, y + (h - size) / 2, size, size);
     if (surface.data)
@@ -418,15 +513,30 @@ void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
     }
     return;
   }
-  auto font = uiFont(13, true);
+  auto fontSize = uintptr_t(GetPropW(i.hwndItem, L"TangOSFontSize"));
+  auto fontWeight = uintptr_t(GetPropW(i.hwndItem, L"TangOSFontWeight"));
+  auto font = uiFont(fontSize ? int(fontSize) : 13, true, int(fontWeight));
   auto prev = SelectObject(i.hDC, font);
   SetTextColor(i.hDC, (i.itemState & ODS_DISABLED) ? rgb(colors.muted)
                       : (primary || danger)        ? RGB(255, 255, 255)
                                                    : rgb(colors.ink));
   SetBkMode(i.hDC, TRANSPARENT);
   RECT r{x + 4, y, w + x - 4, y + h};
+  if (icon && iconText) {
+    auto textSize =
+        textWidth(i.hDC, title, fontSize ? int(fontSize) : 13, fontWeight ? int(fontWeight) : 700);
+    int left = x + std::max(4, (w - textSize - 21) / 2);
+    Surface surface(i.hDC, left, y + (h - 14) / 2, 14, 14);
+    if (surface.data)
+      tangos_icon(surface.data, 14, 14, unsigned(icon - 1),
+                  (i.itemState & ODS_DISABLED) ? colors.muted.value
+                  : primary || danger          ? 0xffffffff
+                                               : colors.ink.value);
+    r.left = left + 21;
+  }
   DrawTextW(i.hDC, title, -1, &r,
-            DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+            DT_SINGLELINE | (iconText ? DT_LEFT : DT_CENTER) | DT_VCENTER | DT_END_ELLIPSIS |
+                DT_NOPREFIX);
   if (i.itemState & ODS_FOCUS) {
     InflateRect(&r, -3, -3);
     DrawFocusRect(i.hDC, &r);

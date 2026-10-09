@@ -17,6 +17,19 @@ const { chromium } = require(path.resolve(playwrightModule));
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(baseUrl, { waitUntil: 'networkidle' });
     await page.getByRole('heading', { name: 'Chaos Controller', exact: true }).waitFor();
+    const controllerGeometry = {};
+    for (const selector of ['.controller', '.controller .head', '.ctl-grid', '.ai-box', '.aib-task',
+                            '.aib-size', '.aib-go', '.aib-idle', '.aib-name', '.aib-top .status-dot',
+                            '.aib-kind', '.ctl-footer', '.ctl-foot-mid', '.ctl-foot-mid .tb-btn']) {
+      controllerGeometry[selector] = await page.locator(selector).evaluateAll(elements => elements.map(element => {
+        const bounds = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
+                 font: style.font, background: style.background, border: style.border,
+                 radius: style.borderRadius };
+      }));
+    }
+    require('fs').writeFileSync(path.resolve(outputDir, 'controller-geometry.json'), JSON.stringify(controllerGeometry, null, 2));
     await page.screenshot({ path: path.resolve(outputDir, 'controller.png') });
     await page.getByTitle('Open detailed stats, history, and recommendation').first().click();
     await page.locator('.ai-detail').waitFor();

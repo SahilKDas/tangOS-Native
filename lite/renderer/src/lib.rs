@@ -62,6 +62,22 @@ pub unsafe extern "C" fn tangos_icon(data: *mut u8, w: u32, h: u32, icon: u32, i
         5 => { path.move_to(6., 6.); path.line_to(18., 6.); path.line_to(18., 18.); path.line_to(6., 18.); path.close(); }
         6 => { line(&mut path, 6., 6., 18., 18.); line(&mut path, 18., 6., 6., 18.); }
         7 => { line(&mut path, 5., 19., 5., 12.); line(&mut path, 12., 19., 12., 5.); line(&mut path, 19., 19., 19., 9.); }
+        9 => { path.move_to(12., 3.); path.line_to(20., 6.); path.line_to(20., 12.);
+               path.cubic_to(20., 17., 16., 20., 12., 22.); path.cubic_to(8., 20., 4., 17., 4., 12.);
+               path.line_to(4., 6.); path.close(); path.move_to(8., 12.); path.line_to(11., 15.); path.line_to(16., 10.); }
+        10 => { path.push_circle(6., 6., 3.); path.push_circle(6., 18., 3.); path.push_circle(18., 6., 3.);
+                line(&mut path, 6., 9., 6., 15.); path.move_to(18., 9.); path.cubic_to(18., 15., 12., 18., 9., 18.); }
+        11 => { path.push_circle(6., 6., 3.); path.push_circle(6., 18., 3.); path.push_circle(18., 18., 3.);
+                line(&mut path, 6., 9., 6., 15.); path.move_to(18., 15.); path.line_to(18., 8.);
+                path.cubic_to(18., 5., 16., 4., 12., 4.); path.move_to(15., 1.); path.line_to(12., 4.); path.line_to(15., 7.); }
+        12 => { path.move_to(9., 20.); path.line_to(9., 16.); path.cubic_to(3., 16., 3., 11., 5., 8.);
+                path.line_to(5., 3.); path.line_to(10., 5.); path.line_to(14., 5.); path.line_to(19., 3.);
+                path.line_to(19., 8.); path.cubic_to(21., 11., 21., 16., 15., 16.); path.line_to(15., 20.);
+                path.move_to(9., 18.); path.cubic_to(4., 20., 5., 15., 2., 15.); }
+        13 => { path.move_to(7., 3.); path.line_to(21., 12.); path.line_to(7., 21.); path.close(); }
+        14 => { path.move_to(5., 5.); path.line_to(19., 5.); path.line_to(19., 19.); path.line_to(5., 19.); path.close(); }
+        15 => { path.move_to(2., 3.); path.line_to(5., 3.); path.line_to(8., 16.); path.line_to(19., 16.);
+                path.line_to(22., 7.); path.line_to(6., 7.); path.push_circle(9., 21., 1.); path.push_circle(18., 21., 1.); }
         _ => { path.move_to(6., 3.); path.line_to(14., 3.); path.line_to(19., 8.); path.line_to(19., 21.); path.line_to(6., 21.); path.close();
                path.move_to(14., 3.); path.line_to(14., 8.); path.line_to(19., 8.);
                for y in [12., 16.] { line(&mut path, 9., y, 16., y); } }
@@ -83,7 +99,29 @@ pub unsafe extern "C" fn tangos_shape(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn tangos_glass(data: *mut u8, w: u32, h: u32, gloss: u32, panel: u32, border: u32) {
+pub unsafe extern "C" fn tangos_frame(data: *mut u8, w: u32, h: u32, radius: f32, fill: u32, border: u32) {
+    gradient_shape(data, w, h, radius, fill, None, fill, border);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tangos_gradient_frame(data: *mut u8, w: u32, h: u32, radius: f32, top: u32, bottom: u32, border: u32) {
+    gradient_shape(data, w, h, radius, top, None, bottom, border);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tangos_glass(data: *mut u8, w: u32, h: u32, gloss: u32, panel: u32, border: u32, kind: u32) {
+    if kind == 1 {
+        // Controller overrides .aero-panel in app.css: 15%, 4%, muted 20% edge.
+        gradient_shape(data, w, h, 18., (gloss & 0x00ffffff) | 0x26000000,
+            Some((gloss & 0x00ffffff) | 0x0a000000), panel, (gloss & 0x00ffffff) | 0x33000000);
+        return;
+    }
+    if kind == 2 {
+        // The elastic agent task area uses uniform 40% gloss and a 10px radius.
+        let fill = (gloss & 0x00ffffff) | 0x66000000;
+        gradient_shape(data, w, h, 10., fill, None, fill, border);
+        return;
+    }
     gradient_shape(data, w, h, 18., (gloss & 0x00ffffff) | 0x8c000000,
         Some((gloss & 0x00ffffff) | 0x0f000000), panel, border);
 }
@@ -337,13 +375,37 @@ mod tests {
     #[test]
     fn glass_keeps_reference_translucent_middle_and_inset_border() {
         let mut pixels = vec![0u8; 100 * 100 * 4];
-        unsafe { tangos_glass(pixels.as_mut_ptr(), 100, 100, 0xffeaf4fd, 0x9effffff, 0xd9ffffff); }
+        unsafe { tangos_glass(pixels.as_mut_ptr(), 100, 100, 0xffeaf4fd, 0x9effffff, 0xd9ffffff, 0); }
         let channel = |x: usize, y: usize| pixels[(y * 100 + x) * 4];
         assert!(channel(50, 2) > 100);
         assert!(channel(50, 42) < 30, "CSS glass has a six-percent stop at 42 percent");
         assert!(channel(50, 97) > 140);
         assert!(channel(0, 42) > 200, "glass border must stay visible against dark backgrounds");
         assert_eq!(channel(0, 0), 0, "rounded corner must preserve its background");
+    }
+    #[test]
+    fn controller_and_task_follow_their_reference_overrides() {
+        let mut pixels = vec![0u8; 100 * 100 * 4];
+        unsafe { tangos_glass(pixels.as_mut_ptr(), 100, 100, 0xffeaf4fd, 0x9effffff, 0xd9ffffff, 1); }
+        let channel = |data: &[u8], x: usize, y: usize| data[(y * 100 + x) * 4];
+        assert!(channel(&pixels, 50, 2) < 45);
+        assert!(channel(&pixels, 50, 42) < 15);
+        assert!(channel(&pixels, 0, 42) < 65);
+        pixels.fill(0);
+        unsafe { tangos_glass(pixels.as_mut_ptr(), 100, 100, 0xffeaf4fd, 0x9effffff, 0xd9ffffff, 2); }
+        assert_eq!(channel(&pixels, 50, 20), channel(&pixels, 50, 80));
+        assert!(channel(&pixels, 50, 20) >= 99 && channel(&pixels, 50, 20) <= 103);
+        assert!(channel(&pixels, 0, 50) > 200);
+    }
+    #[test]
+    fn disabled_drive_uses_reference_ten_percent_fill_and_twenty_two_percent_edge() {
+        let mut pixels = vec![0u8; 100 * 44 * 4];
+        unsafe { tangos_frame(pixels.as_mut_ptr(), 100, 44, 22., 0x1a0099e0, 0x380099e0); }
+        let channel = |x: usize, y: usize| pixels[(y * 100 + x) * 4];
+        assert!(channel(50, 22) >= 21 && channel(50, 22) <= 24);
+        // CSS border-box background also sits behind the translucent border.
+        assert!(channel(50, 0) >= 64 && channel(50, 0) <= 70);
+        assert_eq!(channel(0, 0), 0);
     }
     #[test]
     fn image_downsampling_preserves_dense_detail_without_aliasing() {

@@ -1,5 +1,27 @@
 # Console parity audit
 
+## 0.19.0 Controller reference measurements
+
+The offline capture tool now records actual original DOM geometry alongside its
+screenshots. Native Controller uses the measured three-column offsets, 210px
+Simple cards, 103px task area, 58px count field and 44px Go/Stop controls. The
+header count scope, 24px detail icon, API badge, 9px presence dot, matched count,
+italic idle text and centered footer have corresponding native implementations.
+Controller and task fills now follow their own reference CSS rather than the
+generic glass panel. The agent tint is confined to its border instead of leaking
+through the entire card fill. Regression captures include a passive API card,
+and native tests assert card/detail/footer geometry and remembered Writes state.
+Simple cards expose Add chosen functions when the Viewer cart contains picks;
+the task area shrinks while the card height stays fixed. The native workflow
+tests per-agent cart assignment and verifies no provider starts as a side effect.
+
+These changes do not establish exact visual parity. Numeric field skinning,
+card hover transforms, background animation, full Advanced queue composition,
+and signed-in GitHub footer states still differ. Review and Push deliberately
+retain the user's mandatory preview policy; unattended rolling-PR behavior is
+disabled. A fleet regression also exposed and fixed policy-read contention with
+another agent's statistics transaction; a deterministic lock test covers it.
+
 ## 0.18.0 implementation checkpoint
 
 The toolbar Settings button opens a native scrollable popover while preserving

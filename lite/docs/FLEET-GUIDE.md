@@ -1,8 +1,17 @@
 # Native Console and fleet
 
+The Controller footer centers Writes, Review and Push. Writes toggles permission
+for declared mutating tools and is remembered locally. Review stays ON: click it
+to inspect the selected AI's isolated work, or Git controls when no AI is selected.
+Push stays OFF: click it for the outgoing-commit preview and reviewed Git workflow.
+Unattended publishing is disabled to preserve the required preview of every push.
+Click the document icon for Encyclopedia; right-click it for Git, Batches,
+Settings, Tango guide, and Help/updates/reports. GitHub sign-in uses your own `gh`
+credentials. No sign-in or provider call starts automatically.
+
 Choose your own checkout. TangOS Lite reads that repository's tangos.json; no SM64DS path, fork, provider model or API credential is built into the program.
 
-1. Open Chaos Controller and Add AI. Choose API, CLI or MCP; configure the provider URL/model and encrypted key variable, or an explicit CLI command. API URLs require HTTPS except local test servers.
+1. Open Settings and select Advanced interface, then use Chaos Controller's Add AI. Choose API, CLI or MCP; configure the provider URL/model and encrypted key variable, or an explicit CLI command. API URLs require HTTPS except local test servers.
 2. Pick a role, effort, count, attempts and parallel jobs. Go previews execution and creates a codex/lite-* branch in an isolated worktree. Root and nested AGENTS.md plus descriptor rules are included in instructions. Continuous execution is optional.
 3. Chaos Viewer displays local/published atlas data. Group, filter, search and zoom; Ctrl-click targets into the cart, then assign them to a selected AI. A target cannot be queued by two local agents. Published data loads only when you choose Live data.
 4. Each card shows progress and live output. Stop terminates its process tree and keeps worktrees, queued work and complete logs. Details opens logs and the worktree.
