@@ -1,6 +1,7 @@
 #include "repository.h"
 #include "skin.h"
 #include "console_ui.h"
+#include "window_capture.h"
 #include "backend.h"
 #include "updater.h"
 #include "activity.h"
@@ -594,55 +595,7 @@ void snapshot(const fs::path &path) {
   HBITMAP bitmap = CreateCompatibleBitmap(dc, w, h);
   auto old = SelectObject(memory, bitmap);
   paintChrome(memory, w, h);
-  EnumChildWindows(
-      window,
-      [](HWND child, LPARAM param) -> BOOL {
-        // Render nested Console controls too; hidden top-level smoke windows
-        // cannot use IsWindowVisible, so inspect visibility up to this window.
-        for (HWND ancestor = child; ancestor && ancestor != window; ancestor = GetParent(ancestor))
-          if (!(GetWindowLongW(ancestor, GWL_STYLE) & WS_VISIBLE))
-            return TRUE;
-        auto dc = (HDC)param;
-        RECT bounds;
-        GetWindowRect(child, &bounds);
-        MapWindowPoints(nullptr, window, (POINT *)&bounds, 2);
-        auto state = SaveDC(dc);
-        SetViewportOrgEx(dc, bounds.left, bounds.top, nullptr);
-        IntersectClipRect(dc, 0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top);
-        wchar_t className[32];
-        GetClassNameW(child, className, 32);
-        bool ownerButton = std::wstring(className) == L"Button" &&
-                           (GetWindowLongW(child, GWL_STYLE) & BS_TYPEMASK) == BS_OWNERDRAW;
-        if (ownerButton) {
-          // Hidden WM_PRINT does not reliably invoke native owner drawing. Keep
-          // the already painted parent surface and render the actual button.
-          DRAWITEMSTRUCT item{};
-          item.CtlType = ODT_BUTTON;
-          item.CtlID = GetDlgCtrlID(child);
-          item.itemAction = ODA_DRAWENTIRE;
-          item.itemState = IsWindowEnabled(child) ? 0 : ODS_DISABLED;
-          item.hwndItem = child;
-          item.hDC = dc;
-          item.rcItem = {0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top};
-          SendMessageW(GetParent(child), WM_DRAWITEM, item.CtlID, (LPARAM)&item);
-        } else
-          SendMessageW(child, WM_PRINT, (WPARAM)dc,
-                       PRF_CLIENT | PRF_NONCLIENT | PRF_ERASEBKGND | PRF_CHILDREN);
-        // ComboBox WM_PRINT omits its owner-drawn selection on hidden windows.
-        if (std::wstring(className) == L"ComboBox" && !GetPropW(child, L"TangOSCompactCombo")) {
-          DRAWITEMSTRUCT selection{};
-          selection.CtlType = ODT_COMBOBOX;
-          selection.CtlID = GetDlgCtrlID(child);
-          selection.itemID = (UINT)SendMessageW(child, CB_GETCURSEL, 0, 0);
-          selection.hwndItem = child;
-          selection.hDC = dc;
-          selection.rcItem = {1, 1, bounds.right - bounds.left - 24, 29};
-          SendMessageW(GetParent(child), WM_DRAWITEM, selection.CtlID, (LPARAM)&selection);
-        }
-        RestoreDC(dc, state);
-        return TRUE;
-      },
-      (LPARAM)memory);
+  renderWindowTree(window, memory);
   BITMAPINFO info{};
   info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
   info.bmiHeader.biWidth = w;

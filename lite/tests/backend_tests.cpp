@@ -30,6 +30,16 @@ int main() {
     expect(threw, msg);
   };
   try {
+    expect(richTextRuns("").empty(), "empty rich text remains empty");
+    expect(richTextRuns("A :joke[λ food]!") == Json::array({{{"text", "A "}, {"joke", false}},
+                                                            {{"text", "λ food"}, {"joke", true}},
+                                                            {{"text", "!"}, {"joke", false}}}),
+           "help markup preserves Unicode and span boundaries");
+    expect(richTextRuns(":joke[broken") ==
+               Json::array({{{"text", ":joke[broken"}, {"joke", false}}}),
+           "unclosed help markup stays literal");
+    expect(richTextRuns(":joke[]:joke[x]").size() == 2,
+           "empty and adjacent help spans follow the reference");
     expect(controllerProgress(0, 100, 0) == 0 && controllerProgress(0, 100, 300) == 100,
            "Controller CSS progress endpoints");
     expect(std::abs(controllerProgress(0, 100, 150) - 80.2403) < .001,

@@ -1393,10 +1393,9 @@ struct ConsoleUI::Impl {
       }
     InvalidateRect(window, nullptr, TRUE);
     if (helper)
-      helper->position(
-          width, height,
-          !(tourOverlay && tourOverlay->open()) &&
-              (screen == Screen::controller || (screen == Screen::atlas && !fullAtlas)));
+      helper->position(width, height,
+                       !viewerOnly && !(tourOverlay && tourOverlay->open()) &&
+                           screen == Screen::controller);
   }
   std::string settingsSummary() {
     std::string s = "Project: " + descriptor.title + "\n" + descriptor.tagline + "\n\n";
@@ -4331,8 +4330,7 @@ struct ConsoleUI::Impl {
     if (tourOverlay && !tourOverlay->open()) {
       tourOverlay.reset();
       if (helper)
-        helper->position(width, height,
-                         screen == Screen::controller || (screen == Screen::atlas && !fullAtlas));
+        helper->position(width, height, !viewerOnly && screen == Screen::controller);
     }
     if (initialTourPending && IsWindowVisible(parent) && IsWindowVisible(window) &&
         screen == Screen::controller)
@@ -5073,9 +5071,9 @@ void ConsoleUI::show(bool visible, bool atlas) {
   ShowWindow(impl->window, visible ? SW_SHOW : SW_HIDE);
   if (impl->helper)
     impl->helper->position(impl->width, impl->height,
-                           visible && (!impl->tourOverlay || !impl->tourOverlay->open()) &&
-                               (impl->screen == Screen::controller ||
-                                       (impl->screen == Screen::atlas && !impl->fullAtlas)));
+                           visible && !impl->viewerOnly &&
+                               (!impl->tourOverlay || !impl->tourOverlay->open()) &&
+                               impl->screen == Screen::controller);
 }
 void ConsoleUI::smokeDisplay(const fs::path &directory,
                              const std::function<void(const fs::path &)> &capture) {
@@ -5279,7 +5277,7 @@ void ConsoleUI::smokeRemote(const fs::path &directory,
   int requests = 0;
   bool offline = false;
   auto database = read(confinedPath(impl->repository, impl->descriptor.database));
-  ShowWindow(impl->window, SW_HIDE);
+  show(false);
   try {
     auto remoteSettings = impl->settings;
     remoteSettings.activeProject = "remote-gui";
@@ -5311,13 +5309,13 @@ void ConsoleUI::smokeRemote(const fs::path &directory,
     remote.impl->viewerKey(VK_SPACE);
     if (!remote.impl->cart.empty())
       throw std::runtime_error("Remote keyboard shortcut assigned work");
-    capture(directory / "remote-viewer.bmp");
     auto loadedRequests = requests;
     remote.impl->loadAtlas();
     remote.impl->loader.join();
     remote.impl->tick();
     if (requests != loadedRequests || remote.impl->cacheNotice.find("cache") == std::string::npos)
       throw std::runtime_error("Published Viewer did not reuse its fresh cache");
+    capture(directory / "remote-viewer.bmp");
     offline = true;
     remote.impl->forceLiveReload = true;
     remote.impl->loadAtlas();
@@ -5366,10 +5364,10 @@ void ConsoleUI::smokeRemote(const fs::path &directory,
           "PASS: metadata-only project, no automatic network, published Viewer, no agents or Git "
           "checkout, read-only assignment controls.");
   } catch (...) {
-    ShowWindow(impl->window, SW_SHOW);
+    show(true);
     throw;
   }
-  ShowWindow(impl->window, SW_SHOW);
+  show(true);
 }
 void ConsoleUI::smokeScreens(const fs::path &directory,
                              const std::function<void(const fs::path &)> &capture) {

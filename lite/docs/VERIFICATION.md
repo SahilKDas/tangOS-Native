@@ -15,6 +15,10 @@ Evidence is retained in `lite/release-0.24.0-verified`.
 
 This release does not establish full pixel/animation or hosted-provider parity.
 The subsequent styled-help source work is separate from this packaged hash.
+Visual inspection subsequently found that its floating-helper snapshot was
+overwritten by a lower pane. Interaction checks passed, but that screenshot
+is not valid evidence of overlay visibility. The next source checkpoint fixes
+shared window stacking and adds a captured-header pixel regression.
 
 ## Post-0.23.0 source checkpoint
 

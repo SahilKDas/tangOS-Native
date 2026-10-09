@@ -419,23 +419,24 @@ bool enabledTool(const Json &prefs, const std::string &id) {
 }
 Json Backend::catalog() {
   return Json::array(
-      {"projects.importZip", "projects.discover", "projects.download",  "projects.list",
-       "projects.register",  "projects.open",     "descriptor.preview", "descriptor.write",
-       "preferences.get",    "preferences.set",   "connections.get",    "connections.set",
-       "network.read",       "network.write",     "atlas.load",         "atlas.source",
-       "atlas.history",      "claims.read",       "preflight",          "git.status",
-       "git.syncPreview",    "git.sync",          "git.action",         "git.clone",
-       "git.backup",         "git.discard",       "tools.list",         "tools.run",
-       "checks.list",        "checks.run",        "policy.presence",    "stats.get",
-       "stats.session",      "stats.clear",       "reports.list",       "reports.export",
-       "queue.adopt",        "policy.classify",   "policy.adaptive",    "policy.pool",
-       "policy.statistics",  "policy.layout",     "policy.color",       "policy.batches",
-       "policy.source",      "policy.usage",      "guide.parse",        "guide.tour",
-       "guide.tips",         "projects.get",      "github.credits",     "atlas.cosmetics",
-       "atlas.counts",       "atlas.progress",    "atlas.live",         "update.check",
-       "update.stage",       "bug.report",        "harvest.list",       "activity.snapshot",
-       "policy.activity",    "policy.detail",     "policy.match",       "policy.role",
-       "policy.autoRole",    "policy.effort",     "policy.drive",       "policy.controllerView"});
+      {"projects.importZip",   "projects.discover", "projects.download",  "projects.list",
+       "projects.register",    "projects.open",     "descriptor.preview", "descriptor.write",
+       "preferences.get",      "preferences.set",   "connections.get",    "connections.set",
+       "network.read",         "network.write",     "atlas.load",         "atlas.source",
+       "atlas.history",        "claims.read",       "preflight",          "git.status",
+       "git.syncPreview",      "git.sync",          "git.action",         "git.clone",
+       "git.backup",           "git.discard",       "tools.list",         "tools.run",
+       "checks.list",          "checks.run",        "policy.presence",    "stats.get",
+       "stats.session",        "stats.clear",       "reports.list",       "reports.export",
+       "queue.adopt",          "policy.classify",   "policy.adaptive",    "policy.pool",
+       "policy.statistics",    "policy.layout",     "policy.color",       "policy.batches",
+       "policy.source",        "policy.usage",      "guide.parse",        "guide.tour",
+       "guide.tips",           "guide.richText",    "projects.get",       "github.credits",
+       "atlas.cosmetics",      "atlas.counts",      "atlas.progress",     "atlas.live",
+       "update.check",         "update.stage",      "bug.report",         "harvest.list",
+       "activity.snapshot",    "policy.activity",   "policy.detail",      "policy.match",
+       "policy.role",          "policy.autoRole",   "policy.effort",      "policy.drive",
+       "policy.controllerView"});
 }
 Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
   if (m == "bug.report" && a.contains("description") && a["description"].is_string())
@@ -1144,6 +1145,8 @@ void Backend::recordAgent(const std::string &id, const fs::path &results, const 
 Json Backend::execute(const std::string &m, const Json &a) {
   if (m == "guide.parse")
     return parseGuide(a.at("text").get<std::string>(), a.value("tour", true));
+  if (m == "guide.richText")
+    return richTextRuns(a.value("text", std::string()));
   if (m == "guide.tour" || m == "guide.tips")
     return readGuide(directory, m == "guide.tour");
   if (m == "connections.get")

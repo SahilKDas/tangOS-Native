@@ -86,6 +86,10 @@ The first-run tour and Settings' replay action show ten steps over the current s
 
 While an agent runs, role, effort and batch-size edits are marked for the next batch. They do not replace the running instructions. Stop disables itself and reads “Stopping…” until cancellation completes; complete logs remain available.
 
+Editable Tango text supports `:joke[highlighted words]`: the enclosed words render
+in italic Nunito with the theme's shifting gradient. Unclosed markers remain
+literal text. Reduced-motion settings keep the gradient static.
+
 Viewer color and contributor controls are independent of the grouping layout. Choose status or author colors, select a contributor to dim other authors, and toggle draft/near-miss visibility. Color and draft choices are remembered in console-ui.json. Published career/daily totals and shared colors require your enabled connections; local attribution is the offline fallback. The minimap follows the same color choice.
 
 ## Remote projects and viewer-only mode

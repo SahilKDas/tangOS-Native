@@ -1,4 +1,5 @@
 #include "skin.h"
+#include "help.h"
 #include <commctrl.h>
 #include <algorithm>
 #include <cstdint>
@@ -606,6 +607,111 @@ void tourShade(HDC dc, int width, int height, const RECT *spot) {
       tangos_frame(border.data, border.w, border.h, 12, 0, Color(230, 255, 255, 255).value);
   }
 }
+namespace {
+struct RichPart {
+  std::wstring text;
+  bool joke;
+  int width = 0, x = 0, y = 0;
+};
+struct RichLayout {
+  std::vector<RichPart> parts;
+  int height = 0, lineHeight = 0;
+};
+RichLayout richLayout(HDC dc, const std::wstring &value, int width, int size, bool bold) {
+  RichLayout layout;
+  auto prior = SelectObject(dc, uiFont(size, bold));
+  TEXTMETRICW metrics{};
+  GetTextMetricsW(dc, &metrics);
+  layout.lineHeight = metrics.tmHeight + metrics.tmExternalLeading;
+  SIZE space{};
+  GetTextExtentPoint32W(dc, L" ", 1, &space);
+  std::vector<std::vector<RichPart>> words;
+  std::vector<RichPart> word;
+  for (const auto &run : lite::richTextRuns(lite::utf8(value))) {
+    auto text = lite::wide(run.at("text").get<std::string>());
+    bool joke = run.at("joke").get<bool>();
+    for (auto character : text) {
+      if (character == L' ' || character == L'\n' || character == L'\r' || character == L'\t' ||
+          character == L'\f') {
+        if (!word.empty()) {
+          words.push_back(std::move(word));
+          word.clear();
+        }
+      } else {
+        if (word.empty() || word.back().joke != joke)
+          word.push_back({L"", joke});
+        word.back().text += character;
+      }
+    }
+  }
+  if (!word.empty())
+    words.push_back(std::move(word));
+  int x = 0, y = 0;
+  for (auto &pieces : words) {
+    int wordWidth = 0;
+    for (auto &part : pieces) {
+      SelectObject(dc, uiFont(size, part.joke ? false : bold, 0, part.joke));
+      SIZE bounds{};
+      GetTextExtentPoint32W(dc, part.text.c_str(), int(part.text.size()), &bounds);
+      part.width = bounds.cx;
+      wordWidth += part.width;
+    }
+    if (x && x + space.cx + wordWidth > width) {
+      x = 0;
+      y += layout.lineHeight;
+    } else if (x)
+      x += space.cx;
+    for (auto &part : pieces) {
+      part.x = x;
+      part.y = y;
+      x += part.width;
+      layout.parts.push_back(std::move(part));
+    }
+  }
+  layout.height = layout.parts.empty() ? 0 : y + layout.lineHeight;
+  SelectObject(dc, prior);
+  return layout;
+}
+void gradientText(HDC dc, const RichPart &part, int x, int y, int size, int height, int available) {
+  if (part.width <= 0 || available <= 0)
+    return;
+  Surface mask(dc, x - 1, y, std::min(part.width, available) + 4, height);
+  if (!mask.data)
+    return;
+  std::vector<unsigned char> background(mask.data, mask.data + mask.w * mask.h * 4);
+  PatBlt(mask.dc, 0, 0, mask.w, mask.h, BLACKNESS);
+  auto prior = SelectObject(mask.dc, uiFont(size, false, 0, true));
+  SetTextColor(mask.dc, RGB(255, 255, 255));
+  SetBkMode(mask.dc, TRANSPARENT);
+  int fitted = 0;
+  SIZE extent{};
+  GetTextExtentExPointW(mask.dc, part.text.c_str(), int(std::min<size_t>(8192, part.text.size())),
+                        mask.w, &fitted, nullptr, &extent);
+  TextOutW(mask.dc, 1, 0, part.text.c_str(), int(std::min(part.text.size(), size_t(fitted + 1))));
+  SelectObject(mask.dc, prior);
+  GdiFlush();
+  static const Color accents[] = {Color(127, 196, 0), Color(255, 179, 71), Color(45, 224, 138),
+                                  Color(129, 140, 248), Color(230, 210, 0)};
+  for (int column = 0; column < mask.w; ++column) {
+    double u = std::fmod(
+        column / double(2 * std::max(1, part.width)) + (animationEnabled() ? phase / 3.2 : 0), 1.0);
+    double blend = u < .5 ? 2 * u : 2 * (1 - u);
+    auto first = colors.primary, second = accents[paletteIndex];
+    int tint[] = {int(first.GetB() + (second.GetB() - first.GetB()) * blend),
+                  int(first.GetG() + (second.GetG() - first.GetG()) * blend),
+                  int(first.GetR() + (second.GetR() - first.GetR()) * blend)};
+    for (int row = 0; row < mask.h; ++row) {
+      size_t pixel = (size_t(row) * mask.w + column) * 4;
+      for (int channel = 0; channel < 3; ++channel) {
+        int alpha = mask.data[pixel + channel];
+        mask.data[pixel + channel] =
+            (tint[channel] * alpha + background[pixel + channel] * (255 - alpha) + 127) / 255;
+      }
+      mask.data[pixel + 3] = 255;
+    }
+  }
+}
+} // namespace
 void wrappedLabel(HDC dc, const std::wstring &value, int x, int y, int width, int height, int size,
                   bool bold, COLORREF tint) {
   auto previous = SelectObject(dc, uiFont(size, bold));
@@ -613,6 +719,20 @@ void wrappedLabel(HDC dc, const std::wstring &value, int x, int y, int width, in
   SetBkMode(dc, TRANSPARENT);
   SetTextColor(dc, tint);
   IntersectClipRect(dc, x, y, x + width, y + height);
+  if (value.find(L":joke[") != std::wstring::npos) {
+    auto layout = richLayout(dc, value, width, size, bold);
+    for (const auto &part : layout.parts) {
+      if (part.joke)
+        gradientText(dc, part, x + part.x, y + part.y, size, layout.lineHeight, width - part.x);
+      else {
+        SelectObject(dc, uiFont(size, bold));
+        TextOutW(dc, x + part.x, y + part.y, part.text.c_str(), int(part.text.size()));
+      }
+    }
+    RestoreDC(dc, saved);
+    SelectObject(dc, previous);
+    return;
+  }
   RECT bounds{x, y, x + width, y + height};
   DrawTextW(dc, value.c_str(), int(value.size()), &bounds, DT_WORDBREAK | DT_NOPREFIX);
   RestoreDC(dc, saved);
@@ -624,6 +744,8 @@ void invalidateBackdrop(HWND parent) {
     found->second->rendered = 0;
 }
 int wrappedLabelHeight(HDC dc, const std::wstring &value, int width, int size, bool bold) {
+  if (value.find(L":joke[") != std::wstring::npos)
+    return richLayout(dc, value, width, size, bold).height;
   auto previous = SelectObject(dc, uiFont(size, bold));
   RECT bounds{0, 0, std::max(1, width), 0};
   DrawTextW(dc, value.c_str(), int(value.size()), &bounds,

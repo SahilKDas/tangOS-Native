@@ -13,6 +13,7 @@ struct HelperState {
   void next(int direction);
 };
 Json currentAnnouncement();
+Json richTextRuns(const std::string &text);
 Json updateStatus(const std::string &current, const Json &release);
 std::string supportResultText(const Json &result);
 Json updatePresentation(const Json &downloaded, const Json &current);

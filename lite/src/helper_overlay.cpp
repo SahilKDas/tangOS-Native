@@ -1,4 +1,5 @@
 #include "helper_overlay.h"
+#include "window_capture.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -84,21 +85,7 @@ struct HelperOverlay::Impl {
     auto bitmap =
         CreateCompatibleBitmap(dc, std::max(1L, bounds.right), std::max(1L, bounds.bottom));
     auto previousBitmap = SelectObject(backdrop, bitmap);
-    SendMessageW(parent, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(backdrop), PRF_CLIENT);
-    RECT consoleBounds{};
-    GetClientRect(backdropWindow, &consoleBounds);
-    auto consoleDc = CreateCompatibleDC(dc);
-    auto consoleBitmap = CreateCompatibleBitmap(dc, std::max(1L, consoleBounds.right),
-                                                std::max(1L, consoleBounds.bottom));
-    auto previousConsole = SelectObject(consoleDc, consoleBitmap);
-    SendMessageW(backdropWindow, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(consoleDc), PRF_CLIENT);
-    POINT origin{};
-    MapWindowPoints(backdropWindow, parent, &origin, 1);
-    BitBlt(backdrop, origin.x, origin.y, consoleBounds.right, consoleBounds.bottom, consoleDc, 0, 0,
-           SRCCOPY);
-    SelectObject(consoleDc, previousConsole);
-    DeleteObject(consoleBitmap);
-    DeleteDC(consoleDc);
+    renderWindowTree(parent, backdrop, window);
     BitBlt(dc, 0, 0, 232, 443, backdrop, x, y, SRCCOPY);
     SelectObject(backdrop, previousBitmap);
     DeleteObject(bitmap);
@@ -281,6 +268,12 @@ void HelperOverlay::smoke(const fs::path &directory) {
   SendMessageW(impl->window, WM_LBUTTONUP, 0, MAKELPARAM(100, 330));
   if (!impl->state.open)
     throw std::runtime_error("Helper mascot mouse toggle failed");
+  impl->state.tips.push_back(
+      {{"title", "A :joke[styled] tip"},
+       {"body", "Keep :joke[λ food pellets] italic and colorful while "
+                "this longer message wraps inside Tango's floating panel."}});
+  impl->state.index = impl->state.messages().size() - 1;
+  impl->region();
   write(directory / "helper-overlay.json", snapshot().dump(2));
 }
 } // namespace lite

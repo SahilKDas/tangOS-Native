@@ -1,5 +1,20 @@
 # Console parity audit
 
+## Styled help and window stacking checkpoint
+
+Editable `:joke[...]` text now follows the original span parser (129 differential
+cases), uses italic Nunito and the theme's primary/accent gradient, and wraps
+without displaying markup. The drawing buffer is bounded to visible width.
+Native snapshots, tour backdrops and the helper share a back-to-front window
+renderer that includes owner-drawn controls. A captured-header pixel regression
+rejects the previous helper screenshot ordering and accepts the correction.
+Helper visibility follows the original Controller-only rule.
+
+Backend regression tests and all three native GUI workflows passed. Evidence:
+`lite/out/gui-richtext-layered-final-024`, `gui-layered-missing-024` and
+`gui-layered-invalid-024`. Original background physics, blur/shadow composition,
+animation cadence and auxiliary overlay presentation remain under comparison.
+
 ## Floating help, tour and active Controller checkpoint
 
 The native helper now preserves announcement read state, opens floating editable

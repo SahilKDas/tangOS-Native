@@ -4,6 +4,23 @@
 #include <stdexcept>
 #include <windows.h>
 namespace lite {
+Json richTextRuns(const std::string &text) {
+  auto runs = Json::array();
+  size_t offset = 0;
+  while (offset < text.size()) {
+    auto marker = text.find(":joke[", offset);
+    auto end = marker == std::string::npos ? marker : text.find(']', marker + 6);
+    if (end == std::string::npos) {
+      runs.push_back({{"text", text.substr(offset)}, {"joke", false}});
+      break;
+    }
+    if (marker > offset)
+      runs.push_back({{"text", text.substr(offset, marker - offset)}, {"joke", false}});
+    runs.push_back({{"text", text.substr(marker + 6, end - marker - 6)}, {"joke", true}});
+    offset = end + 1;
+  }
+  return runs;
+}
 Json currentAnnouncement() {
   return {{"id", "match-logging-2026-07"},
           {"title", "New update!"},

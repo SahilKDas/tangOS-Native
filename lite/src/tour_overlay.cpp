@@ -1,52 +1,8 @@
 #include "tour_overlay.h"
+#include "window_capture.h"
 #include <algorithm>
 #include <stdexcept>
 namespace lite {
-namespace {
-void renderUnderlying(HWND owner, HDC dc, HWND excluded) {
-  SendMessageW(owner, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(dc), PRF_CLIENT);
-  struct Context {
-    HWND owner, excluded;
-    HDC dc;
-  } context{owner, excluded, dc};
-  EnumChildWindows(
-      owner,
-      [](HWND child, LPARAM value) -> BOOL {
-        auto &context = *reinterpret_cast<Context *>(value);
-        for (auto ancestor = child; ancestor && ancestor != context.owner;
-             ancestor = GetParent(ancestor))
-          if (ancestor == context.excluded ||
-              !(GetWindowLongPtrW(ancestor, GWL_STYLE) & WS_VISIBLE))
-            return TRUE;
-        RECT bounds{};
-        GetWindowRect(child, &bounds);
-        MapWindowPoints(nullptr, context.owner, reinterpret_cast<POINT *>(&bounds), 2);
-        auto saved = SaveDC(context.dc);
-        SetViewportOrgEx(context.dc, bounds.left, bounds.top, nullptr);
-        IntersectClipRect(context.dc, 0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top);
-        wchar_t name[32]{};
-        GetClassNameW(child, name, 32);
-        bool ownerButton = std::wstring(name) == L"Button" &&
-                           (GetWindowLongPtrW(child, GWL_STYLE) & BS_TYPEMASK) == BS_OWNERDRAW;
-        if (ownerButton) {
-          DRAWITEMSTRUCT item{};
-          item.CtlType = ODT_BUTTON;
-          item.CtlID = GetDlgCtrlID(child);
-          item.itemAction = ODA_DRAWENTIRE;
-          item.itemState = IsWindowEnabled(child) ? 0 : ODS_DISABLED;
-          item.hwndItem = child;
-          item.hDC = context.dc;
-          item.rcItem = {0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top};
-          SendMessageW(GetParent(child), WM_DRAWITEM, item.CtlID, reinterpret_cast<LPARAM>(&item));
-        } else {
-          SendMessageW(child, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(context.dc), PRF_CLIENT);
-        }
-        RestoreDC(context.dc, saved);
-        return TRUE;
-      },
-      reinterpret_cast<LPARAM>(&context));
-}
-} // namespace
 struct TourOverlay::Impl {
   HWND owner, window = nullptr, priorFocus = nullptr;
   fs::path data;
@@ -79,6 +35,7 @@ struct TourOverlay::Impl {
       throw std::runtime_error("Cannot create Tango tour overlay");
     layout();
     SetFocus(window);
+    SetTimer(window, 1, 50, nullptr);
   }
   ~Impl() {
     if (window)
@@ -106,7 +63,7 @@ struct TourOverlay::Impl {
     backdrop = CreateCompatibleDC(dc);
     bitmap = CreateCompatibleBitmap(dc, width, height);
     previousBitmap = SelectObject(backdrop, bitmap);
-    renderUnderlying(owner, backdrop, window);
+    renderWindowTree(owner, backdrop, window);
     ReleaseDC(owner, dc);
     if (window && visible)
       ShowWindow(window, SW_SHOW);
@@ -217,6 +174,10 @@ struct TourOverlay::Impl {
       }
       if (msg == WM_GETDLGCODE)
         return DLGC_WANTALLKEYS;
+      if (msg == WM_TIMER && skin::animationEnabled()) {
+        InvalidateRect(h, &self->box, FALSE);
+        return 0;
+      }
       if (msg == WM_KEYDOWN) {
         if (w == VK_ESCAPE)
           self->close();

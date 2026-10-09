@@ -61,6 +61,16 @@ if (-not (Test-Path -LiteralPath (Join-Path $fixture 'help-complete-reference.bm
 foreach ($overlay in @('helper-floating-tips', 'tour-overlay-centered', 'tour-overlay-spotlight')) {
   if (-not (Test-Path -LiteralPath (Join-Path $fixture "$overlay.bmp"))) { throw "Native overlay missing: $overlay" }
 }
+$helper = Get-Content -LiteralPath (Join-Path $fixture 'helper-overlay.json') -Raw | ConvertFrom-Json
+$pixels = [IO.File]::ReadAllBytes((Join-Path $fixture 'helper-floating-tips.bmp'))
+$pixelWidth = [BitConverter]::ToInt32($pixels, 18)
+$pixelHeight = [BitConverter]::ToInt32($pixels, 22)
+if ([BitConverter]::ToInt16($pixels, 28) -ne 32 -or $pixelHeight -le 0) { throw 'Unexpected native capture format' }
+$sampleX = [int]$helper.panel.x + 130
+$sampleY = [int]$helper.panel.y + 20
+if ($sampleX -ge $pixelWidth -or $sampleY -ge $pixelHeight) { throw 'Floating helper is outside the capture' }
+$pixel = [BitConverter]::ToInt32($pixels, 10) + (($pixelHeight - 1 - $sampleY) * $pixelWidth + $sampleX) * 4
+if ($pixels[$pixel] -ge 100 -or $pixels[$pixel + 1] -lt 190 -or $pixels[$pixel + 1] - $pixels[$pixel + 2] -lt 70) { throw 'Floating helper was painted behind the Console pane' }
 foreach ($image in @('controller-reference-idle', 'controller-cart')) {
   $path = Join-Path $fixture "$image.bmp"
   if (-not (Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -lt 100000) { throw "Missing Controller reference render: $image" }
