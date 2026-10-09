@@ -1,5 +1,25 @@
 # Windows release verification — 2026-10-07
 
+## 0.20.0 verified native report package — 2026-10-08
+
+Source checkpoint **03c85a2** passed two clean Windows x64 builds with identical
+bytes: **6,411,776 bytes (6.412 decimal MB)**, SHA256
+**8FF45749DA1CD1C8F05A79822D9460174231E2EEE677662534EBD9EDFFEAF431**.
+All five native suites, disposable backend/Git/ZIP workflows, 12,100 original
+source comparisons and all three packaged GUI workflows passed. Official MCP
+Inspector was enabled. The launched report modal checks its empty-description
+guard, measured field geometry, asynchronous screenshot export and owner
+restoration without modifying the test machine's clipboard or launching Explorer.
+Backend tests cover changed-attachment rejection, secret redaction and native
+4K clipboard-to-PNG compression. The real module window passes initial and
+resized containment checks. The packaged 25,000-function Viewer rendered in
+2,187 ms with a capped 500-row roster.
+The package is `lite/release-0.20.0-final/TangOSLite.exe`, with Windows system
+DLL imports only. Full parity remains incomplete. An expanded reference audit
+found equal-rate recommendation ordering differs from JavaScript; the subsequent
+source correction is not included in this package. Exact Advanced composition,
+arbitrary DPI, paid providers and real GitHub writes remain unverified.
+
 ## 0.19.0 verified Controller package — 2026-10-08
 
 Source checkpoint **afad693** passed two clean Windows x64 builds with identical
