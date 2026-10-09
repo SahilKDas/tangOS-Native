@@ -312,8 +312,17 @@ pub unsafe extern "C" fn tangos_mesh(data: *mut u8, w: u32, h: u32, seconds: f32
     let mut dst = PixmapMut::from_bytes(bytes, w, h).unwrap();
     dst.fill(color(palette[0]));
     let rect = Rect::from_xywh(0., 0., w as f32, h as f32).unwrap();
-    let homes = [(0.76, 0.26), (0.24, 0.74), (0.58, 0.84), (0.32, 0.42)];
+    let homes = [
+        [(0.76, 0.26), (0.24, 0.74), (0.58, 0.84), (0.32, 0.42)],
+        [(0.715, 0.387), (0.679, 0.705), (0.325, 0.535), (0.385, 0.849)],
+        [(0.609, 0.341), (0.371, 0.761), (0.688, 0.724), (0.87, 0.485)],
+        [(0.715, 0.387), (0.679, 0.705), (0.325, 0.535), (0.385, 0.849)],
+        [(0.87, 0.528), (0.135, 0.47), (0.291, 0.803), (0., 0.)],
+    ][(theme as usize).min(4)];
     for (i, (x, y)) in homes.iter().enumerate() {
+        if theme == 4 && i == 3 {
+            continue;
+        }
         let t = seconds * 0.035 * (0.65 + i as f32 * 0.17);
         let px = ((*x + 0.2 + t).rem_euclid(1.4) - 0.2) * w as f32;
         let py = (*y + 0.05 * (t * 3. + i as f32).sin()) * h as f32;

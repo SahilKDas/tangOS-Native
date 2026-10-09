@@ -5062,6 +5062,8 @@ ConsoleUI::ConsoleUI(HWND parent, HFONT font, fs::path repo, fs::path data, Sett
                                   std::move(transport))) {}
 ConsoleUI::~ConsoleUI() = default;
 void ConsoleUI::show(bool visible, bool atlas) {
+  if (impl->tourOverlay && impl->tourOverlay->open() && (!visible || atlas))
+    impl->tourOverlay->close();
   if (visible) {
     auto screen = atlas ? Screen::atlas : Screen::controller;
     if (impl->screen == Screen::controller || impl->screen == Screen::atlas ||
@@ -5071,7 +5073,8 @@ void ConsoleUI::show(bool visible, bool atlas) {
   ShowWindow(impl->window, visible ? SW_SHOW : SW_HIDE);
   if (impl->helper)
     impl->helper->position(impl->width, impl->height,
-                           visible && (impl->screen == Screen::controller ||
+                           visible && (!impl->tourOverlay || !impl->tourOverlay->open()) &&
+                               (impl->screen == Screen::controller ||
                                        (impl->screen == Screen::atlas && !impl->fullAtlas)));
 }
 void ConsoleUI::smokeDisplay(const fs::path &directory,

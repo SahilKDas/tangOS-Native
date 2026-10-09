@@ -1,4 +1,4 @@
-# TangOS Lite 0.23.0
+# TangOS Lite 0.24.0
 
 Optional real local-provider validation, after building and with an existing
 Ollama model available:

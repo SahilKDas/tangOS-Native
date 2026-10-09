@@ -359,16 +359,12 @@ void advance(bool visible) {
   lastMotion = now;
 }
 static void drawBackground(HDC dc, int w, int h) {
-  if (animationEnabled() && w > 0 && h > 0) {
+  if (w > 0 && h > 0) {
     Surface surface(dc, 0, 0, w, h);
     if (surface.data)
-      tangos_mesh(surface.data, w, h, phase, paletteIndex);
+      tangos_mesh(surface.data, w, h, animationEnabled() ? phase : 0, paletteIndex);
     return;
   }
-  int split = h * 58 / 100;
-  shape(dc, 0, 0, w, split, 0, colors.top, colors.middle);
-  shape(dc, 0, split, w, h - split, 0, colors.middle, colors.bottom);
-  shape(dc, 0, 0, w, 52, 0, Color(42, 234, 244, 253), Color(42, 234, 244, 253));
 }
 namespace {
 struct BackgroundFrame {

@@ -54,7 +54,7 @@ The theme selector remembers Aero, Sunset, Deepsea, Bubblegum or Lemonlime.
 ROM path/digest or check commands. Port-only mode defaults on and rejects `src/`
 in staging/commit/push. Keep all proprietary assets excluded.
 
-Click Tango or choose **Alt+Space → About** for embedded notices. The full
+Choose **Alt+Space → About** for embedded notices. Click Tango for floating tips. The full
 README describes field meanings and check overrides; LIMITATIONS.md lists the
 unfinished Console screens and fleet functionality.
 
@@ -82,7 +82,9 @@ Explicit Git sync is destructive: review its exact target, local changes and lis
 
 When tangos.json is missing or invalid, Generate descriptor scans available checks. Edit the JSON draft, choose Preview write, inspect the complete configuration, then Confirm write. An edited draft or changed repository invalidates confirmation. Reload descriptor rebuilds the native workspace after the write. Different folder opens the local repository picker.
 
-Tour includes ten steps and expression artwork. Tips switches to short help messages. Edit text opens tango-tour.txt or tango-tips.txt in your local configuration folder. Changes are read when reopening/navigating help; empty files fall back to embedded defaults. Tour completion is remembered. Matching/publication instructions retain mandatory review and port-only safety.
+The first-run tour and Settings' replay action show ten steps over the current screen, with spotlights on the relevant controls. Use Next/Back, arrow keys, or Escape to skip. Click Tango in the lower corner to open floating tips; the red badge indicates an unread announcement. Reading or closing the message remembers it locally. Edit text opens tango-tour.txt or tango-tips.txt in your local configuration folder. Changes are read when reopening help; empty files fall back to embedded defaults. Matching/publication instructions retain mandatory review and port-only safety.
+
+While an agent runs, role, effort and batch-size edits are marked for the next batch. They do not replace the running instructions. Stop disables itself and reads “Stopping…” until cancellation completes; complete logs remain available.
 
 Viewer color and contributor controls are independent of the grouping layout. Choose status or author colors, select a contributor to dim other authors, and toggle draft/near-miss visibility. Color and draft choices are remembered in console-ui.json. Published career/daily totals and shared colors require your enabled connections; local attribution is the offline fallback. The minimap follows the same color choice.
 

@@ -57,6 +57,7 @@ struct TourOverlay::Impl {
   HBITMAP bitmap = nullptr;
   HGDIOBJ previousBitmap = nullptr;
   int width = 0, height = 0;
+  int titleHeight = 20, bodyHeight = 57, boxHeight = 149;
   bool visible = true;
   RECT box{}, back{}, next{}, skip{}, spot{};
   bool hasSpot = false;
@@ -111,10 +112,20 @@ struct TourOverlay::Impl {
       ShowWindow(window, SW_SHOW);
   }
   void layout() {
+    auto dc = GetDC(owner);
+    titleHeight =
+        std::max(20, skin::wrappedLabelHeight(
+                         dc, wide(steps.at(index).value("title", std::string())), 252, 15, true));
+    bodyHeight =
+        std::max(19, skin::wrappedLabelHeight(
+                         dc, wide(steps.at(index).value("body", std::string())), 252, 13, false));
+    ReleaseDC(owner, dc);
+    boxHeight = 28 + titleHeight + 5 + bodyHeight + 10 + 29;
+    const int popHeight = std::max(171, boxHeight);
     auto selector = steps.at(index).value("target", std::string());
     auto rect = selector.empty() ? std::optional<RECT>{} : target(selector);
     hasSpot = rect.has_value();
-    int left = (width - 448) / 2, top = (height - 230) / 2;
+    int left = (width - 448) / 2, top = (height - popHeight) / 2;
     if (rect) {
       spot = *rect;
       InflateRect(&spot, 6, 6);
@@ -122,8 +133,8 @@ struct TourOverlay::Impl {
       left = std::clamp(int(rect->left + (rect->right - rect->left) / 2 - 224), 14,
                         std::max(14, width - 462));
     }
-    top = std::clamp(top, 14, std::max(14, height - 244));
-    box = {left + 164, top, left + 448, top + 230};
+    top = std::clamp(top, 14, std::max(14, height - popHeight - 14));
+    box = {left + 164, top + popHeight - boxHeight, left + 448, top + popHeight};
     back = {box.right - 172, box.bottom - 42, box.right - 98, box.bottom - 12};
     next = {box.right - 90, box.bottom - 42, box.right - 14, box.bottom - 12};
     skip = {width - 100, 16, width - 18, 46};
@@ -161,13 +172,21 @@ struct TourOverlay::Impl {
                 RGB(255, 255, 255));
     skin::tourPanel(dc, box.left, box.top, box.right - box.left, box.bottom - box.top);
     skin::wrappedLabel(dc, wide(steps.at(index).value("title", std::string())), box.left + 16,
-                       box.top + 14, 252, 40, 15, true, RGB(31, 61, 16));
+                       box.top + 14, 252, titleHeight, 15, true, RGB(31, 61, 16));
     skin::wrappedLabel(dc, wide(steps.at(index).value("body", std::string())), box.left + 16,
-                       box.top + 58, 252, 120, 13, false, RGB(44, 61, 34));
+                       box.top + 14 + titleHeight + 5, 252, bodyHeight, 13, false, RGB(44, 61, 34));
     skin::mascot(dc, box.left - 164, box.bottom - 171, 158,
                  steps.at(index).value("emotion", std::string("smile")));
-    skin::label(dc, wide(std::to_string(index + 1) + "/" + std::to_string(steps.size())),
-                box.left + 16, box.bottom - 35, 80, 22, 11, true, false, false, RGB(79, 174, 46));
+    for (size_t dot = 0; dot < steps.size(); ++dot) {
+      auto brush = CreateSolidBrush(dot == index ? RGB(79, 174, 46) : RGB(195, 215, 182));
+      auto oldBrush = SelectObject(dc, brush);
+      auto oldPen = SelectObject(dc, GetStockObject(NULL_PEN));
+      int x = box.left + 16 + int(dot) * 10;
+      Ellipse(dc, x, box.bottom - 30, x + 6, box.bottom - 24);
+      SelectObject(dc, oldPen);
+      SelectObject(dc, oldBrush);
+      DeleteObject(brush);
+    }
     if (index) {
       skin::panel(dc, back.left, back.top, back.right - back.left, 30);
       skin::label(dc, L"Back", back.left + 16, back.top + 6, 50, 20, 13, true);
@@ -245,7 +264,7 @@ Json TourOverlay::snapshot() const {
            {{"x", impl->box.left},
             {"y", impl->box.top},
             {"width", impl->box.right - impl->box.left},
-            {"height", 230}}}};
+            {"height", impl->boxHeight}}}};
 }
 void TourOverlay::smoke(const fs::path &directory,
                         const std::function<void(const fs::path &)> &capture) {
@@ -260,5 +279,14 @@ void TourOverlay::smoke(const fs::path &directory,
   SendMessageW(impl->window, WM_KEYDOWN, VK_LEFT, 0);
   if (impl->index != 0 || impl->hasSpot)
     throw std::runtime_error("Native tour back did not recenter");
+  for (size_t step = 0; step < impl->steps.size(); ++step) {
+    impl->index = step;
+    impl->layout();
+    if (impl->box.bottom > impl->height - 14 || impl->box.top < 14 ||
+        impl->boxHeight < impl->titleHeight + impl->bodyHeight + 72)
+      throw std::runtime_error("Native tour text or panel clipped");
+  }
+  impl->index = 0;
+  impl->layout();
 }
 } // namespace lite
