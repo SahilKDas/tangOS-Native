@@ -412,6 +412,10 @@ void policyButton(HWND window, unsigned state) {
   SetPropW(window, L"TangOSPolicy", reinterpret_cast<HANDLE>(uintptr_t(state + 1)));
   buttonFont(window, 12);
 }
+void roleChip(HWND window) {
+  SetPropW(window, L"TangOSRoleChip", reinterpret_cast<HANDLE>(1));
+  buttonFont(window, 11, 700);
+}
 void rule(HDC dc, int x, int y, int width) {
   static const COLORREF values[] = {RGB(255, 255, 255), RGB(255, 214, 182), RGB(120, 190, 230),
                                     RGB(255, 210, 238), RGB(214, 238, 168)};
@@ -489,6 +493,11 @@ void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
               .value,
           Color(policy == 1 ? 36 : 77, bottom.GetR(), bottom.GetG(), bottom.GetB()).value,
           Color(policy == 1 ? 217 : 153, border.GetR(), border.GetG(), border.GetB()).value);
+  } else if (GetPropW(i.hwndItem, L"TangOSRoleChip")) {
+    Surface surface(i.hDC, x, y, w, h);
+    if (surface.data)
+      tangos_frame(surface.data, w, h, h / 2.f, Color(hover ? 55 : 36, 59, 130, 246).value,
+                   Color(102, 59, 130, 246).value);
   } else if ((i.itemState & ODS_DISABLED) && primary) {
     Surface surface(i.hDC, x, y, w, h);
     if (surface.data)

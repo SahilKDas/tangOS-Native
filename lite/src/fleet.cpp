@@ -54,12 +54,28 @@ std::map<std::string, std::string> Vault::values() const {
     }
   return values;
 }
+Args assignedRoles(const AgentSpec &spec) {
+  if (!spec.roles.empty())
+    return spec.roles;
+  return spec.role == "Unassigned" ? Args{} : Args{spec.role};
+}
 static Json specJson(const AgentSpec &s) {
-  return {{"name", s.name},       {"kind", s.kind},         {"role", s.role},
-          {"effort", s.effort},   {"model", s.model},       {"base_url", s.baseUrl},
-          {"dialect", s.dialect}, {"key", s.key},           {"cli", s.cli},
-          {"count", s.count},     {"attempts", s.attempts}, {"jobs", s.jobs},
-          {"loop", s.loop},       {"provider", s.provider}};
+  auto roles = assignedRoles(s);
+  return {{"name", s.name},
+          {"kind", s.kind},
+          {"role", roles.empty() ? "Unassigned" : roles.front()},
+          {"roles", roles},
+          {"effort", s.effort},
+          {"model", s.model},
+          {"base_url", s.baseUrl},
+          {"dialect", s.dialect},
+          {"key", s.key},
+          {"cli", s.cli},
+          {"count", s.count},
+          {"attempts", s.attempts},
+          {"jobs", s.jobs},
+          {"loop", s.loop},
+          {"provider", s.provider}};
 }
 Json agentJson(const AgentState &s) {
   return {{"spec", specJson(s.spec)},
@@ -85,6 +101,13 @@ AgentState parseAgent(const Json &j) {
   s.spec.name = v.at("name");
   s.spec.kind = v.value("kind", std::string("api"));
   s.spec.role = v.value("role", std::string("Unassigned"));
+  s.spec.roles = v.contains("roles") ? v.at("roles").get<Args>() : assignedRoles(s.spec);
+  std::set<std::string> roles;
+  for (auto &role : s.spec.roles)
+    if ((role != "Hard matcher" && role != "Drafter" && role != "Refiner" && role != "Random") ||
+        !roles.insert(role).second)
+      throw std::runtime_error("Choose distinct supported agent roles");
+  s.spec.role = s.spec.roles.empty() ? "Unassigned" : s.spec.roles.front();
   s.spec.provider = v.value("provider", std::string());
   s.spec.effort = v.value("effort", std::string());
   s.spec.model = v.value("model", std::string());
@@ -221,7 +244,7 @@ std::string Fleet::add(AgentSpec spec) {
   auto job = std::make_shared<Job>();
   job->state.spec = std::move(spec);
   job->state.id = uniqueId();
-  parseAgent(agentJson(job->state));
+  job->state.spec = parseAgent(agentJson(job->state)).spec;
   std::lock_guard<std::mutex> lock(mutex);
   for (auto &entry : jobs)
     if (agentNameKey(entry.second->state.spec.name) == agentNameKey(job->state.spec.name))
@@ -241,7 +264,7 @@ void Fleet::configure(const std::string &id, AgentSpec spec) {
       throw std::runtime_error("Agent name already exists; choose a unique name");
   auto s = j->state;
   s.spec = std::move(spec);
-  parseAgent(agentJson(s));
+  s.spec = parseAgent(agentJson(s)).spec;
   j->state = s;
   saveLocked();
 }
@@ -515,8 +538,23 @@ void Fleet::editBatch(const std::string &batchId, int direction, bool remove) {
 void Fleet::clear(const std::string &id) {
   std::lock_guard<std::mutex> lock(mutex);
   auto job = jobs.at(id);
-  if (job->active)
-    throw std::runtime_error("Stop agent before clearing its queue");
+  if (job->active) {
+    if (job->state.assigned.empty())
+      throw std::runtime_error(
+          "Current assignment is still preparing; retry queue editing once it starts");
+    std::set<std::string> current;
+    for (auto &row : job->state.assigned)
+      current.insert(batchTarget(row));
+    Json retained = Json::array();
+    for (auto &row : job->state.queue)
+      if (current.count(batchTarget(row)))
+        retained.push_back(row);
+    job->state.queue = retained;
+    job->state.total = job->state.completed + int(retained.size());
+    batchBook.clearAgent(id, job->state.assigned);
+    saveLocked();
+    return;
+  }
   batchBook.clearAgent(id);
   job->state.queue = Json::array();
   job->state.assigned = Json::array();
@@ -528,24 +566,35 @@ void Fleet::clear(const std::string &id) {
 void Fleet::editQueue(const std::string &id, size_t index, int direction, bool remove) {
   std::lock_guard<std::mutex> lock(mutex);
   auto job = jobs.at(id);
-  if (job->active)
-    throw std::runtime_error("Stop the agent before editing its queue");
+  if (job->active && job->state.assigned.empty())
+    throw std::runtime_error(
+        "Current assignment is still preparing; retry queue editing once it starts");
   if (index >= job->state.queue.size())
     throw std::runtime_error("Select a queued target");
+  std::set<std::string> current;
+  if (job->active)
+    for (auto &row : job->state.assigned)
+      current.insert(batchTarget(row));
+  if (current.count(batchTarget(job->state.queue[index])))
+    throw std::runtime_error("That target is already being worked; Stop to cancel its execution");
   if (remove)
     job->state.queue.erase(index);
   else {
     if (direction != -1 && direction != 1)
       throw std::runtime_error("Queue direction must be up or down");
     auto next = (int64_t)index + direction;
-    if (next >= 0 && next < (int64_t)job->state.queue.size())
+    if (next >= 0 && next < (int64_t)job->state.queue.size()) {
+      if (current.count(batchTarget(job->state.queue[size_t(next)])))
+        throw std::runtime_error("Waiting work cannot be moved ahead of an in-flight target");
       std::swap(job->state.queue[index], job->state.queue[(size_t)next]);
+    }
   }
-  job->state.assigned = Json::array();
+  if (!job->active)
+    job->state.assigned = Json::array();
   if (job->state.phase == "queued")
     job->state.phase = "idle";
   job->state.total = job->state.completed + (int)job->state.queue.size();
-  batchBook.reconcile(id, job->state.queue);
+  batchBook.reconcile(id, job->state.queue, job->active ? job->state.assigned : Json::array());
   saveLocked();
 }
 static Json attemptedTargets(const Json &assigned, const Json &results) {

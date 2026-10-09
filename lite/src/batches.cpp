@@ -127,8 +127,9 @@ void BatchBook::complete(const std::string &agent, const Json &rows) {
         ++it;
     }
 }
-void BatchBook::reconcile(const std::string &agent, const Json &queue) {
+void BatchBook::reconcile(const std::string &agent, const Json &queue, const Json &active) {
   auto targets = keys(queue);
+  auto current = keys(active);
   for (auto &batch : entries)
     if (batch["agentId"] == agent && batch["status"] != "done") {
       bool open = false;
@@ -138,7 +139,11 @@ void BatchBook::reconcile(const std::string &agent, const Json &queue) {
           if (!row["removed"].get<bool>())
             open = true;
         }
-      batch["status"] = open ? "queued" : "done";
+      bool running = false;
+      for (auto &row : batch["items"])
+        if (current.count(batchTarget(row)))
+          running = true;
+      batch["status"] = open ? running ? "active" : "queued" : "done";
     }
 }
 void BatchBook::park(const std::string &agent, const std::string &reason) {
@@ -149,11 +154,26 @@ void BatchBook::park(const std::string &agent, const std::string &reason) {
       batch["note"] = reason;
     }
 }
-void BatchBook::clearAgent(const std::string &agent) {
+void BatchBook::clearAgent(const std::string &agent, const Json &active) {
+  auto retained = keys(active);
   for (auto it = entries.begin(); it != entries.end();)
-    if ((*it)["agentId"] == agent && (*it)["status"] != "done")
-      it = entries.erase(it);
-    else
+    if ((*it)["agentId"] == agent && (*it)["status"] != "done") {
+      bool current = false;
+      for (auto &row : (*it)["items"])
+        if (retained.count(batchTarget(row)))
+          current = true;
+      if (!current) {
+        it = entries.erase(it);
+        continue;
+      }
+      Json items = Json::array();
+      for (auto &row : (*it)["items"])
+        if (row.value("worked", false) || retained.count(batchTarget(row)))
+          items.push_back(row);
+      (*it)["items"] = items;
+      (*it)["status"] = "active";
+      ++it;
+    } else
       ++it;
 }
 void BatchBook::assign(const std::string &id, const std::string &agent, const std::string &name) {

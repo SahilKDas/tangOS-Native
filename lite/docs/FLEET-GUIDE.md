@@ -11,7 +11,7 @@ credentials. No sign-in or provider call starts automatically.
 
 Choose your own checkout. TangOS Lite reads that repository's tangos.json; no SM64DS path, fork, provider model or API credential is built into the program.
 
-1. Open Settings and select Advanced interface, then use Chaos Controller's Add AI. Choose API, CLI or MCP; configure the provider URL/model and encrypted key variable, or an explicit CLI command. API URLs require HTTPS except local test servers.
+1. Open Settings, select Advanced interface, then use **Advanced settings and key vault → Add AI profile**. Choose API, CLI or MCP; configure the provider URL/model and encrypted key variable, or an explicit CLI command. API URLs require HTTPS except local test servers.
 2. Pick a role, effort, count, attempts and parallel jobs. Go previews execution and creates a codex/lite-* branch in an isolated worktree. Root and nested AGENTS.md plus descriptor rules are included in instructions. Continuous execution is optional.
 3. Chaos Viewer displays local/published atlas data. Group, filter, search and zoom; Ctrl-click targets into the cart, then assign them to a selected AI. A target cannot be queued by two local agents. Published data loads only when you choose Live data.
 4. Each card shows progress and live output. Stop terminates its process tree and keeps worktrees, queued work and complete logs. Details opens logs and the worktree.
@@ -20,6 +20,20 @@ Choose your own checkout. TangOS Lite reads that repository's tangos.json; no SM
 7. Drivers may produce results.output rather than source changes. Land driver results invokes the descriptor's console.land tool in the isolated worktree, runs independent available checks, then requires diff review. Landing is blocked in port-only mode because decomp landing can change src/.
 
 Encyclopedia discovers the repository's tools and typed arguments. Edit arguments opens a native form; Run previews the exact argv and requires permission for writes/apply. Mutating tools in the primary checkout are blocked in port-only mode. Only run trusted repository code.
+
+Advanced cards add roles without replacing existing roles; each header chip
+removes its own role. The first assigned role selects generated batches. Single
+option effort controls are hidden. API attempts clamp to 1–20. The ∞ toggle
+selects continuous matching and disables the finite count. **Add to queue**
+prepares work; **Drive queue** executes available queued work through the user's
+configured driver. With no queue or driver capability, Drive remains disabled.
+While running, the action cluster collapses to Stop.
+
+Queue management can reorder, remove or clear waiting targets while an assigned
+batch runs. Current targets remain protected, and their batch history and logs
+are retained. Queue editing during assignment preparation returns a retry error.
+Changing an active agent's configuration still requires Stop. Clearing a queue
+does not disable continuous matching; use Stop to end that loop.
 
 Settings stores API keys with Windows DPAPI. Agent definitions and queues use human-readable fleet.json under local application data; worktrees and logs persist there too. Secrets are supplied to child environments and redacted from captured logs, including pipe-chunk boundaries. Avoid writing credentials into command arguments or prompts.
 

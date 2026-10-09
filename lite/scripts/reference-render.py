@@ -3,9 +3,10 @@ import argparse,json,pathlib,shutil,subprocess
 
 def main():
     root=pathlib.Path(__file__).resolve().parents[2]
-    parser=argparse.ArgumentParser();parser.add_argument('--dependencies',type=pathlib.Path,default=root/'lite/out/reference-tools');parser.add_argument('--output',type=pathlib.Path,default=root/'lite/out/reference-ui');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--dependencies',type=pathlib.Path,default=root/'lite/out/reference-tools');parser.add_argument('--output',type=pathlib.Path,default=root/'lite/out/reference-ui');parser.add_argument('--interface-mode',choices=('simple','advanced'),default='simple');args=parser.parse_args()
     deps=args.dependencies.resolve();out=args.output.resolve();out.mkdir(parents=True,exist_ok=True)
     values=json.loads((root/'lite/tests/fixtures/reference-ui.json').read_text(encoding='utf-8'))
+    values['uiPrefsGet']['mode']=args.interface_mode
     bridge='window.__referenceCalls=[];const values='+json.dumps(values)+';window.tangos=new Proxy({}, {get:(_,name)=>{if(typeof name!=="string")return undefined;if(name.startsWith("on"))return ()=>()=>{};return ()=>{window.__referenceCalls.push(name);if(Object.hasOwn(values,name))return Promise.resolve(structuredClone(values[name]));return Promise.reject(new Error("Read-only visual fixture has no handler: "+name));};}});\n'
     (out/'fixture.js').write_text(bridge,encoding='utf-8')
     (out/'entry.tsx').write_text("import './fixture.js';import "+json.dumps((root/'console/src/renderer/src/main.tsx').as_posix())+';\n',encoding='utf-8')

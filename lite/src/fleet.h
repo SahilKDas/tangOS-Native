@@ -20,6 +20,7 @@ struct AgentSpec {
   std::string name, kind = "api", role = "Unassigned", effort, model, baseUrl, provider,
                     dialect = "openai", key;
   std::string cli;
+  Args roles;
   int count = 16, attempts = 4, jobs = 1;
   bool loop = false;
 };
@@ -33,6 +34,7 @@ struct AgentState {
   bool active = false;
 };
 Json agentJson(const AgentState &agent);
+Args assignedRoles(const AgentSpec &spec);
 AgentState parseAgent(const Json &json);
 class Fleet {
   struct Job {

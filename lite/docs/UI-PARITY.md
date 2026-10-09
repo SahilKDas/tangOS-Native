@@ -1,5 +1,25 @@
 # Console parity audit
 
+## Advanced Controller source checkpoint
+
+Advanced cards now use measured queue rows, a compact count, continuous toggle,
+API attempts, additive/removable role chips and a separate disabled-empty Drive
+queue row. Single-option effort controls are omitted. Role order persists in
+fleet.json; legacy single roles migrate, and the first role remains compatible
+with existing scheduler selection. Running cards collapse their actions to Stop.
+The MCP button uses the same header placement in both modes, correcting an
+overlap found during native screenshot inspection. Profile creation moved to
+Advanced settings and the key vault, preserving the original Controller header.
+Native widget decorations, active role reconfiguration, progress composition,
+card hover motion and background animation still differ from the original.
+The offline reference renderer can capture either Simple or Advanced fixtures.
+
+Waiting queue edits now preserve in-flight targets and active batch history;
+preparation remains protected with an explicit retry error. A controlled CLI
+fixture exercises removal/reorder guards, waiting-only clearing and completion
+without resurrecting cleared work. These source changes follow 0.20.0 and do
+not establish full Console parity.
+
 ## Native report overlay source checkpoint
 
 The following statistics correction preserves first-observation bucket order

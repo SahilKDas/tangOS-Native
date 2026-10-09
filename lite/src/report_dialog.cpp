@@ -117,7 +117,7 @@ struct ReportDialog::Impl {
       SendMessageW(descriptionField, EM_SETRECT, 0, reinterpret_cast<LPARAM>(&textBounds));
       SetWindowRgn(descriptionField, CreateRoundRectRgn(0, 0, 483, 121, 20, 20), TRUE);
       auto attachButton = control(L"BUTTON", "Attach screenshots", Attach, x, y + 245, 153, 26);
-      skin::iconTextButton(attachButton, skin::Icon::document);
+      skin::iconTextButton(attachButton, skin::Icon::image);
       skin::buttonFont(attachButton, 12);
       for (size_t i = 0; i < screenshots.size(); ++i) {
         int column = int(i % 2), row = 1 + int(i / 2);

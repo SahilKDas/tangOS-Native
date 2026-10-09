@@ -62,6 +62,19 @@ int main(int argc, char **argv) {
           "ROOT_RULE: only change port files; no src changes or copyrighted assets.\n");
     write(repo / "port/AGENTS.md", "NESTED_RULE: run independent port reference check.\n");
     write(repo / "src/original.cpp", "int original = 1;\n");
+    write(repo / "tools/queue_hold.py",
+          "import argparse,json,time\nfrom pathlib import Path\n"
+          "p=argparse.ArgumentParser();p.add_argument('--prompt');p.add_argument('--wl');"
+          "p.add_argument('--out');a=p.parse_args()\n"
+          "assert 'ROOT_RULE' in Path(a.prompt).read_text(encoding='utf-8')\n"
+          "Path('port/queue-started.flag').write_text('controlled fixture')\n"
+          "deadline=time.monotonic()+30\n"
+          "while not Path('port/queue-release.flag').exists():\n"
+          " assert time.monotonic()<deadline, 'fixture release timed out'\n"
+          " time.sleep(.02)\n"
+          "rows=[json.loads(line) for line in Path(a.wl).read_text().splitlines() if line]\n"
+          "Path(a.out).write_text(json.dumps({'results':[dict(r,matched=False) for r in rows]}))\n"
+          "print('controlled queue fixture finished',flush=True)\n");
     write(repo / "tools/port_refcheck.py",
           "from pathlib import Path\nassert Path('src/original.cpp').read_text() == 'int original "
           "= 1;\\n'\nprint('independent verification passed', flush=True)\n");
@@ -246,9 +259,87 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       a.model = "fixture";
       a.baseUrl = "http://127.0.0.1:" + trim(read(dir / "port.txt"));
       a.count = 1;
+      AgentState roleFixture;
+      roleFixture.id = "abc123";
+      roleFixture.spec = a;
+      roleFixture.spec.roles = {"Drafter", "Refiner"};
+      auto multipleRoles = parseAgent(agentJson(roleFixture));
+      expect(multipleRoles.spec.roles == Args{"Drafter", "Refiner"} &&
+                 multipleRoles.spec.role == "Drafter",
+             "multiple assigned roles preserve order and first-role scheduler compatibility");
+      auto legacyRole = agentJson(roleFixture);
+      legacyRole["spec"].erase("roles");
+      expect(parseAgent(legacyRole).spec.roles == Args{"Drafter"},
+             "legacy single-role fleet state migrates to ordered assigned roles");
+      auto noRoles = agentJson(roleFixture);
+      noRoles["spec"]["roles"] = Json::array();
+      expect(parseAgent(noRoles).spec.role == "Unassigned",
+             "explicit empty roles restore automatic selection");
+      auto badRoles = agentJson(roleFixture);
+      badRoles["spec"]["roles"] = {"Drafter", "Drafter"};
+      reject([&] { parseAgent(badRoles); }, "duplicate roles rejected");
+      badRoles["spec"]["roles"] = {"unsupported-role"};
+      reject([&] { parseAgent(badRoles); }, "unknown roles rejected");
       auto first = fleet.add(a);
+      auto assigned = a;
+      assigned.roles = {"Drafter", "Refiner"};
+      fleet.configure(first, assigned);
+      expect(fleet.snapshot().front().spec.roles == Args{"Drafter", "Refiner"},
+             "fleet configuration retains several assigned roles");
+      fleet.configure(first, a);
       a.name = "API B";
       auto second = fleet.add(a);
+      {
+        AgentSpec hold;
+        hold.name = "Active queue fixture";
+        hold.kind = "cli";
+        hold.count = 1;
+        hold.cli = "python tools/queue_hold.py --prompt {prompt} --wl {worklist} --out {out}";
+        auto id = fleet.add(hold);
+        fleet.enqueue(id, Json::array({{{"id", "active-queue-a"}},
+                                       {{"id", "waiting-queue-b"}},
+                                       {{"id", "waiting-queue-c"}}}));
+        fleet.start(id);
+        auto state = [&] {
+          for (auto &agent : fleet.snapshot())
+            if (agent.id == id)
+              return agent;
+          throw std::runtime_error("Active queue fixture disappeared");
+        };
+        auto deadline = GetTickCount64() + 15000;
+        while ((state().worktree.empty() ||
+                !fs::exists(state().worktree / "port/queue-started.flag")) &&
+               GetTickCount64() < deadline)
+          std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        expect(state().active && fs::exists(state().worktree / "port/queue-started.flag"),
+               "controlled CLI assignment is running");
+        auto assigned = state().assigned;
+        expect(assigned.size() == 1 && assigned[0].at("id") == "active-queue-a",
+               "controlled assignment protects its first target");
+        reject([&] { fleet.editQueue(id, 0, 0, true); }, "cannot remove an in-flight target");
+        reject([&] { fleet.editQueue(id, 1, -1); },
+               "waiting target cannot move ahead of current assignment");
+        fleet.editQueue(id, 1, 1);
+        expect(state().queue[1].at("id") == "waiting-queue-c" && state().assigned == assigned,
+               "waiting queue can reorder while current work stays unchanged");
+        fleet.editQueue(id, 2, 0, true);
+        fleet.clear(id);
+        auto retained = state();
+        expect(retained.active && retained.assigned == assigned && retained.queue.size() == 1 &&
+                   retained.queue[0].at("id") == "active-queue-a",
+               "clearing waiting work preserves the running target and runner");
+        bool activeHistory = false;
+        for (auto &batch : fleet.batches())
+          if (batch.at("agentId") == id) {
+            activeHistory = batch.at("status") == "active" && batch.at("items").size() == 1;
+          }
+        expect(activeHistory, "waiting clear retains active batch history");
+        write(retained.worktree / "port/queue-release.flag", "release controlled fixture");
+        wait(fleet);
+        expect(!state().active && state().queue.empty() && state().completed == 1,
+               "retained current target completes without resurrecting cleared work");
+        fleet.remove(id);
+      }
       auto statePath = data / "projects/fixture/fleet.json";
       HANDLE lockedState = CreateFileW(statePath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
                                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -320,7 +411,12 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
           "duplicate target claim");
       fleet.enqueue(second, Json::array({{{"id", "two"}, {"name", "two"}, {"module", "port"}}}));
       fleet.start(first);
-      reject([&] { fleet.editBatch(fleet.batches()[0].at("id").get<std::string>(), 1); },
+      std::string runningBatch;
+      for (auto &batch : fleet.batches())
+        if (batch.at("agentId") == first && batch.at("status") != "done")
+          runningBatch = batch.at("id").get<std::string>();
+      expect(!runningBatch.empty(), "running agent batch exists");
+      reject([&] { fleet.editBatch(runningBatch, 1); },
              "active batch edits rejected without stopping work");
       fleet.start(second);
       fleet.enqueue(first, Json::array({{{"id", "later"}, {"name", "later"}, {"module", "port"}}}));

@@ -18,13 +18,16 @@ enum class Icon {
   github,
   play,
   stop,
-  cart
+  cart,
+  image,
+  sparkles
 };
 enum class PanelStyle { glass, controller, task };
 void iconButton(HWND window, Icon icon);
 void iconTextButton(HWND window, Icon icon);
 void drawIcon(HDC dc, Icon icon, int x, int y, int size);
 void policyButton(HWND window, unsigned state);
+void roleChip(HWND window);
 void rule(HDC dc, int x, int y, int width);
 void buttonFont(HWND window, int size, int weight = 700);
 void controlFont(HWND window, int size, int weight = 400);

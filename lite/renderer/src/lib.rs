@@ -78,6 +78,20 @@ pub unsafe extern "C" fn tangos_icon(data: *mut u8, w: u32, h: u32, icon: u32, i
         14 => { path.move_to(5., 5.); path.line_to(19., 5.); path.line_to(19., 19.); path.line_to(5., 19.); path.close(); }
         15 => { path.move_to(2., 3.); path.line_to(5., 3.); path.line_to(8., 16.); path.line_to(19., 16.);
                 path.line_to(22., 7.); path.line_to(6., 7.); path.push_circle(9., 21., 1.); path.push_circle(18., 21., 1.); }
+        16 => { // Screenshot attachment with a plus in the open upper corner.
+                path.move_to(12., 3.); path.line_to(5., 3.); path.quad_to(3., 3., 3., 5.);
+                path.line_to(3., 19.); path.quad_to(3., 21., 5., 21.);
+                path.line_to(19., 21.); path.quad_to(21., 21., 21., 19.); path.line_to(21., 12.);
+                path.push_circle(8., 8., 1.5);
+                path.move_to(3., 16.); path.line_to(8., 11.); path.line_to(14., 17.);
+                path.line_to(17., 14.); path.line_to(21., 18.);
+                line(&mut path, 16., 5., 22., 5.); line(&mut path, 19., 2., 19., 8.); }
+        17 => { // Queue generation sparkles.
+                path.move_to(12., 3.); path.line_to(14., 10.); path.line_to(21., 12.);
+                path.line_to(14., 14.); path.line_to(12., 21.); path.line_to(10., 14.);
+                path.line_to(3., 12.); path.line_to(10., 10.); path.close();
+                line(&mut path, 3., 2., 3., 6.); line(&mut path, 1., 4., 5., 4.);
+                line(&mut path, 21., 18., 21., 22.); line(&mut path, 19., 20., 23., 20.); }
         _ => { path.move_to(6., 3.); path.line_to(14., 3.); path.line_to(19., 8.); path.line_to(19., 21.); path.line_to(6., 21.); path.close();
                path.move_to(14., 3.); path.line_to(14., 8.); path.line_to(19., 8.);
                for y in [12., 16.] { line(&mut path, 9., y, 16., y); } }

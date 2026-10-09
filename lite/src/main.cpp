@@ -202,7 +202,7 @@ std::string resourceText(int id) {
 }
 void about() {
   reviewDialog(
-      "TangOS Lite 0.20.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
+      "TangOS Lite 0.21.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
       "for checks and Git; Repository for status.\nAlways read AGENTS.md and review "
       "changes before publication.\n\n" +
           resourceText(204) + "\n\nMinGW-w64 libwinpthread\n" + resourceText(202) +
@@ -587,7 +587,7 @@ void paintChrome(HDC dc, int w, int h) {
     skin::label(dc, L"Repository status", rail + 16, 345, 308, 24, 14, true);
   skin::label(dc, L"Port-only  ·  Review before push", rail + 16, h - 139, 300, 23, 12, true, true);
   skin::mascot(dc, w - 137, h - 127, 96);
-  skin::label(dc, L"v0.20.0", w - 74, h - 27, 60, 18, 10, false, true);
+  skin::label(dc, L"v0.21.0", w - 74, h - 27, 60, 18, 10, false, true);
 }
 void snapshot(const fs::path &path) {
   skin::invalidateBackdrop(window);
@@ -674,7 +674,7 @@ fs::path saveDebugSnapshot() {
   fs::create_directories(folder);
   snapshot(folder / "window.bmp");
   Json state = {{"app", "TangOS Lite"},
-                {"version", "0.20.0"},
+                {"version", "0.21.0"},
                 {"capturedAt", activityNow()},
                 {"toolboxOpen", toolboxOpen},
                 {"repositoryView", repositoryView},

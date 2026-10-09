@@ -16,9 +16,9 @@ public:
            const Json &rows, int64_t created, const std::string &title, const std::string &prompt);
   void activate(const std::string &agent, const Json &rows, int64_t at);
   void complete(const std::string &agent, const Json &rows);
-  void reconcile(const std::string &agent, const Json &queue);
+  void reconcile(const std::string &agent, const Json &queue, const Json &active = Json::array());
   void park(const std::string &agent, const std::string &reason);
-  void clearAgent(const std::string &agent);
+  void clearAgent(const std::string &agent, const Json &active = Json::array());
   void assign(const std::string &id, const std::string &agent, const std::string &name);
   void remove(const std::string &id);
   void reorder(const std::string &id, int direction);

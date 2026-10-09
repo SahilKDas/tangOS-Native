@@ -614,20 +614,20 @@
     },
     {
       "contract": "setClientRoles",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": ["lite/tests/fleet_tests.cpp", "lite/src/console_ui.cpp:smokeScreens"],
       "kind": "api"
     },
     {
       "contract": "setClientEffort",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": ["lite/tests/test_auto_role_reference.py", "lite/src/console_ui.cpp:smokeScreens"],
       "kind": "api"
     },
     {
       "contract": "setClientAttempts",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": ["lite/tests/fleet_tests.cpp", "lite/src/console_ui.cpp:smokeScreens"],
       "kind": "api"
     },
     {
