@@ -2,6 +2,25 @@
 
 ## 0.17.0 source validation — 2026-10-08
 
+Release source checkpoint **b4c059d** passed two clean Windows x64 builds with
+identical executable bytes: **6,177,792 bytes (6.178 decimal MB)**, SHA256
+**347D5651A24DA65DE2EDD3814264062729BB7EEE791F6464196AB16C8FD56157**.
+The verified package is `lite/release-0.17.0-final/TangOSLite.exe`; imports are
+Windows system DLLs only. All five native suites, harmless backend/Git/ZIP
+integration tests, original-code comparisons and all three packaged window
+workflows passed. This includes 7,208 automatic-role cases and 2,600 provider
+effort cases. The installed official MCP Inspector was enabled for the Fleet
+suite. No personal client settings, credentials or paid providers were used.
+
+An earlier 0.17.0 packaging attempt failed on simultaneous Git worktree
+registration. It was not promoted. The final build serializes internal
+worktree metadata operations, with eight concurrent disposable registrations
+and cancellation behind a controlled checkout hook tested successfully.
+
+Installed VS Code 1.140.0 accepted the native stdio server definition through
+its own CLI in a disposable user profile. This establishes registration only;
+authenticated server/tool execution inside VS Code remains unverified.
+
 The actual native window workflow in `lite/out/gui-viewport-modal-017` passes
 repository selection, status, checks, complete logs, Controller model streams,
 recent-run expansion and statistics scope, remote clone/viewer, report export
