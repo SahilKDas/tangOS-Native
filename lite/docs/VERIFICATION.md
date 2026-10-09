@@ -1,5 +1,24 @@
 # Windows release verification — 2026-10-07
 
+## 0.21.0 verified Advanced Controller package — 2026-10-08
+
+Source checkpoint **b6c0ebf** passed two clean Windows x64 builds with identical
+bytes: **6,525,440 bytes (6.525 decimal MB)**, SHA256
+**885356F9E8D2FB8284F353613E5E6CE6C29C826B56F19BC86A5CDD766063FDEA**.
+All five native suites, disposable backend/Git/ZIP workflows, 12,124 original
+source comparisons and all three packaged GUI workflows passed. Official MCP
+Inspector was enabled. Advanced Controller tests cover compact count geometry,
+disabled empty Drive, additive/removable roles, effort persistence, attempts
+clamping, continuous count guarding, header containment and passive queue edits.
+A controlled CLI driver confirms waiting-only removal/reordering/clearing keeps
+the in-flight target and active batch history, then completes without resurrecting
+cleared work. Equal-rate recommendations retain original insertion order.
+The package is `lite/release-0.21.0-final/TangOSLite.exe`, with Windows system
+DLL imports only. Full parity remains incomplete: native widget decoration,
+live telemetry composition, animations, further overlays and unusual DPI still
+need work; paid providers and real GitHub writes remain unverified. Subsequent
+Controller view-model source changes are not included in this package.
+
 ## 0.20.0 verified native report package — 2026-10-08
 
 Source checkpoint **03c85a2** passed two clean Windows x64 builds with identical
