@@ -1,6 +1,15 @@
 # Windows release verification — 2026-10-10
 
-## 0.28.0 source validation
+## 0.28.0 verified portable package — 2026-10-10
+
+Code checkpoint **fbbedbf** produced two identical clean Windows x64 builds:
+**6,839,296 bytes (6.839 decimal MB)**, SHA256
+**05FFC73975C338A8188939D187D04DF9581F136326D16D86FDA448A601B03CFA**.
+All seven release suites passed (142.48 seconds), together with 12,407 Console
+reference comparisons, packaged backend/Git/ZIP workflows and the new safety
+regressions. The portable executable launched successfully and passed the full
+repository/status/check/log workflow with valid, missing and invalid descriptors
+(12 responsive timer ticks each). The default `lite/release` package is 0.28.0.
 
 Native checks now append interpreted outcomes to both the UI stream and durable
 logs; `checks.run` exposes a structured `verification` result. Zero-exit ROM-data
@@ -9,9 +18,9 @@ and cancellations remain distinct. Oversized baseline counts cannot crash parsin
 The native classifier and backend integration suites pass, as do 166 core/Git
 assertions, five Python verdict tests, the changed-remote confirmation regression
 and the repository/status/check/log GUI workflow (11 responsive timer ticks).
-The release pipeline includes these additional safety gates. This source
-checkpoint is awaiting its own clean reproducible packaging; the current portable
-package remains the verified 0.27.0 described below.
+The release pipeline includes these additional safety gates. This checkpoint
+does not establish full visual parity or fix the independently reported real
+checkout/compiler/ROM failures below.
 
 ## 0.27.0 verified portable package — 2026-10-10
 
@@ -20,8 +29,8 @@ Code checkpoint **54d59bf** produced two identical clean Windows x64 builds:
 **37C8CA71C3A36FA8A400C8EEB2BB6E5553D8E6157D32396B08F22396AA3BE0E7**.
 All six release suites passed, together with 12,407 Console reference comparisons.
 The packaged executable passed native repository/status/check/log workflows with
-valid, missing and invalid descriptors. The default `lite/release` executable is
-this verified package; subsequent source fixes require a new packaged validation.
+valid, missing and invalid descriptors. This package is retained as an earlier
+verified checkpoint; the default executable is the newer 0.28.0 above.
 
 Native app-switch overlay tests pass delayed 450-ms view switching, 1,750-ms
 expiry, rapid replay cancelling the old callback, capture, and native-window
