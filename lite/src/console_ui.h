@@ -19,7 +19,7 @@ public:
             std::string module = {}, std::function<void(Json)> draftAdded = {},
             bool remoteOnly = false, Transport transport = requestHttp);
   ~ConsoleUI();
-  void show(bool visible, bool atlas = false);
+  void show(bool visible, bool atlas = false, bool transition = false);
   void resize(int width, int height);
   bool running() const;
   void stop();

@@ -15,6 +15,7 @@ extern "C" void tangos_gradient_frame(unsigned char *, unsigned, unsigned, float
                                       uint32_t, uint32_t);
 extern "C" void tangos_image(unsigned char *, unsigned, unsigned, const unsigned char *, size_t);
 extern "C" void tangos_mesh(unsigned char *, unsigned, unsigned, float, unsigned);
+extern "C" void tangos_shadow(unsigned char *, unsigned, unsigned, unsigned, float, float, int, float);
 extern "C" void tangos_icon(unsigned char *, unsigned, unsigned, unsigned, uint32_t);
 extern "C" void tangos_glass(unsigned char *, unsigned, unsigned, uint32_t, uint32_t, uint32_t,
                              unsigned);
@@ -470,8 +471,14 @@ void scrim(HDC dc, int w, int h) {
       }
     }
 }
-void agentCard(HDC dc, int x, int y, int w, int h, COLORREF tint) {
-  shape(dc, x, y + 4, w, h, 14, Color(18, 0, 0, 0), Color(18, 0, 0, 0));
+void agentCard(HDC dc, int x, int y, int w, int h, COLORREF tint, bool hovered) {
+  {
+    constexpr int padding = 40;
+    Surface shadow(dc, x - padding, y - padding, w + padding * 2, h + padding * 2);
+    if (shadow.data)
+      tangos_shadow(shadow.data, shadow.w, shadow.h, padding, 14, hovered ? 20 : 12,
+                     hovered ? 8 : 4, hovered ? .13f : .08f);
+  }
   static const Color gloss[] = {Color(234, 244, 253), Color(250, 208, 172), Color(20, 44, 70),
                                 Color(252, 214, 240), Color(238, 255, 196)};
   auto fill = gloss[paletteIndex];
@@ -479,6 +486,15 @@ void agentCard(HDC dc, int x, int y, int w, int h, COLORREF tint) {
   if (surface.data)
     tangos_frame(surface.data, w, h, 14, Color(230, fill.GetR(), fill.GetG(), fill.GetB()).value,
                  Color(255, GetRValue(tint), GetGValue(tint), GetBValue(tint)).value);
+}
+void splashBubble(HDC dc, int x, int y, int size, double opacity) {
+  if (size <= 0)
+    return;
+  Surface surface(dc, x, y, size, size);
+  if (surface.data)
+    tangos_frame(surface.data, size, size, size / 2.f,
+                 Color(int(76 * opacity), 255, 255, 255).value,
+                 Color(int(140 * opacity), 255, 255, 255).value);
 }
 COLORREF matched() {
   static const COLORREF values[] = {RGB(63, 196, 95), RGB(61, 186, 122), RGB(45, 224, 138),

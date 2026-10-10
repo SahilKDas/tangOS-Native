@@ -15,7 +15,9 @@ p.add_argument('--repo', required=True)
 p.add_argument('--output', required=True)
 p.add_argument('--python', help='Explicit local validation environment; does not change global Python')
 p.add_argument('--check', action='append', required=True,
-               choices=['Port references', 'Declaration agreement', 'Dead references', 'Link checks', 'Byte matching'])
+               choices=['Port references', 'Declaration agreement', 'Dead references', 'Link checks',
+                        'Byte matching', 'Port build + smoke', 'Smoke tests (built port)',
+                        'ROM verification', 'ROM data comparison'])
 p.add_argument('--timeout', type=int, default=1800)
 args = p.parse_args()
 exe, repo, output = [pathlib.Path(v).resolve() for v in (args.exe, args.repo, args.output)]

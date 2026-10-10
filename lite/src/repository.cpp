@@ -101,15 +101,23 @@ std::string Repository::pushPreview(const std::string &remote, const std::string
                              "branch, without options.");
   git({"remote", "get-url", "--push", remote});
   auto target = "refs/remotes/" + remote + "/" + branch;
-  // Requiring a fetched destination closes the 'new branch skips historical
-  // blobs' gap.
-  git({"rev-parse", "--verify", target});
-  std::string range = target + "..HEAD";
-  auto ids = split(git({"rev-list", "--reverse", range}), '\n');
-  if (ids.empty())
+  auto destination = runner.run({{"git", "rev-parse", "--verify", target}, root});
+  bool newBranch = destination.code != 0;
+  // A new destination still needs fetched history. Review every commit absent
+  // from that remote, including intermediate commits later deleted or reverted.
+  // Git's ordinary non-force push remains the authority on remote races.
+  if (newBranch && trim(git({"for-each-ref", "--format=%(objectname)",
+                            "refs/remotes/" + remote + "/"})).empty())
+    throw std::runtime_error("Fetch remote history before publishing a new branch.");
+  auto history = newBranch ? git({"rev-list", "--reverse", "HEAD", "--not", "--remotes=" + remote})
+                           : git({"rev-list", "--reverse", target + "..HEAD"});
+  auto ids = split(history, '\n');
+  if (trim(history).empty() && !newBranch)
     throw std::runtime_error("No outgoing commits. Fetch first if remote state changed.");
   std::string out = "DESTINATION: " + remote + " / " + branch +
                     "\nHEAD: " + trim(git({"rev-parse", "HEAD"})) + "\n";
+  if (newBranch)
+    out += "NEW REMOTE BRANCH: all unpublished history reviewed against fetched remote refs.\n";
   for (auto id : ids) {
     id = trim(id);
     if (id.empty())

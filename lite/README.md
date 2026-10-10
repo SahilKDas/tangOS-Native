@@ -1,4 +1,4 @@
-# TangOS Lite 0.26.0
+# TangOS Lite 0.27.0
 
 Optional real local-provider validation, after building and with an existing
 Ollama model available:
@@ -11,6 +11,17 @@ This exercises native Fleet instruction delivery and the actual local
 OpenAI-compatible endpoint in a disposable repository. It does not download
 models, use account credentials or establish ROM byte correctness. Ordinary
 tests and release builds do not call a provider.
+
+Explicit live GitHub validation creates a **new private synthetic repository**
+and retains its draft PR. It uses existing `gh` authentication; inspect the
+test source before opting in:
+
+```powershell
+python lite/tests/run_github_workflow.py --exe lite/out/TangOSLite.exe --output lite/out/github-live --create-private-fixture
+```
+
+This tests native clone, commit/push previews, first branch publication, draft
+creation and actual Actions checks. It never merges or deletes remote resources.
 
 Use **Alt+Space → About** for embedded third-party notices. Click Tango for floating tips.
 

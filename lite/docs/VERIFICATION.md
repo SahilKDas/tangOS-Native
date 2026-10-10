@@ -1,4 +1,31 @@
-# Windows release verification — 2026-10-09
+# Windows release verification — 2026-10-10
+
+## 0.27.0 development validation — 2026-10-10
+
+Native app-switch overlay tests pass delayed 450-ms view switching, 1,750-ms
+expiry, rapid replay cancelling the old callback, capture, and native-window
+cleanup. The existing essential GUI workflow passed under PowerShell 7 and
+Windows PowerShell 5.1 (14 and 11 responsive timer ticks). The smoke script now
+retains process handles when a fast hash verification exits before Start-Process
+returns. Disposable Git tests pass first publication of a branch, fetched-history
+requirements, and rejection of protected assets in intermediate commits.
+
+The actual installed Ollama `llama3.2:3b` provider passed through native Fleet,
+including instruction delivery, retained logs, completion and unchanged source.
+Native GitHub readiness read real upstream PR 3731 with fifteen checks and a
+blocked merge state; pending checks were retained without claiming completion.
+The explicit live workflow harness created a fresh private synthetic repository,
+then exercised native clone, staged-diff/commit review, push review, first branch
+push, draft PR creation and actual passing GitHub Actions checks. Its draft is
+[retained for review](https://github.com/SahilKDas/tangos-lite-validation-68ccc8653fcf/pull/1).
+No existing remote project was modified; no credential or game data was uploaded.
+
+Ten comparisons against the original CSS shadow values in installed Edge pass
+mean/p99 tolerances (maximum observed difference five RGB levels). Edge is a
+development reference only. This is not pixel-identical proof. Exact background
+motion/composition, further overlays, sharp unusual-DPI output and hosted-provider
+interoperability remain unverified. Reproducible 0.27.0 packaging is in progress;
+the stable default package remains 0.26.0 until all release gates pass.
 
 ## 0.26.0 verified portable package — 2026-10-09
 

@@ -208,3 +208,11 @@ Agent post-land regeneration stays in the isolated worktree, retains a complete
 log, and leaves the primary checkout untouched. Refresh failure does not discard
 landed changes or report byte verification. Statistics baseline seeding only
 lowers known divergence values and cannot inflate counts on its own.
+
+First publication of a Git branch requires fetched remote history. Review scans
+every commit absent from that remote, including intermediate blobs later deleted;
+ordinary Git push handles conflicting remote updates without force. The opt-in
+live GitHub test creates a fresh private repository with synthetic text and a
+minimal read-only Actions job. It uses existing gh authentication, retains its
+draft PR for review, and never merges or deletes remote resources. It is excluded
+from ordinary tests and release builds.

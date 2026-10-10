@@ -1,5 +1,26 @@
 # Console parity audit
 
+## Native switch overlay and live Git checkpoint — 0.27.0
+
+Controller/Viewer toolbar changes now show a native theme-backed Tango splash.
+It follows the original 450-ms delayed view swap, 1,750-ms lifecycle and cubic
+whoosh/fade timing, uses a fresh mascot pose and eighteen rising circles, and
+replays by destroying the prior overlay and its timer. Reduced-motion settings
+switch immediately. Hidden native-window tests cover expiry, replay, capture
+and cleanup. The original bubble highlights/blur, wordmark letter spacing,
+background physics and project-switch splash remain visual parity gaps.
+
+Card shadows use bounded cached native Gaussian masks; ten installed-Edge
+comparisons against the original CSS pass the recorded tolerance. Hover shadow
+interpolation remains unfinished. Rounded geometry now uses circular cubic
+corners rather than the previous quadratic approximation. No browser is shipped.
+
+Native Git workflows passed clone, reviewed commit/push, initial branch
+publication, draft creation and actual checks in a private synthetic GitHub
+fixture. Installed Ollama and the official MCP Inspector have separate opt-in
+live validation. Unusual DPI and hosted-provider coverage remain open; these
+results do not establish full pixel or external-client parity.
+
 ## Descriptor Atlas generation checkpoint
 
 Native projects now honor `data.generate`, including the descriptor interpreter,

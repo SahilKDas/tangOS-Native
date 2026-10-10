@@ -1,5 +1,93 @@
 use tiny_skia::*;
 
+// CSS box-shadow uses sigma = blur / 2. Cache alpha masks, never caller pixels.
+// The opaque box geometry clips outer shadows even when its fill is translucent.
+fn rounded_coverage(x: f32, y: f32, w: f32, h: f32, radius: f32) -> f32 {
+    let radius = radius.min(w / 2.).min(h / 2.);
+    let qx = (x - w / 2.).abs() - (w / 2. - radius);
+    let qy = (y - h / 2.).abs() - (h / 2. - radius);
+    let distance = qx.max(0.).hypot(qy.max(0.)) + qx.max(qy).min(0.) - radius;
+    (0.5 - distance).clamp(0., 1.)
+}
+
+fn shadow_mask(w: usize, h: usize, padding: usize, radius: f32, blur: f32) -> Vec<f32> {
+    let mut mask = vec![0.; w * h];
+    let cw = (w - padding * 2) as f32;
+    let ch = (h - padding * 2) as f32;
+    for y in 0..h {
+        for x in 0..w {
+            mask[y * w + x] = rounded_coverage(x as f32 + 0.5 - padding as f32,
+                y as f32 + 0.5 - padding as f32, cw, ch, radius);
+        }
+    }
+    let sigma = blur * 0.5;
+    if sigma < 0.01 { return mask; }
+    let extent = (sigma * 3.).ceil() as isize;
+    let mut weights: Vec<f32> = (-extent..=extent)
+        .map(|i| (-(i * i) as f32 / (2. * sigma * sigma)).exp()).collect();
+    let sum: f32 = weights.iter().sum();
+    for weight in &mut weights { *weight /= sum; }
+    let mut horizontal = vec![0.; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            for (k, weight) in weights.iter().enumerate() {
+                let source = x as isize + k as isize - extent;
+                if source >= 0 && source < w as isize {
+                    horizontal[y * w + x] += mask[y * w + source as usize] * weight;
+                }
+            }
+        }
+    }
+    mask.fill(0.);
+    for y in 0..h {
+        for x in 0..w {
+            for (k, weight) in weights.iter().enumerate() {
+                let source = y as isize + k as isize - extent;
+                if source >= 0 && source < h as isize {
+                    mask[y * w + x] += horizontal[source as usize * w + x] * weight;
+                }
+            }
+        }
+    }
+    mask
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tangos_shadow(data: *mut u8, w: u32, h: u32, padding: u32,
+    radius: f32, blur: f32, offset_y: i32, opacity: f32) {
+    if data.is_null() || padding > 64 || w <= padding * 2 || h <= padding * 2 || w > 4096 || h > 4096 ||
+        w as usize * h as usize > 1_048_576 || !radius.is_finite() || radius < 0. ||
+        !blur.is_finite() || !(0. ..=64.).contains(&blur) || !opacity.is_finite() ||
+        !(0. ..=1.).contains(&opacity) || !(-64..=64).contains(&offset_y) { return; }
+    type Entry = ((u32, u32, u32, u32, u32), Vec<f32>);
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<Vec<Entry>>> = std::sync::OnceLock::new();
+    let key = (w, h, padding, radius.to_bits(), blur.to_bits());
+    let Ok(mut cache) = CACHE.get_or_init(|| std::sync::Mutex::new(Vec::new())).lock() else { return; };
+    if !cache.iter().any(|entry| entry.0 == key) {
+        while !cache.is_empty() && (cache.len() >= 8 ||
+            cache.iter().map(|entry| entry.1.len()).sum::<usize>() + w as usize * h as usize > 4_194_304) {
+            cache.remove(0);
+        }
+        cache.push((key, shadow_mask(w as usize, h as usize, padding as usize, radius, blur)));
+    }
+    let mask = &cache.iter().find(|entry| entry.0 == key).unwrap().1;
+    let pixels = std::slice::from_raw_parts_mut(data, w as usize * h as usize * 4);
+    for y in 0..h {
+        let source_y = y as i64 - offset_y as i64;
+        if source_y < 0 || source_y >= h as i64 { continue; }
+        for x in 0..w {
+            let covered = rounded_coverage(x as f32 + 0.5 - padding as f32,
+                y as f32 + 0.5 - padding as f32, (w - padding * 2) as f32,
+                (h - padding * 2) as f32, radius);
+            let alpha = opacity * mask[source_y as usize * w as usize + x as usize] * (1. - covered);
+            let index = (y as usize * w as usize + x as usize) * 4;
+            for channel in 0..3 {
+                pixels[index + channel] = (pixels[index + channel] as f32 * (1. - alpha)).round() as u8;
+            }
+        }
+    }
+}
+
 // ZIP uses the already present native DEFLATE implementation. Bounds are supplied
 // by the validated central directory; no archive data is executed.
 #[no_mangle]
@@ -176,15 +264,16 @@ unsafe fn gradient_shape(
         radius.min(w as f32 / 2.).min(h as f32 / 2.),
     );
     let mut p = PathBuilder::new();
+    let k = r * 0.552_284_8; // Cubic quarter-circle, including fully circular bubbles.
     p.move_to(r, 0.);
     p.line_to(x - r, 0.);
-    p.quad_to(x, 0., x, r);
+    p.cubic_to(x - r + k, 0., x, r - k, x, r);
     p.line_to(x, y - r);
-    p.quad_to(x, y, x - r, y);
+    p.cubic_to(x, y - r + k, x - r + k, y, x - r, y);
     p.line_to(r, y);
-    p.quad_to(0., y, 0., y - r);
+    p.cubic_to(r - k, y, 0., y - r + k, 0., y - r);
     p.line_to(0., r);
-    p.quad_to(0., 0., r, 0.);
+    p.cubic_to(0., r - k, r - k, 0., r, 0.);
     p.close();
     let path = p.finish().unwrap();
     pixmap.fill_path(
@@ -476,5 +565,36 @@ mod tests {
             tangos_shape(pixels.as_mut_ptr(), 16, 16, 0., 0xff0000ff, 0xff0000ff);
         }
         assert_eq!(&pixels[0..4], &[255, 0, 0, 255]);
+    }
+    #[test]
+    fn css_shadow_has_soft_exterior_and_obscured_interior() {
+        let mut idle = vec![255u8; 128 * 128 * 4];
+        let mut hover = idle.clone();
+        unsafe {
+            tangos_shadow(idle.as_mut_ptr(), 128, 128, 40, 14., 12., 4, 0.08);
+            tangos_shadow(hover.as_mut_ptr(), 128, 128, 40, 14., 20., 8, 0.13);
+        }
+        let sample = |pixels: &[u8], x: usize, y: usize| pixels[(y * 128 + x) * 4];
+        assert_eq!(sample(&idle, 64, 64), 255, "outer shadow leaks beneath the translucent box");
+        assert_eq!(sample(&hover, 64, 64), 255);
+        assert!(sample(&idle, 64, 89) < 255, "no exterior shadow");
+        assert!(sample(&idle, 64, 89) < sample(&idle, 64, 100), "edge is not blurred");
+        assert!(sample(&hover, 64, 102) < sample(&idle, 64, 102), "hover shadow lacks its larger extent");
+        assert_eq!(sample(&idle, 64, 120), 255);
+        assert!(idle.chunks_exact(4).all(|pixel| pixel[3] == 255));
+        let mut blue = vec![0u8; 128 * 128 * 4];
+        for pixel in blue.chunks_exact_mut(4) { pixel[0] = 255; pixel[3] = 255; }
+        unsafe { tangos_shadow(blue.as_mut_ptr(), 128, 128, 40, 14., 12., 4, 0.08); }
+        assert_eq!(sample(&blue, 64, 89), sample(&idle, 64, 89));
+        assert!(blue.chunks_exact(4).all(|pixel| pixel[1] == 0 && pixel[2] == 0), "cache retained caller colors");
+    }
+    #[test]
+    fn shadow_rejects_invalid_ffi_geometry_without_writing() {
+        let original = vec![123u8; 8 * 8 * 4];
+        for (padding, offset, blur) in [(u32::MAX, 0, 12.), (0, i32::MIN, 12.), (0, 0, f32::NAN)] {
+            let mut pixels = original.clone();
+            unsafe { tangos_shadow(pixels.as_mut_ptr(), 8, 8, padding, 2., blur, offset, 0.08); }
+            assert_eq!(pixels, original);
+        }
     }
 }

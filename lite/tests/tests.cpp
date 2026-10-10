@@ -2,6 +2,7 @@
 #include "viewer.h"
 #include "help.h"
 #include "batches.h"
+#include "splash_overlay.h"
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
@@ -17,6 +18,13 @@ void expect(bool ok, const char *what) {
 template <class F> void rejects(F f, const char *what) {
   bool caught = false;
   try {
+    expect(splashFrame(0).opacity == 0 && !splashFrame(449).swap &&
+               splashFrame(450).swap && !splashFrame(1749).finished &&
+               splashFrame(1750).finished && splashFrame(1750).opacity == 0,
+           "splash covers delayed swap and always expires at 1750 ms");
+    expect(splashFrame(350).opacity > .9 && splashFrame(1050).opacity == 1 &&
+               splashFrame(1225).scale == 1 && splashFrame(0).translateY == 26,
+           "splash follows original fade and whoosh keyframes");
     f();
   } catch (const std::exception &) {
     caught = true;
@@ -268,12 +276,25 @@ int main() {
     auto b = runner.run({{"git", "init", "--bare"}, bare});
     expect(b.code == 0, "disposable bare remote");
     run({"git", "remote", "add", "origin", utf8(bare.wstring())});
+    rejects([&] { repo.pushPreview("origin", "codex/unfetched"); },
+            "new remote branch requires fetched history");
     run({"git", "push", "-u", "origin", "main"});
     write(r / "port/ok.txt", "third\n");
     run({"git", "add", "port/ok.txt"});
     run({"git", "commit", "-m", "third"});
     expect(repo.pushPreview("origin", "main").find("third") != std::string::npos,
            "outgoing patch preview");
+    auto newPreview = repo.pushPreview("origin", "codex/published");
+    expect(newPreview.find("NEW REMOTE BRANCH") != std::string::npos &&
+               newPreview.find("third") != std::string::npos,
+           "first branch push reviews unpublished commit patches");
+    auto firstPush = runner.run(repo.action("Push reviewed", "origin", "codex/published", ""));
+    expect(firstPush.code == 0 &&
+               trim(repo.git({"rev-parse", "refs/remotes/origin/codex/published"})) ==
+                   trim(repo.git({"rev-parse", "HEAD"})),
+           "reviewed first push publishes branch using ordinary Git");
+    expect(repo.pushPreview("origin", "codex/alias").find("NEW REMOTE BRANCH") != std::string::npos,
+           "new branch can reference already reviewed remote history");
     auto peer = temp / "peer";
     auto cloned = runner.run({{"git", "-c", "core.autocrlf=false", "clone", "-b", "main",
                                utf8(bare.wstring()), utf8(peer.wstring())},
@@ -358,6 +379,8 @@ int main() {
     run({"git", "commit", "-m", "delete bad asset"});
     rejects([&] { repo.pushPreview("origin", "main"); },
             "deleted intermediate asset still blocks push");
+    rejects([&] { repo.pushPreview("origin", "codex/unsafe-new"); },
+            "first branch push still blocks deleted intermediate assets");
     auto wt = temp / "worktree";
     run({"git", "worktree", "add", "-b", "test-worktree", utf8(wt.wstring())});
     Repository wr(runner, wt, s);

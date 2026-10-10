@@ -2,6 +2,7 @@
 #include "help.h"
 #include "helper_overlay.h"
 #include "tour_overlay.h"
+#include "splash_overlay.h"
 #include "atlas_layout.h"
 #include "viewer.h"
 #include "backend.h"
@@ -200,6 +201,8 @@ struct ConsoleUI::Impl {
   std::unique_ptr<ReportDialog> report;
   std::unique_ptr<HelperOverlay> helper;
   std::unique_ptr<TourOverlay> tourOverlay;
+  std::unique_ptr<SplashOverlay> splashOverlay;
+  std::optional<Screen> splashTarget;
   bool initialTourPending = false;
   std::unique_ptr<McpServer> mcp, pendingMcp;
   std::thread mcpWorker;
@@ -452,6 +455,7 @@ struct ConsoleUI::Impl {
     build();
   }
   ~Impl() {
+    splashOverlay.reset();
     tourOverlay.reset();
     helper.reset();
     report.reset();
@@ -2707,7 +2711,7 @@ struct ConsoleUI::Impl {
         for (auto c : wide(a.spec.name))
           colorHash = colorHash * 31 + uint16_t(c);
         auto tint = palette[colorHash % 12];
-        skin::agentCard(dc, x, y, w, h, tint);
+        skin::agentCard(dc, x, y, w, h, tint, cardHoverMotion[a.id].target != 0);
         auto dot = agentPresence(a.spec.kind, lastAgentSignal[a.id], a.active,
                                  std::time(nullptr) * int64_t(1000));
         skin::presenceDot(dc, x + 13, y + 20, dot, 9);
@@ -5124,14 +5128,29 @@ ConsoleUI::ConsoleUI(HWND parent, HFONT font, fs::path repo, fs::path data, Sett
                                   std::move(module), std::move(draftAdded), remoteOnly,
                                   std::move(transport))) {}
 ConsoleUI::~ConsoleUI() = default;
-void ConsoleUI::show(bool visible, bool atlas) {
+void ConsoleUI::show(bool visible, bool atlas, bool transition) {
   if (impl->tourOverlay && impl->tourOverlay->open() && (!visible || atlas))
     impl->tourOverlay->close();
   if (visible) {
-    auto screen = atlas ? Screen::atlas : Screen::controller;
+    auto screen = atlas ? Screen::atlas : impl->remoteOnly ? Screen::remoteGate : Screen::controller;
     if (impl->screen == Screen::controller || impl->screen == Screen::atlas ||
-        impl->screen == Screen::remoteGate)
-      impl->navigate(screen);
+        impl->screen == Screen::remoteGate) {
+      if (transition && skin::animationEnabled() && impl->screen != screen &&
+          !impl->viewerOnly) {
+        impl->splashOverlay.reset();
+        impl->splashTarget = screen;
+        impl->splashOverlay = std::make_unique<SplashOverlay>(
+            impl->parent, atlas ? "Chaos Viewer" : "Chaos Controller", [this, screen] {
+              impl->splashTarget.reset();
+              impl->navigate(screen);
+            });
+      } else if (!impl->splashTarget)
+        impl->navigate(screen);
+    }
+  }
+  if (!visible) {
+    impl->splashOverlay.reset();
+    impl->splashTarget.reset();
   }
   ShowWindow(impl->window, visible ? SW_SHOW : SW_HIDE);
   if (impl->helper)

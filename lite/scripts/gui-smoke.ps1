@@ -31,15 +31,28 @@ $knownDigest = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
 foreach ($expected in @($knownDigest, ('0' * 64))) {
   $hashArgs = '--verify-rom "{0}" {1}' -f $hashFixture, $expected
   $hashOutput = Join-Path $fixture "hash-$expected.txt"
-  $hashProcess = Start-Process -FilePath $exe -ArgumentList $hashArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $hashOutput
+  # Process.Start retains the handle even when this small command exits before
+  # PowerShell 5.1's Start-Process returns; otherwise ExitCode can be null.
+  $hashProcess = New-Object Diagnostics.Process
+  $hashProcess.StartInfo.FileName = $exe
+  $hashProcess.StartInfo.Arguments = $hashArgs
+  $hashProcess.StartInfo.UseShellExecute = $false
+  $hashProcess.StartInfo.CreateNoWindow = $true
+  $hashProcess.StartInfo.WindowStyle = 'Hidden'
+  $hashProcess.StartInfo.RedirectStandardOutput = $true
+  [void]$hashProcess.Start()
+  $hashRead = $hashProcess.StandardOutput.ReadToEndAsync()
   if (-not $hashProcess.WaitForExit(10000)) { Stop-Process -Id $hashProcess.Id; throw 'Native hash verification timed out' }
+  [IO.File]::WriteAllText($hashOutput, $hashRead.Result)
   $wantedCode = if ($expected -eq $knownDigest) { 0 } else { 1 }
   if ($hashProcess.ExitCode -ne $wantedCode -or -not ((Get-Content -LiteralPath $hashOutput -Raw).Contains($knownDigest))) { throw 'Packaged native hash verification failed' }
+  $hashProcess.Dispose()
 }
 $ini = Join-Path $fixture 'settings.ini'
 # Quoting is required because both the executable and repository paths can contain spaces.
 $arguments = '--smoke-test "{0}" "{1}"' -f $repo, $ini
 $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru -WindowStyle Hidden
+$null = $process.Handle
 # The expanded matrix captures overlays, three window sizes, every attached monitor
 # and a 25,000-function fixture. Bound the whole run separately from individual checks.
 if (-not $process.WaitForExit(240000)) { Stop-Process -Id $process.Id; throw 'GUI workflow timed out' }

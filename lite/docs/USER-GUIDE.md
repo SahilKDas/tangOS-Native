@@ -1,5 +1,11 @@
 # TangOS Lite quick guide
 
+Switching between Controller and Viewer now shows the native Tango splash. The
+view changes under the opaque part of the animation and the overlay dismisses
+automatically. Turning animations off switches immediately. Git **Push reviewed**
+can publish a new branch after remote history has been fetched; inspect every
+outgoing commit in its preview before confirming, then create your draft PR.
+
 Controller progress tracks targets worked through in the latest batch, including
 non-matching attempts. It retains the latest output line after a run ends. Hit-rate
 and near-miss statistics appear when there is data, with **This session** and
