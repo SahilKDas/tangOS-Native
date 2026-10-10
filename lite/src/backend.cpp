@@ -1,4 +1,5 @@
 #include "backend.h"
+#include "verification.h"
 #include "controller_view.h"
 #include "help.h"
 #include "atlas_layout.h"
@@ -511,6 +512,7 @@ Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
       Runner r;
       Repository repo(r, repository, settings);
       baseline = repo.git({"show-ref"}) + repo.git({"rev-parse", "HEAD"}) +
+                 repo.git({"remote", "-v"}) +
                  repo.git({"status", "--porcelain=v1", "-z", "--untracked-files=all"}) +
                  repo.git({"diff", "--binary", "HEAD"});
       for (auto &change :
@@ -1461,7 +1463,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       args["connection"] = m;
     auto result = execute("network.read", args);
     if (m == "update.check" && result.value("ok", false))
-      result["update"] = updateStatus("0.27.0", result.at("data"));
+      result["update"] = updateStatus("0.28.0", result.at("data"));
     return result;
   }
   if (m == "git.clone") {
@@ -1579,7 +1581,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto folder = directory / "exports" / ("bug-report-" + uniqueId());
     fs::create_directories(folder);
     Json debug = {{"app", "TangOS Lite"},
-                  {"version", "0.27.0"},
+                  {"version", "0.28.0"},
                   {"portOnly", settings.portOnly},
                   {"project", settings.activeProject},
                   {"connections", Json::array()},
@@ -1878,8 +1880,17 @@ Json Backend::execute(const std::string &m, const Json &a) {
         auto &runner = processRunner ? *processRunner : local;
         auto log = directory / "logs" / ("check-" + uniqueId() + ".log");
         auto result = runner.run(check.command, progressSink, log);
+        auto verification = checkOutcome(check.name, result.code, result.output);
+        auto summary = checkOutcomeText(verification);
+        {
+          std::ofstream stream(log, std::ios::binary | std::ios::app);
+          stream << summary;
+        }
+        if (progressSink)
+          progressSink(summary);
         return {{"exit", result.code},
-                {"output", result.output},
+                {"output", result.output + summary},
+                {"verification", verification},
                 {"log", utf8(log.wstring())},
                 {"cancelled", result.code == ERROR_CANCELLED}};
       }

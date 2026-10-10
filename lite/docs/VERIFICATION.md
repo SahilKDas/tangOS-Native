@@ -1,6 +1,27 @@
 # Windows release verification — 2026-10-10
 
-## 0.27.0 development validation — 2026-10-10
+## 0.28.0 source validation
+
+Native checks now append interpreted outcomes to both the UI stream and durable
+logs; `checks.run` exposes a structured `verification` result. Zero-exit ROM-data
+differences, partial/incomplete data reports, banked disagreements, skipped checks
+and cancellations remain distinct. Oversized baseline counts cannot crash parsing.
+The native classifier and backend integration suites pass, as do 166 core/Git
+assertions, five Python verdict tests, the changed-remote confirmation regression
+and the repository/status/check/log GUI workflow (11 responsive timer ticks).
+The release pipeline includes these additional safety gates. This source
+checkpoint is awaiting its own clean reproducible packaging; the current portable
+package remains the verified 0.27.0 described below.
+
+## 0.27.0 verified portable package — 2026-10-10
+
+Code checkpoint **54d59bf** produced two identical clean Windows x64 builds:
+**6,811,136 bytes (6.811 decimal MB)**, SHA256
+**37C8CA71C3A36FA8A400C8EEB2BB6E5553D8E6157D32396B08F22396AA3BE0E7**.
+All six release suites passed, together with 12,407 Console reference comparisons.
+The packaged executable passed native repository/status/check/log workflows with
+valid, missing and invalid descriptors. The default `lite/release` executable is
+this verified package; subsequent source fixes require a new packaged validation.
 
 Native app-switch overlay tests pass delayed 450-ms view switching, 1,750-ms
 expiry, rapid replay cancelling the old callback, capture, and native-window
@@ -24,8 +45,27 @@ Ten comparisons against the original CSS shadow values in installed Edge pass
 mean/p99 tolerances (maximum observed difference five RGB levels). Edge is a
 development reference only. This is not pixel-identical proof. Exact background
 motion/composition, further overlays, sharp unusual-DPI output and hosted-provider
-interoperability remain unverified. Reproducible 0.27.0 packaging is in progress;
-the stable default package remains 0.26.0 until all release gates pass.
+interoperability remain unverified.
+
+The real 64DS-DX checks were rerun on 2026-10-10: port references passed 8,868
+checks; declaration agreement passed with 12,228 banked disagreements; dead
+references still failed on 561 prose/comment references; link checks had no
+changed-source range to verify; byte matching still failed the strict stock-ROM
+bootstrap control. Full logs and a tracked-source-unchanged assertion are retained
+under `lite/out/live-checks-current`. No baseline was changed or failure waived.
+The official MCP Inspector 2.10.1 also passed against native stdio; the containing
+Fleet/descriptor/vault suite passed 130 assertions. Its configuration was a
+disposable fixture, and no personal desktop-client settings were changed.
+
+Additional real checks: the port wrapper failed because its pinned Visual Studio
+Build Tools path is absent; built-port smoke and trusted ROM verification were
+unavailable in the isolated test configuration. ROM-data comparison completed
+with **914 verified, 357 partial, 3 differing and 59 unnamed** data symbols.
+Its zero exit status does not establish a clean byte/data gate. The live report
+classifier now retains those counts and labels the result
+`completed-with-differences`; four regression tests cover partial, absent,
+banked, clean and failed reports. Complete logs and unchanged-source assertions
+remain in `lite/out/live-port-checks-current`.
 
 ## 0.26.0 verified portable package — 2026-10-09
 

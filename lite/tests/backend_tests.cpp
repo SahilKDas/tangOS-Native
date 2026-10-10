@@ -256,6 +256,16 @@ int main() {
       args["confirmation"] = preview.at("confirmation");
       return backend.invoke(method, args);
     };
+    write(repo / "tools/romdata_check.py",
+          "print('VERIFIED 914\\nPARTIAL 357\\nDIFFERS 3\\nUNNAMED 59')\n");
+    auto dataCheck = confirmed("checks.run", {{"name", "ROM data comparison"}});
+    expect(dataCheck.at("exit") == 0 &&
+               dataCheck.at("verification").at("state") == "completed-with-differences",
+           "zero-exit ROM data differences remain visible in the native backend");
+    expect(read(fs::u8path(dataCheck.at("log").get<std::string>())).find(
+               "[VERIFICATION] completed-with-differences") != std::string::npos,
+           "interpreted data verdict is preserved in the durable check log");
+    fs::remove(repo / "tools/romdata_check.py");
     expect(!enabledTool({{"allowNearMiss", false}}, "nearmiss_stats"),
            "near-miss tool policy denied");
     expect(enabledTool({{"allowNearMiss", false}}, "check"),
@@ -557,6 +567,9 @@ int main() {
       expect(before.at("cancelled") == true && before.at("exit") == ERROR_CANCELLED &&
                  !fs::exists(repo / "port/finished.txt"),
              "check cancellation before launch reaches backend runner");
+      expect(before.at("verification").at("state") == "cancelled" &&
+                 before.at("output").get<std::string>().find("[VERIFICATION] cancelled") != std::string::npos,
+             "check result exposes cancellation verdict in API and complete output");
       expect(read(fs::u8path(before.at("log").get<std::string>())).find("CANCELLED") !=
                  std::string::npos,
              "pre-launch cancellation preserves complete log");

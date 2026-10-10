@@ -99,7 +99,13 @@ std::string Repository::pushPreview(const std::string &remote, const std::string
   if (!validRef(remote) || remote.find('/') != remote.npos || !validRef(branch))
     throw std::runtime_error("Supply a configured remote name and destination "
                              "branch, without options.");
-  git({"remote", "get-url", "--push", remote});
+  auto destinationUrl = trim(git({"remote", "get-url", "--push", remote}));
+  if (((destinationUrl.rfind("https://", 0) == 0 || destinationUrl.rfind("http://", 0) == 0) &&
+       destinationUrl.substr(destinationUrl.find("://") + 3,
+                             destinationUrl.find('/', destinationUrl.find("://") + 3) -
+                                 (destinationUrl.find("://") + 3)).find('@') != std::string::npos) ||
+      destinationUrl.find('?') != std::string::npos || destinationUrl.find('#') != std::string::npos)
+    throw std::runtime_error("Push URL must be credential-free; use your Git credential helper.");
   auto target = "refs/remotes/" + remote + "/" + branch;
   auto destination = runner.run({{"git", "rev-parse", "--verify", target}, root});
   bool newBranch = destination.code != 0;
@@ -115,6 +121,7 @@ std::string Repository::pushPreview(const std::string &remote, const std::string
   if (trim(history).empty() && !newBranch)
     throw std::runtime_error("No outgoing commits. Fetch first if remote state changed.");
   std::string out = "DESTINATION: " + remote + " / " + branch +
+                    "\nREMOTE URL: " + destinationUrl +
                     "\nHEAD: " + trim(git({"rev-parse", "HEAD"})) + "\n";
   if (newBranch)
     out += "NEW REMOTE BRANCH: all unpublished history reviewed against fetched remote refs.\n";

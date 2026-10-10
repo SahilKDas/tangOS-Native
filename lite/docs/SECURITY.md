@@ -1,5 +1,16 @@
 # Security and destructive-operation review
 
+Push previews identify the configured push URL. A changed remote configuration
+invalidates backend confirmation tickets, and the desktop workflow compares a
+fresh preview before executing. HTTP URLs containing embedded user information,
+query strings or fragments are rejected; use a Git credential helper. Ordinary
+non-force Git pushes remain authoritative when remote history changes.
+
+Check logs preserve both process exit status and an interpreted verification
+outcome. ROM-data differences and partial reports are not clean passes even
+when the repository script exits zero. Existing declaration baselines, skipped
+checks and cancelled processes are explicitly identified.
+
 Live fleet configuration changes are limited to role, effort, batch size,
 attempts and loop selection. They are saved separately from the active driver
 and apply to its next batch. Changing executable, provider, model, key reference

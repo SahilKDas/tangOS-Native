@@ -285,6 +285,15 @@ int main() {
     expect(repo.pushPreview("origin", "main").find("third") != std::string::npos,
            "outgoing patch preview");
     auto newPreview = repo.pushPreview("origin", "codex/published");
+    expect(newPreview.find("REMOTE URL: " + utf8(bare.wstring())) != std::string::npos,
+           "push review identifies the actual destination URL");
+    run({"git", "remote", "set-url", "--push", "origin", "https://fixture.invalid/other.git"});
+    expect(repo.pushPreview("origin", "codex/published") != newPreview,
+           "changing push destination invalidates the reviewed text");
+    run({"git", "remote", "set-url", "--push", "origin", "https://user:synthetic-secret@fixture.invalid/repo.git"});
+    rejects([&] { repo.pushPreview("origin", "codex/published"); },
+            "credential-bearing push destination rejected before displaying it");
+    run({"git", "remote", "set-url", "--push", "origin", utf8(bare.wstring())});
     expect(newPreview.find("NEW REMOTE BRANCH") != std::string::npos &&
                newPreview.find("third") != std::string::npos,
            "first branch push reviews unpublished commit patches");
