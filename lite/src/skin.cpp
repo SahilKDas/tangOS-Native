@@ -104,6 +104,18 @@ struct IconTooltip {
   }
 };
 std::map<HWND, std::unique_ptr<IconTooltip>> iconTooltips;
+// Regions belong to the window, and must follow its outer dimensions rather
+// than the edit's inset client rectangle. Windows virtualizes these units for
+// the current DPI policy; do not scale them a second time.
+void refreshCompactRegion(HWND window) {
+  RECT bounds{};
+  if (!GetWindowRect(window, &bounds))
+    return;
+  auto region = CreateRoundRectRgn(0, 0, bounds.right - bounds.left + 1,
+                                   bounds.bottom - bounds.top + 1, 16, 16);
+  if (!SetWindowRgn(window, region, TRUE))
+    DeleteObject(region);
+}
 void buttonBackground(const DRAWITEMSTRUCT &item) {
   HWND parent = GetParent(item.hwndItem);
   RECT parentBounds{}, bounds{};
@@ -193,6 +205,8 @@ void paintCompactCombo(HWND window, HDC dc) {
 }
 LRESULT CALLBACK compactComboProc(HWND window, UINT message, WPARAM w, LPARAM l, UINT_PTR id,
                                   DWORD_PTR) {
+  if (message == WM_SIZE)
+    refreshCompactRegion(window);
   if (message == WM_PAINT) {
     PAINTSTRUCT paint{};
     auto dc = BeginPaint(window, &paint);
@@ -236,6 +250,15 @@ void paintCompactEdit(HWND window, HDC dc) {
 }
 LRESULT CALLBACK compactEditProc(HWND window, UINT message, WPARAM w, LPARAM l, UINT_PTR id,
                                  DWORD_PTR) {
+  if (message == WM_SIZE)
+    refreshCompactRegion(window);
+  if (message == WM_SETFONT) {
+    auto result = DefSubclassProc(window, message, w, l);
+    // Recalculate vertical centering when accessibility/font scaling changes.
+    SetWindowPos(window, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    return result;
+  }
   if (message == WM_NCCALCSIZE) {
     auto bounds =
         w ? &reinterpret_cast<NCCALCSIZE_PARAMS *>(l)->rgrc[0] : reinterpret_cast<RECT *>(l);
@@ -297,6 +320,42 @@ void shape(HDC dc, int x, int y, int w, int h, float radius, Color top, Color bo
     tangos_shape(s.data, w, h, radius, top.value, bottom.value);
 }
 } // namespace
+void projectMenuRow(HDC dc, const RECT &bounds, const std::wstring &title,
+                    const std::wstring &glyph, bool viewerOnly, bool active, bool hovered) {
+  int width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
+  auto brush = CreateSolidBrush(compactField());
+  FillRect(dc, &bounds, brush);
+  DeleteObject(brush);
+  if (active || hovered) {
+    auto tint = Color(active ? 51 : 36, colors.primary.GetR(), colors.primary.GetG(),
+                      colors.primary.GetB());
+    shape(dc, bounds.left + 6, bounds.top + 1, width - 12, height - 2, 8, tint, tint);
+  }
+  auto rowText = [&](const std::wstring &value, int x, int w, int size, bool muted,
+                     bool centered = false) {
+    auto previous = SelectObject(dc, uiFont(size, false, 600));
+    SetTextColor(dc, rgb(muted ? colors.muted : colors.ink));
+    SetBkMode(dc, TRANSPARENT);
+    RECT textBounds{x, bounds.top, x + w, bounds.bottom};
+    DrawTextW(dc, value.c_str(), int(value.size()), &textBounds,
+              DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS |
+                  (centered ? DT_CENTER : DT_LEFT));
+    SelectObject(dc, previous);
+  };
+  int left = bounds.left + 16;
+  if (!glyph.empty()) {
+    auto tint = Color(56, colors.primary.GetR(), colors.primary.GetG(), colors.primary.GetB());
+    shape(dc, left, bounds.top + (height - 20) / 2, 20, 20, 6, tint, tint);
+    rowText(glyph, left, 20, 10, false, true);
+    left += 28;
+  }
+  int suffix = viewerOnly ? 82 : 0;
+  rowText(title, left, bounds.right - left - 36 - suffix, 13, false);
+  if (viewerOnly)
+    rowText(L"viewer only", bounds.right - 36 - suffix, suffix, 11, true);
+  if (active)
+    rowText(L"✓", bounds.right - 30, 20, 13, false, true);
+}
 void initialize() {
   BOOL enabled = TRUE;
   SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
@@ -774,11 +833,7 @@ void compactCombo(HWND window, bool needsRole) {
   if (needsRole)
     SetPropW(window, L"TangOSNeedsRole", reinterpret_cast<HANDLE>(1));
   SendMessageW(window, CB_SETITEMHEIGHT, WPARAM(-1), 20);
-  RECT bounds{};
-  GetClientRect(window, &bounds);
-  auto region = CreateRoundRectRgn(0, 0, bounds.right + 1, bounds.bottom + 1, 16, 16);
-  if (!SetWindowRgn(window, region, TRUE))
-    DeleteObject(region);
+  refreshCompactRegion(window);
   SetWindowSubclass(window, compactComboProc, 3, 0);
 }
 COLORREF compactField() {
@@ -792,12 +847,7 @@ void compactEdit(HWND window) {
   SetWindowLongPtrW(window, GWL_STYLE, GetWindowLongPtrW(window, GWL_STYLE) | WS_BORDER);
   SetWindowPos(window, nullptr, 0, 0, 0, 0,
                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-  RECT bounds{};
-  GetWindowRect(window, &bounds);
-  auto region = CreateRoundRectRgn(0, 0, bounds.right - bounds.left + 1,
-                                   bounds.bottom - bounds.top + 1, 16, 16);
-  if (!SetWindowRgn(window, region, TRUE))
-    DeleteObject(region);
+  refreshCompactRegion(window);
 }
 void iconButton(HWND window, Icon icon) {
   SetPropW(window, L"TangOSIcon", (HANDLE)(uintptr_t(unsigned(icon) + 1)));

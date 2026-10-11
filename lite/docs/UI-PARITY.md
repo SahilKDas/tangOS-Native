@@ -1,5 +1,24 @@
 # Console parity audit
 
+## Native field reflow and project rows — 0.30.0
+
+Compact edits and selectors now refresh their rounded window regions after
+resizing. Edit font changes recalculate the inset client rectangle, retaining
+vertical centering rather than the original font's geometry. A native regression
+exercises growth, shrinkage, fractional-scale-equivalent dimensions and larger
+Nunito fonts. These stress cases do not simulate a physical monitor DPI change.
+
+Project selection now uses owner-drawn Nunito rows with rounded hover/active
+highlights, project glyphs, ellipsized titles, separate viewer-only status and
+an active check mark. The popup retains Windows menu navigation and dismissal;
+its opening animation and outer frame are not yet identical to Console.
+
+The application still uses Windows DPI virtualization. Per-monitor-aware crisp
+rendering requires coordinated conversion of child geometry, fonts, hit testing,
+GDI capture and TinySkia buffers. The manifest deliberately does not claim that
+this migration has been completed. Unusual physical DPI and monitor transitions
+remain unverified.
+
 ## Project-switch transition — 0.29.0
 
 Project selections now show the native splash with the project's title and start

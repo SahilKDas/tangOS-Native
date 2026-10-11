@@ -73,6 +73,10 @@ HWND themeCombo, minimizeButton, maximizeButton, closeButton, projectButton;
 HWND controllerTab, repositoryTab;
 HWND toolbarReport, toolbarRefresh, toolbarSettings, toolbarKeys;
 HWND toolboxButton;
+struct ProjectMenuRow {
+  std::wstring title, glyph;
+  bool viewerOnly = false, active = false;
+};
 HBRUSH fieldBrush = nullptr;
 const std::vector<std::string> actions = {
     "Fetch",           "Pull (fast-forward)",  "Merge",          "Rebase",
@@ -203,7 +207,7 @@ std::string resourceText(int id) {
 }
 void about() {
   reviewDialog(
-      "TangOS Lite 0.29.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
+      "TangOS Lite 0.30.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
       "for checks and Git; Repository for status.\nAlways read AGENTS.md and review "
       "changes before publication.\n\n" +
           resourceText(204) + "\n\nMinGW-w64 libwinpthread\n" + resourceText(202) +
@@ -631,7 +635,7 @@ void paintChrome(HDC dc, int w, int h) {
     skin::label(dc, L"Repository status", rail + 16, 345, 308, 24, 14, true);
   skin::label(dc, L"Port-only  ·  Review before push", rail + 16, h - 139, 300, 23, 12, true, true);
   skin::mascot(dc, w - 137, h - 127, 96);
-  skin::label(dc, L"v0.29.0", w - 74, h - 27, 60, 18, 10, false, true);
+  skin::label(dc, L"v0.30.0", w - 74, h - 27, 60, 18, 10, false, true);
 }
 void snapshot(const fs::path &path) {
   skin::invalidateBackdrop(window);
@@ -670,7 +674,7 @@ fs::path saveDebugSnapshot() {
   fs::create_directories(folder);
   snapshot(folder / "window.bmp");
   Json state = {{"app", "TangOS Lite"},
-                {"version", "0.29.0"},
+                {"version", "0.30.0"},
                 {"capturedAt", activityNow()},
                 {"toolboxOpen", toolboxOpen},
                 {"repositoryView", repositoryView},
@@ -766,29 +770,31 @@ void projectMenu() {
     throw std::runtime_error("Stop agents before switching repositories");
   auto projects = Backend(repo, dataDir, settings).invoke("projects.list");
   HMENU menu = CreatePopupMenu();
+  std::vector<ProjectMenuRow> rows;
+  rows.reserve(projects.size() + 4);
+  auto append = [&](UINT id, std::wstring title, std::wstring glyph = L"",
+                    bool viewerOnly = false, bool active = false) {
+    rows.push_back({std::move(title), std::move(glyph), viewerOnly, active});
+    AppendMenuW(menu, MF_OWNERDRAW, id, reinterpret_cast<LPCWSTR>(&rows.back()));
+  };
   std::vector<std::string> ids;
   for (auto &entry : projects) {
     auto id = entry.at("id").get<std::string>();
     auto title = entry.value("title", id);
     auto glyph = entry.value("glyph", std::string());
-    if (!glyph.empty())
-      title = glyph + "  " + title;
     bool cloned = entry.value("cloned", false);
-    if (!cloned)
-      title += " · viewer only";
-    auto flags = MF_STRING | (entry.value("active", false) ? MF_CHECKED : 0);
-    AppendMenuW(menu, flags, 1 + ids.size(), wide(title).c_str());
+    append(1 + ids.size(), wide(title), wide(glyph), !cloned, entry.value("active", false));
     ids.push_back(id);
   }
   if (!ids.empty())
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(menu, MF_STRING, 10000, L"Open another local repository…");
-  AppendMenuW(menu, MF_STRING, 10001, L"Add remote project (tangos.json)…");
-  AppendMenuW(menu, MF_STRING, 10002, L"Discover remote projects…");
-  AppendMenuW(menu, MF_STRING, 10003, L"Import project ZIP…");
+  append(10000, L"Open another local repository…");
+  append(10001, L"Add remote project (tangos.json)…");
+  append(10002, L"Discover remote projects…");
+  append(10003, L"Import project ZIP…");
   RECT bounds;
   GetWindowRect(projectButton, &bounds);
-  auto selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, bounds.left, bounds.bottom, 0,
+  auto selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, bounds.left, bounds.bottom + 8, 0,
                                  window, nullptr);
   DestroyMenu(menu);
   if (selected == 10000)
@@ -1050,6 +1056,12 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   }
   case WM_DRAWITEM: {
     auto *i = (DRAWITEMSTRUCT *)l;
+    if (i->CtlType == ODT_MENU && i->itemData) {
+      auto &row = *reinterpret_cast<ProjectMenuRow *>(i->itemData);
+      skin::projectMenuRow(i->hDC, i->rcItem, row.title, row.glyph, row.viewerOnly,
+                           row.active, (i->itemState & ODS_SELECTED) != 0);
+      return TRUE;
+    }
     if (i->CtlType == ODT_BUTTON) {
       skin::button(*i,
                    i->CtlID == RUN || i->CtlID == ACTION || i->CtlID == SELECT ||
@@ -1080,6 +1092,11 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     break;
   }
   case WM_MEASUREITEM:
+    if (((MEASUREITEMSTRUCT *)l)->CtlType == ODT_MENU) {
+      ((MEASUREITEMSTRUCT *)l)->itemWidth = 360;
+      ((MEASUREITEMSTRUCT *)l)->itemHeight = 36;
+      return TRUE;
+    }
     if (((MEASUREITEMSTRUCT *)l)->CtlType == ODT_COMBOBOX) {
       ((MEASUREITEMSTRUCT *)l)->itemHeight = 24;
       return TRUE;

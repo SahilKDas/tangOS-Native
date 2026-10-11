@@ -2,6 +2,8 @@
 #include <string>
 #include <windows.h>
 namespace skin {
+void projectMenuRow(HDC dc, const RECT &bounds, const std::wstring &title,
+                    const std::wstring &glyph, bool viewerOnly, bool active, bool hovered);
 enum class Icon {
   report,
   refresh,

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(TangOSLite VERSION 0.29.0 LANGUAGES CXX RC)
+project(TangOSLite VERSION 0.30.0 LANGUAGES CXX RC)
 if(NOT WIN32)
   message(FATAL_ERROR "TangOS Lite currently targets Windows")
 endif()
@@ -77,6 +77,11 @@ add_executable(lite_splash_tests tests/splash_tests.cpp src/splash_overlay.cpp s
 target_link_libraries(lite_splash_tests PRIVATE lite_core comctl32 msimg32)
 target_link_options(lite_splash_tests PRIVATE -static -Wl,--no-insert-timestamp)
 add_test(NAME native_splash_transition COMMAND lite_splash_tests "${CMAKE_CURRENT_BINARY_DIR}/splash-fixture")
+
+add_executable(lite_control_layout_tests tests/control_layout_tests.cpp src/skin.cpp src/app.rc)
+target_link_libraries(lite_control_layout_tests PRIVATE lite_core comctl32 msimg32)
+target_link_options(lite_control_layout_tests PRIVATE -static -Wl,--no-insert-timestamp)
+add_test(NAME native_control_layout COMMAND lite_control_layout_tests)
 
 add_executable(lite_shadow_probe tests/shadow_probe.cpp)
 target_link_libraries(lite_shadow_probe PRIVATE tangos_raster ws2_32 userenv ntdll)
