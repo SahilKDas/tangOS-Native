@@ -815,7 +815,7 @@ void projectMenu() {
 void automaticUpdate() {
   if (smoke)
     return;
-  if (busy) {
+  if (busy || projectSwitchPending) {
     updatePending = true;
     return;
   }
@@ -842,7 +842,7 @@ void automaticUpdate() {
 void automaticDiscovery() {
   if (smoke)
     return;
-  if (busy) {
+  if (busy || projectSwitchPending) {
     discoveryPending = true;
     return;
   }
@@ -886,7 +886,8 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     std::unique_ptr<std::string> receipt(reinterpret_cast<std::string *>(l));
     if (!receipt)
       return 0;
-    if (m == CONSOLE_UPDATE_INSTALL && (busy || (consoleUI && consoleUI->running()))) {
+    if (m == CONSOLE_UPDATE_INSTALL &&
+        (busy || projectSwitchPending || (consoleUI && consoleUI->running()))) {
       MessageBoxW(h, L"Stop active checks and agents before restarting into the update.", L"Update",
                   MB_OK | MB_ICONINFORMATION);
       return 0;
