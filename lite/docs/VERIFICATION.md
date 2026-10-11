@@ -1,5 +1,50 @@
 # Windows release verification — 2026-10-11
 
+## 0.32.0 verified backend checkpoint — 2026-10-11
+
+Code checkpoint **937afff** produced two identical clean Windows x64 builds:
+**6,905,856 bytes (6.906 decimal MB)**, SHA256
+**1B42E5D5BA0901CBB82C5DD514AD976AE353131B3D3FE0D0A8E7CE9DC0721241**.
+All nine native suites passed (119.66 seconds), with **12,428 original Console
+comparisons** and packaged backend, reviewed Git and ZIP workflows. The
+packaged executable launched and passed repository/status/check/log workflows
+with valid, missing and invalid descriptors (11 responsive timer ticks each),
+at the attached 125% monitor. Two clean builds have identical hashes.
+
+Added upstream recent-source activity with default-branch discovery, added and
+modified C/C++ stems, deduplication, unpublished-work exclusion and opt-in fetch.
+Atlas loading now returns null for missing, malformed or invalid data while
+retaining valid database metadata. Requirements repair provides confirmed Python,
+pinned-package and local-input extraction commands, fingerprint expiry, durable
+logs and cancellation. No actual installation, package download, ROM extraction
+or external-account change was performed. Tests use synthetic local inputs.
+Sixteen additional comparisons invoke actual original Atlas/Git functions; five
+compare exact repair argv without executing installers. The original repair has
+a single-package guard bug: native construction correctly accepts one package,
+instead of reproducing that refusal. This is an intentional correction.
+
+The first regression attempts exposed missing fixture descriptors, command-log
+banner parsing and an incorrect test envelope key. These were corrected before
+the full release gate passed; no assertions were waived. Build trees and GUI
+captures were removed, preserving compact reports. Observed release free space
+stayed above 26.3 GiB. No Genseki/Nu model data or other project dependencies were
+touched.
+
+**Full backend parity is unfinished.** Further source inspection found actual
+implementation differences, not just missing live credentials: native live refresh
+polls rather than providing the original reconnecting SSE event stream; credits
+currently accept a caller-supplied response instead of reconstructing GitHub's
+contributor/email/PR-author identity map; original cache/current-state and stale
+background-regeneration/event contracts still need comparison and completion.
+The contract ledger distinguishes unverified operations from missing ones, and
+its counts must not be presented as an implementation percentage. Every push
+still requires its own preview, and external connections remain user-configured.
+
+Frontend gaps also include background motion, splash highlights/blur and
+wordmark spacing, hover-shadow interpolation, control/dialog composition and
+unverified auxiliary-overlay/footer/glass equivalence, in addition to physical
+mixed-monitor testing, popup animation/frame composition and responsive sizing.
+Historical audit entries are checkpoints, not a complete current inventory.
 ## 0.31.0 verified portable package — 2026-10-11
 
 Code checkpoint **93eeee8**, with release checkpoint **1c9d53a**, produced two

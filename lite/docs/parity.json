@@ -174,7 +174,7 @@
       "contract": "atlasLoad",
       "state": "partial",
       "evidence": [
-        "Native local reload and retained cart tested; full original DB envelope not compared"
+        "lite/tests/test_atlas_backend_reference.py: actual original readAtlas null/envelope comparisons; native local reload and retained cart tested; original cache/state/event behavior remains unverified"
       ],
       "kind": "api"
     },
