@@ -318,11 +318,12 @@ void selectProject(const std::string &id) {
   try {
     projectSplash = std::make_unique<SplashOverlay>(window, entry.value("title", id), [job] {
       try {
+        if (consoleUI && consoleUI->running())
+          throw std::runtime_error("Stop active operations before switching projects");
         start(job, true);
       } catch (const std::exception &error) {
-        projectSwitchPending = false;
-        projectSplash->release();
         output("\nERROR: " + std::string(error.what()) + "\n");
+        PostMessageW(window, DONE, 0, 0);
       }
     }, true);
   } catch (...) {
