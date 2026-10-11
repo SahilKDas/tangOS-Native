@@ -1,5 +1,35 @@
 # Windows release verification — 2026-10-11
 
+## 0.31.0 verified portable package — 2026-10-11
+
+Code checkpoint **93eeee8**, with release checkpoint **1c9d53a**, produced two
+identical clean Windows x64 builds: **6,882,816 bytes (6.883 decimal MB)**.
+SHA256: **75826E9CA7F9AB4FC61070F231FE39BCB66FE2DA88E960BAFDD4A8FE4EF50D9A**.
+All nine native suites, 12,407 Console reference comparisons, and packaged
+backend/Git/ZIP checks passed. The packaged executable launched and passed
+repository selection, status, check execution and complete logs with valid,
+missing and invalid descriptors (11, 11 and 12 responsive timer ticks).
+
+Per-monitor v2 now maps logical layout and input to physical-resolution GDI and
+TinySkia buffers, refreshes native fonts and child geometry on DPI changes, and
+preserves compact field dimensions. Tests cover 100/125/150/175/200/250/300%
+rasterization and injected window transitions. Actual attached-monitor GUI
+verification was at 125%; physical multi-monitor transitions and every small
+high-DPI desktop configuration remain unverified. Activity labels restore their
+shared background without stale text, and tooltips use Nunito.
+
+The default portable package is 0.31.0. Reproducible build trees and GUI captures
+were removed, retaining compact reports. A first attempt stopped at the storage
+guard; the release now saves a source-fingerprinted first-build hash so it can
+resume without repeating that build. A mismatched resume fingerprint was tested
+and rejected. Storage fluctuated below the requested floor before recovery;
+only this project's generated files were cleaned, without touching other jobs.
+
+**The entire backend is not certified full parity.** Earlier live-provider,
+GitHub and MCP evidence remains useful, but hosted updates, additional clients,
+and ROM/compiler checks retain the limitations recorded below. Popup opening
+animation/frame composition, background fidelity and responsive minimum-size
+behavior also remain UI differences. These results do not establish full parity.
 ## 0.30.0 verified portable package — 2026-10-11
 
 Code checkpoint **fcc58d0** produced two identical clean Windows x64 builds:
