@@ -1,4 +1,24 @@
-# Windows release verification — 2026-10-10
+# Windows release verification — 2026-10-11
+
+## 0.30.0 verified portable package — 2026-10-11
+
+Code checkpoint **fcc58d0** produced two identical clean Windows x64 builds:
+**6,848,512 bytes (6.849 decimal MB)**, SHA256
+**9CCBC96FBE8F501A0969F96D17CF6A59C9CFF87A61C3AEF8892600A227D18A1F**.
+All eight native suites passed (202.89 seconds), including control growth,
+shrinkage, larger-font reflow and project-row hover/selection across five themes.
+The 12,407 Console reference comparisons and packaged backend/Git/ZIP workflows
+passed. The executable launched and passed repository/status/check/log workflows
+with valid, missing and invalid descriptors (12 responsive timer ticks each).
+
+The default `lite/release` package is now 0.30.0. Build trees and GUI captures
+were removed after compact reports were preserved. Free storage remained above
+26.9 GiB during observed release checks. Rounded control regions now follow
+resizing, and project-menu rows use Nunito and native TinySkia highlights.
+These tests do not establish physical 175%/250% monitor rendering or per-monitor
+transitions: Windows DPI virtualization remains in use. Popup frame/animation,
+background fidelity and the previously recorded external limitations still
+prevent a full-parity claim.
 
 ## 0.29.0 verified portable package — 2026-10-10
 
@@ -11,7 +31,7 @@ repository/status/check/log workflow passed with valid, missing and invalid
 descriptors (11, 11 and 12 responsive timer ticks). Slow project-switch overlay
 hold/release, replay and window cleanup passed native-window tests.
 
-The default `lite/release` package is 0.29.0. Release builds now retain the first
+This earlier package is superseded by 0.30.0 above. Release builds now retain the first
 clean executable's hash, delete that tree before building the second, then remove
 successful build trees, GUI captures and explicitly identified disposable test
 fixtures after preserving compact evidence. A 20-GiB free-space floor plus
