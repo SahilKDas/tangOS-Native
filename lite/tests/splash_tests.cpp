@@ -95,6 +95,20 @@ int main(int argc, char **argv) {
              "Expired splash still intercepts input");
       expect(swaps == 1, "View swap callback repeated");
     }
+    {
+      int projectSwaps = 0;
+      SplashOverlay loading(owner, "Remote project", [&] { ++projectSwaps; }, true);
+      pumpUntil(GetTickCount64() + 2100);
+      auto heldWindow = FindWindowExW(owner, nullptr, L"TangOSLiteSplash", nullptr);
+      expect(projectSwaps == 1 && heldWindow &&
+                 (GetWindowLongPtrW(heldWindow, GWL_STYLE) & WS_VISIBLE),
+             "Slow project switch must remain covered and swap once");
+      loading.release();
+      loading.release();
+      pumpUntil(GetTickCount64() + 750);
+      expect(!(GetWindowLongPtrW(heldWindow, GWL_STYLE) & WS_VISIBLE),
+             "Completed project switch did not release its overlay");
+    }
     int cancelled = 0, replayed = 0;
     {
       auto splash =
@@ -113,6 +127,7 @@ int main(int argc, char **argv) {
     write(output / "report.json", Json{{"state", "passed"},
                                        {"delayedSwap", true},
                                        {"expires", true},
+                                       {"slowProjectHoldAndRelease", true},
                                        {"replayCancelsOldCallback", true},
                                        {"nativeWindowReleased", true}}
                                       .dump(2));

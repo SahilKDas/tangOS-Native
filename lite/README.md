@@ -1,4 +1,11 @@
-# TangOS Lite 0.28.0
+# TangOS Lite 0.29.0
+
+Release packaging requires at least 20 GiB free plus build headroom. It builds
+twice sequentially, retaining the first hash while deleting that build tree,
+then checks the second executable against it. Successful releases keep the
+portable executable, documentation and compact reports; generated builds,
+GUI captures and owned disposable test fixtures are removed. Use
+`-KeepBuildArtifacts` only when investigating a failure.
 
 Optional real local-provider validation, after building and with an existing
 Ollama model available:

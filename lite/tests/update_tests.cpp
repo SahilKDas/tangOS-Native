@@ -74,6 +74,7 @@ int main(int argc, char **argv) {
     };
     rejected([&] { stagePortableUpdate(root / "state", release, prefix, target, invalidFetch); });
     std::cout << "Portable update staging, replacement, rollback backup and safety tests passed\n";
+    std::cout << "Fixture retained for inspection: " << utf8(root.wstring()) << "\n";
     return 0;
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

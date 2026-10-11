@@ -1,5 +1,6 @@
 #include "repository.h"
 #include "verification.h"
+#include "splash_overlay.h"
 #include "skin.h"
 #include "console_ui.h"
 #include "window_capture.h"
@@ -25,6 +26,8 @@ HWND window, repoEdit, statusEdit, logEdit, checkCombo, actionCombo, remoteEdit,
 HFONT uiFont, monoFont;
 Runner runner;
 std::unique_ptr<ConsoleUI> consoleUI;
+std::unique_ptr<SplashOverlay> projectSplash;
+bool projectSwitchPending = false;
 Settings settings;
 fs::path config, repo, logPath, dataDir, consoleRepository;
 std::thread worker;
@@ -200,7 +203,7 @@ std::string resourceText(int id) {
 }
 void about() {
   reviewDialog(
-      "TangOS Lite 0.28.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
+      "TangOS Lite 0.29.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
       "for checks and Git; Repository for status.\nAlways read AGENTS.md and review "
       "changes before publication.\n\n" +
           resourceText(204) + "\n\nMinGW-w64 libwinpthread\n" + resourceText(202) +
@@ -218,8 +221,8 @@ void fillChecks() {
   }
   SendMessageW(checkCombo, CB_SETCURSEL, smoke ? 2 : 0, 0);
 }
-void start(const std::function<void()> &job) {
-  if (busy)
+void start(const std::function<void()> &job, bool projectSwitch = false) {
+  if (busy || (projectSwitchPending && !projectSwitch))
     return;
   if (worker.joinable())
     worker.join();
@@ -288,9 +291,44 @@ void openProjectState(const std::string &id) {
   PostMessageW(window, STATE, 0, (LPARAM) new std::string(status));
 }
 void selectProject(const std::string &id) {
+  if (busy || projectSwitchPending)
+    return;
   if (consoleUI && consoleUI->running())
     throw std::runtime_error("Stop active operations before switching projects");
-  start([id] { openProjectState(id); });
+  auto entry = Backend(repo, dataDir, settings).invoke("projects.get", {{"id", id}});
+  auto job = [id, entry] {
+    if (!entry.contains("descriptor") && entry.value("repository", std::string()).empty()) {
+      Backend backend(repo, dataDir, settings, Vault(dataDir / "vault").values(), requestHttp,
+                      &runner, output);
+      Json args{{"id", id}};
+      auto preview = backend.invoke("projects.download", args);
+      args["confirmation"] = preview.at("confirmation");
+      auto result = backend.invoke("projects.download", args);
+      if (result.contains("warning"))
+        output(result["warning"].get<std::string>() + "\n");
+    }
+    openProjectState(id);
+  };
+  if (smoke || !skin::animationEnabled()) {
+    start(job);
+    return;
+  }
+  projectSplash.reset();
+  projectSwitchPending = true;
+  try {
+    projectSplash = std::make_unique<SplashOverlay>(window, entry.value("title", id), [job] {
+      try {
+        start(job, true);
+      } catch (const std::exception &error) {
+        projectSwitchPending = false;
+        projectSplash->release();
+        output("\nERROR: " + std::string(error.what()) + "\n");
+      }
+    }, true);
+  } catch (...) {
+    projectSwitchPending = false;
+    throw;
+  }
 }
 void importRemoteProject() {
   IFileDialog *dialog = nullptr;
@@ -592,7 +630,7 @@ void paintChrome(HDC dc, int w, int h) {
     skin::label(dc, L"Repository status", rail + 16, 345, 308, 24, 14, true);
   skin::label(dc, L"Port-only  ·  Review before push", rail + 16, h - 139, 300, 23, 12, true, true);
   skin::mascot(dc, w - 137, h - 127, 96);
-  skin::label(dc, L"v0.28.0", w - 74, h - 27, 60, 18, 10, false, true);
+  skin::label(dc, L"v0.29.0", w - 74, h - 27, 60, 18, 10, false, true);
 }
 void snapshot(const fs::path &path) {
   skin::invalidateBackdrop(window);
@@ -631,7 +669,7 @@ fs::path saveDebugSnapshot() {
   fs::create_directories(folder);
   snapshot(folder / "window.bmp");
   Json state = {{"app", "TangOS Lite"},
-                {"version", "0.28.0"},
+                {"version", "0.29.0"},
                 {"capturedAt", activityNow()},
                 {"toolboxOpen", toolboxOpen},
                 {"repositoryView", repositoryView},
@@ -721,6 +759,8 @@ void importProjectZip() {
   });
 }
 void projectMenu() {
+  if (busy || projectSwitchPending)
+    return;
   if (consoleUI && consoleUI->running())
     throw std::runtime_error("Stop agents before switching repositories");
   auto projects = Backend(repo, dataDir, settings).invoke("projects.list");
@@ -768,20 +808,7 @@ void projectMenu() {
     });
   else if (selected > 0 && selected <= ids.size()) {
     auto id = ids[selected - 1];
-    auto entry = Backend(repo, dataDir, settings).invoke("projects.get", {{"id", id}});
-    if (!entry.contains("descriptor") && entry.value("repository", std::string()).empty())
-      start([id] {
-        Backend backend(repo, dataDir, settings, Vault(dataDir / "vault").values(), requestHttp,
-                        &runner, output);
-        Json args{{"id", id}};
-        auto preview = backend.invoke("projects.download", args);
-        args["confirmation"] = preview.at("confirmation");
-        auto result = backend.invoke("projects.download", args);
-        if (result.contains("warning"))
-          output(result["warning"].get<std::string>() + "\n");
-        openProjectState(id);
-      });
-    else
+    if (id != settings.activeProject)
       selectProject(id);
   }
 }
@@ -1340,6 +1367,11 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (worker.joinable())
       worker.join();
     busy = false;
+    if (projectSwitchPending) {
+      projectSwitchPending = false;
+      if (projectSplash)
+        projectSplash->release();
+    }
     if (updatePending) {
       updatePending = false;
       PostMessageW(h, WM_COMMAND, AUTO_UPDATE, 0);
@@ -1463,6 +1495,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       set(activityLabel, "Wait for cancellation to finish, then close.");
       return 0;
     }
+    projectSplash.reset();
     consoleUI.reset();
     DestroyWindow(h);
     return 0;

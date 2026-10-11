@@ -1,5 +1,14 @@
 # Console parity audit
 
+## Project-switch transition — 0.29.0
+
+Project selections now show the native splash with the project's title and start
+the worker after the 450-ms covered phase. Slow descriptor downloads hold the
+overlay opaque until the worker completes; completion or failure releases it.
+The current Controller/Viewer selection is retained. Selecting the active project
+is a no-op. Reduced motion switches immediately. Native tests cover slow holds,
+idempotent release, existing app transitions and callback/window cleanup.
+
 ## Native switch overlay and live Git checkpoint — 0.27.0
 
 Controller/Viewer toolbar changes now show a native theme-backed Tango splash.
@@ -8,7 +17,7 @@ whoosh/fade timing, uses a fresh mascot pose and eighteen rising circles, and
 replays by destroying the prior overlay and its timer. Reduced-motion settings
 switch immediately. Hidden native-window tests cover expiry, replay, capture
 and cleanup. The original bubble highlights/blur, wordmark letter spacing,
-background physics and project-switch splash remain visual parity gaps.
+background physics remain visual parity gaps.
 
 Card shadows use bounded cached native Gaussian masks; ten installed-Edge
 comparisons against the original CSS pass the recorded tolerance. Hover shadow

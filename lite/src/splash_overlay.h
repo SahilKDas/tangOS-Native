@@ -13,8 +13,9 @@ class SplashOverlay {
   std::unique_ptr<Impl> impl;
 
 public:
-  SplashOverlay(HWND parent, std::string label, std::function<void()> swap);
+  SplashOverlay(HWND parent, std::string label, std::function<void()> swap, bool hold = false);
   ~SplashOverlay();
   bool open() const;
+  void release();
 };
 } // namespace lite

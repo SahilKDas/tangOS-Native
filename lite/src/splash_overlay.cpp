@@ -12,12 +12,28 @@ struct SplashOverlay::Impl {
   std::function<void()> swap;
   ULONGLONG started = GetTickCount64();
   bool swapped = false;
+  bool holding = false;
+  ULONGLONG resumed = 0;
+  double resumeFrom = 0;
+  double elapsed() const {
+    auto now = GetTickCount64();
+    auto time = double(now - started);
+    return resumed ? resumeFrom + double(now - resumed) : holding ? std::min(time, 1225.) : time;
+  }
+  void release() {
+    if (!holding)
+      return;
+    resumeFrom = elapsed();
+    resumed = GetTickCount64();
+    holding = false;
+  }
   struct Bubble {
     double left, size, delay, duration;
   };
   std::array<Bubble, 18> bubbles;
-  Impl(HWND parent, std::string text, std::function<void()> action)
-      : owner(parent), priorFocus(GetFocus()), label(std::move(text)), swap(std::move(action)) {
+  Impl(HWND parent, std::string text, std::function<void()> action, bool hold)
+      : owner(parent), priorFocus(GetFocus()), label(std::move(text)), swap(std::move(action)),
+        holding(hold) {
     std::mt19937 random(static_cast<unsigned>(started));
     std::uniform_real_distribution<double> unit(0, 1);
     for (auto &b : bubbles)
@@ -46,7 +62,7 @@ struct SplashOverlay::Impl {
       DestroyWindow(window);
   }
   void advance() {
-    auto frame = splashFrame(double(GetTickCount64() - started));
+    auto frame = splashFrame(elapsed());
     if (frame.swap && !swapped) {
       swapped = true;
       swap();
@@ -56,6 +72,8 @@ struct SplashOverlay::Impl {
       ShowWindow(window, SW_HIDE);
       if (IsWindow(priorFocus) && IsWindowVisible(priorFocus))
         SetFocus(priorFocus);
+      else if (IsWindow(owner))
+        SetFocus(owner);
       return;
     }
     RECT bounds{};
@@ -77,14 +95,14 @@ struct SplashOverlay::Impl {
     auto oldBase = SelectObject(base, bitmap), oldLayer = SelectObject(layer, foreground);
     renderWindowTree(owner, base, window);
     skin::background(layer, w, h);
-    auto elapsed = double(GetTickCount64() - started);
-    auto frame = splashFrame(elapsed);
+    auto time = elapsed();
+    auto frame = splashFrame(time);
     for (const auto &b : bubbles) {
-      auto progress = (elapsed - b.delay) / b.duration;
+      auto progress = (time - b.delay) / b.duration;
       if (progress < 0 || progress > 1)
         continue;
       int size = int(b.size), x = int(b.left * w), y = int(h + 70 - progress * 1.12 * h);
-      double opacity = progress < .15 ? progress / .15 * .9 : (1-progress) / .85 * .9;
+      double opacity = progress < .15 ? progress / .15 * .9 : (1 - progress) / .85 * .9;
       skin::splashBubble(layer, x, y, size, opacity);
     }
     auto center = CreateCompatibleDC(dc);
@@ -160,8 +178,9 @@ struct SplashOverlay::Impl {
     return DefWindowProcW(h, message, w, l);
   }
 };
-SplashOverlay::SplashOverlay(HWND parent, std::string label, std::function<void()> swap)
-    : impl(std::make_unique<Impl>(parent, std::move(label), std::move(swap))) {}
+SplashOverlay::SplashOverlay(HWND parent, std::string label, std::function<void()> swap, bool hold)
+    : impl(std::make_unique<Impl>(parent, std::move(label), std::move(swap), hold)) {}
 SplashOverlay::~SplashOverlay() = default;
 bool SplashOverlay::open() const { return impl->window && IsWindowVisible(impl->window); }
+void SplashOverlay::release() { impl->release(); }
 } // namespace lite
