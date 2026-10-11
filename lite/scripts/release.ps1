@@ -1,8 +1,8 @@
-param([string]$OutputDir = "$PSScriptRoot/../release", [double]$MinimumFreeGiB = 25, [switch]$KeepBuildArtifacts)
+param([string]$OutputDir = "$PSScriptRoot/../release", [double]$MinimumFreeGiB = 25, [switch]$KeepBuildArtifacts, [switch]$Resume)
 $ErrorActionPreference = 'Stop'
 $source = [IO.Path]::GetFullPath("$PSScriptRoot/..")
 $out = [IO.Path]::GetFullPath($OutputDir)
-if (Test-Path -LiteralPath $out) { throw "Use a fresh release directory: $out" }
+if ((Test-Path -LiteralPath $out) -and -not $Resume) { throw "Use a fresh release directory: $out" }
 New-Item -ItemType Directory -Force $out | Out-Null
 $out = (Resolve-Path -LiteralPath $out).Path
 function Assert-FreeSpace {
@@ -20,8 +20,26 @@ function Remove-GeneratedDirectory([string]$path) {
     Remove-Item -LiteralPath $absolute -Recurse -Force
   }
 }
+$checkpointPath = Join-Path $out 'first-build.json'
+$repoRoot = [IO.Path]::GetFullPath("$source/..")
+$inputs = & git -C $repoRoot ls-files -- lite
+if ($LASTEXITCODE) { throw 'Cannot fingerprint release source' }
+$inputHashes = foreach ($inputPath in $inputs) {
+  "$inputPath $((Get-FileHash -LiteralPath (Join-Path $repoRoot $inputPath) -Algorithm SHA256).Hash)"
+}
+$hasher = [Security.Cryptography.SHA256]::Create()
+try {
+  $sourceHash = [BitConverter]::ToString($hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes(($inputHashes -join "`n")))).Replace('-', '')
+} finally { $hasher.Dispose() }
 $referenceHash = $null
+if ($Resume) {
+  if (-not (Test-Path -LiteralPath $checkpointPath)) { throw 'No completed first-build checkpoint; use a fresh directory' }
+  $checkpoint = Get-Content -LiteralPath $checkpointPath -Raw | ConvertFrom-Json
+  if ($checkpoint.sourceHash -ne $sourceHash -or $checkpoint.hash -notmatch '^[A-F0-9]{64}$') { throw 'Release source changed; use a fresh directory' }
+  $referenceHash = $checkpoint.hash
+}
 foreach ($name in @('build-b', 'build-a')) {
+  if ($name -eq 'build-b' -and $referenceHash) { continue }
   Assert-FreeSpace
   cmake -S $source -B "$out/$name" -G 'MinGW Makefiles' -DCMAKE_BUILD_TYPE=Release
   if ($LASTEXITCODE) { throw 'Configure failed' }
@@ -33,6 +51,7 @@ foreach ($name in @('build-b', 'build-a')) {
   if ($LASTEXITCODE) { throw 'Build failed' }
   if ($name -eq 'build-b') {
     $referenceHash = (Get-FileHash -LiteralPath "$out/$name/TangOSLite.exe" -Algorithm SHA256).Hash
+    @{ hash = $referenceHash; sourceHash = $sourceHash } | ConvertTo-Json | Set-Content -LiteralPath $checkpointPath -Encoding utf8
     if (-not $KeepBuildArtifacts) { Remove-GeneratedDirectory "$out/$name" }
   }
 }
@@ -128,4 +147,5 @@ foreach ($fixture in @('gui-fixture', 'gui-descriptor-missing', 'gui-descriptor-
   if (-not $KeepBuildArtifacts) { Remove-GeneratedDirectory "$out/$fixture" }
 }
 if (-not $KeepBuildArtifacts) { Remove-GeneratedDirectory "$out/build-a" }
+Remove-Item -LiteralPath $checkpointPath -Force
 Write-Output $report
