@@ -1,4 +1,4 @@
-# TangOS Lite 0.31.0
+# TangOS Lite 0.32.0
 
 Release packaging requires at least 25 GiB free plus build headroom. It builds
 twice sequentially, retaining the first hash while deleting that build tree,

@@ -95,6 +95,10 @@ if ($LASTEXITCODE) { throw 'Original Atlas color comparisons failed' }
 python "$source/tests/test_batches_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original batch comparisons failed' }
 python "$source/tests/test_source_reference.py" --exe "$out/build-a/TangOSLite.exe"
+python "$source/tests/test_atlas_backend_reference.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Atlas backend reference comparisons failed' }
+python "$source/tests/test_repair_reference.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Repair reference comparisons failed' }
 if ($LASTEXITCODE) { throw 'Original source comparisons failed' }
 python "$source/tests/test_driver_tokens_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original driver token-summary comparisons failed' }
@@ -118,7 +122,7 @@ Assert-FreeSpace
 $imports = & objdump -p "$out/TangOSLite.exe" | Select-String 'DLL Name:' | ForEach-Object { $_.Line.Trim() }
 $compiler = (& g++ --version | Select-Object -First 1)
 $cmake = (& cmake --version | Select-Object -First 1)
-$report = "TangOS Lite 0.31.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
+$report = "TangOS Lite 0.32.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
 Set-Content -LiteralPath "$out/SIZE.txt" -Value $report -Encoding utf8
 Copy-Item -LiteralPath "$source/README.md" -Destination "$out/README.md"
 Copy-Item -LiteralPath "$source/../LICENSE" -Destination "$out/LICENSE"

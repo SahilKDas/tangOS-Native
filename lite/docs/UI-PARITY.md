@@ -1,5 +1,24 @@
 # Console parity audit
 
+## Current gap inventory — 2026-10-11
+
+Physical mixed-monitor testing, popup opening/frame composition and responsive
+minimum sizing are not the complete frontend gap list. Background motion,
+splash bubble blur/highlights and wordmark spacing, hover-shadow interpolation,
+and native control/dialog composition retain differences. Auxiliary overlays,
+footer/glass layout and complete screen-by-screen interaction equivalence still
+need a current comparison; historical entries below are checkpoints, not a
+reliable list of all currently missing features. Implemented workflows and
+passing component comparisons do not certify exact whole-screen parity.
+
+The public-contract ledger remains deliberately incomplete. Its unverified
+entries include implemented native operations as well as missing behavior, so
+its counts are neither an implementation percentage nor proof that all backends
+are present. Current backend omissions found by direct inspection include recent
+upstream source activity and Requirements repair commands; this checkpoint adds
+those services and corrects Atlas absent/invalid responses. Live-feed cache/event
+semantics and end-to-end state contracts still need direct contract comparison.
+External connection configuration and credentials remain entirely user-owned.
 ## Per-monitor rendering — 0.31.0
 
 The native UI now uses per-monitor v2 awareness and an isolated logical/pixel

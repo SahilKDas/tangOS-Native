@@ -114,6 +114,42 @@ Json reportAttachments(const Json &args) {
   }
   return result;
 }
+Command preflightRepairCommand(const fs::path &repository, const Descriptor &descriptor,
+                               const Json &args) {
+  auto id = args.at("id").get<std::string>();
+  if (id == "python")
+    return {{"winget", "install", "--id", "Python.Python.3.12", "-e", "--accept-package-agreements",
+             "--accept-source-agreements"},
+            repository};
+  if (id == "pypkgs") {
+    Args command{descriptor.python, "-m", "pip", "install"};
+    auto requirements = confinedPath(repository, "requirements.txt");
+    if (fs::is_regular_file(requirements)) {
+      command.insert(command.end(), {"-r", "requirements.txt"});
+    } else {
+      auto packages = descriptor.document.value("requirements", Json::object())
+                          .value("pythonPackages", Json::array());
+      for (auto &package : packages) {
+        auto name = package.get<std::string>();
+        if (name.empty() || name.front() == '-' || name.find_first_of("\r\n") != std::string::npos)
+          throw std::runtime_error("Python package must not contain pip options or newlines");
+        command.push_back(name);
+      }
+      if (command.size() == 4)
+        throw std::runtime_error("This repo names no Python packages to install");
+    }
+    return {command, repository};
+  }
+  if (id == "rom") {
+    auto file = fs::u8path(args.value("filePath", std::string()));
+    if (!file.is_absolute() || !fs::is_regular_file(file))
+      throw std::runtime_error("Choose an absolute path to your own local ROM file");
+    if (!fs::is_regular_file(confinedPath(repository, "tools/unpack.py")))
+      throw std::runtime_error("This repo has no tools/unpack.py to extract with");
+    return {{descriptor.python, "tools/unpack.py", utf8(file.wstring())}, repository};
+  }
+  throw std::runtime_error("Unknown repair id; use python, pypkgs, rom or atlas.generate for data");
+}
 Json fileJson(const fs::path &p, Json fallback = Json::object()) {
   if (!fs::exists(p))
     return fallback;
@@ -406,13 +442,13 @@ Backend::Backend(fs::path repo, fs::path data, Settings prefs,
   fs::create_directories(directory);
 }
 bool Backend::mutation(const std::string &m, const Json &) {
-  return m == "update.stage" || m == "projects.importZip" || m == "projects.discover" ||
-         m == "projects.download" || m == "projects.open" || m == "projects.register" ||
-         m == "descriptor.write" || m == "preferences.set" || m == "connections.set" ||
-         m == "git.action" || m == "checks.run" || m == "tools.run" || m == "atlas.generate" ||
-         m == "reports.export" || m == "bug.report" || m == "stats.clear" || m == "network.write" ||
-         m == "queue.adopt" || m == "git.clone" || m == "git.backup" || m == "git.discard" ||
-         m == "git.sync";
+  return m == "preflight.fix" || m == "update.stage" || m == "projects.importZip" ||
+         m == "projects.discover" || m == "projects.download" || m == "projects.open" ||
+         m == "projects.register" || m == "descriptor.write" || m == "preferences.set" ||
+         m == "connections.set" || m == "git.action" || m == "checks.run" || m == "tools.run" ||
+         m == "atlas.generate" || m == "reports.export" || m == "bug.report" ||
+         m == "stats.clear" || m == "network.write" || m == "queue.adopt" || m == "git.clone" ||
+         m == "git.backup" || m == "git.discard" || m == "git.sync";
 }
 bool enabledTool(const Json &prefs, const std::string &id) {
   auto hidden = prefs.value("disabledTools", Json::array());
@@ -421,24 +457,24 @@ bool enabledTool(const Json &prefs, const std::string &id) {
 }
 Json Backend::catalog() {
   return Json::array(
-      {"projects.importZip", "projects.discover",    "projects.download",  "projects.list",
-       "projects.register",  "projects.open",        "descriptor.preview", "descriptor.write",
-       "preferences.get",    "preferences.set",      "connections.get",    "connections.set",
-       "network.read",       "network.write",        "atlas.load",         "atlas.generate",
-       "atlas.source",       "atlas.history",        "claims.read",        "preflight",
-       "git.status",         "git.syncPreview",      "git.sync",           "git.action",
-       "git.clone",          "git.backup",           "git.discard",        "tools.list",
-       "tools.run",          "checks.list",          "checks.run",         "policy.presence",
-       "stats.get",          "stats.session",        "stats.clear",        "reports.list",
-       "reports.export",     "queue.adopt",          "policy.classify",    "policy.adaptive",
-       "policy.pool",        "policy.statistics",    "policy.layout",      "policy.color",
-       "policy.batches",     "policy.source",        "policy.usage",       "guide.parse",
-       "guide.tour",         "guide.tips",           "guide.richText",     "projects.get",
-       "github.credits",     "atlas.cosmetics",      "atlas.counts",       "atlas.progress",
-       "atlas.live",         "update.check",         "update.stage",       "bug.report",
-       "harvest.list",       "activity.snapshot",    "policy.activity",    "policy.detail",
-       "policy.match",       "policy.role",          "policy.autoRole",    "policy.effort",
-       "policy.drive",       "policy.controllerView"});
+      {"projects.importZip", "projects.discover", "projects.download",  "projects.list",
+       "projects.register",  "projects.open",     "descriptor.preview", "descriptor.write",
+       "preferences.get",    "preferences.set",   "connections.get",    "connections.set",
+       "network.read",       "network.write",     "atlas.load",         "atlas.generate",
+       "preflight.fix",      "atlas.source",      "atlas.recentAdds",   "atlas.history",
+       "claims.read",        "preflight",         "git.status",         "git.syncPreview",
+       "git.sync",           "git.action",        "git.clone",          "git.backup",
+       "git.discard",        "tools.list",        "tools.run",          "checks.list",
+       "checks.run",         "policy.presence",   "stats.get",          "stats.session",
+       "stats.clear",        "reports.list",      "reports.export",     "queue.adopt",
+       "policy.classify",    "policy.adaptive",   "policy.pool",        "policy.statistics",
+       "policy.layout",      "policy.color",      "policy.batches",     "policy.source",
+       "policy.usage",       "guide.parse",       "guide.tour",         "guide.tips",
+       "guide.richText",     "projects.get",      "github.credits",     "atlas.cosmetics",
+       "atlas.counts",       "atlas.progress",    "atlas.live",         "update.check",
+       "update.stage",       "bug.report",        "harvest.list",       "activity.snapshot",
+       "policy.activity",    "policy.detail",     "policy.match",       "policy.role",
+       "policy.autoRole",    "policy.effort",     "policy.drive",       "policy.controllerView"});
 }
 Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
   if (m == "bug.report" && a.contains("description") && a["description"].is_string())
@@ -542,6 +578,17 @@ Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
       attachments = reportAttachments(a);
       baseline += attachments.dump();
     }
+    if (m == "preflight.fix") {
+      auto command = preflightRepairCommand(repository, loadDescriptor(repository), a);
+      baseline += preview(command);
+      for (auto relative : {"tangos.json", "requirements.txt", "tools/unpack.py"}) {
+        auto file = confinedPath(repository, relative);
+        if (fs::is_regular_file(file))
+          baseline += relative + sha256File(file);
+      }
+      if (a.at("id") == "rom")
+        baseline += sha256File(fs::u8path(a.at("filePath").get<std::string>()));
+    }
     baseline = fingerprint(baseline);
     if (ticket.empty()) {
       Json details = Json::object();
@@ -561,6 +608,14 @@ Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
             {"trustedAssetPrefix", profile.value("assetPrefix", std::string())},
             {"notice",
              "Download only; SHA256 and native executable checks must pass before installation"}};
+      }
+      if (m == "preflight.fix") {
+        auto command = preflightRepairCommand(repository, loadDescriptor(repository), a);
+        details["command"] = preview(command);
+        details["argv"] = command.argv;
+        details["notice"] = "Run only with your own inputs. Package/Python installation contacts "
+                            "external services; ROM extraction uses your local repository script. "
+                            "No ROM or credentials are uploaded by TangOS Lite.";
       }
       if (m == "checks.run") {
         bool found = false;
@@ -1463,7 +1518,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       args["connection"] = m;
     auto result = execute("network.read", args);
     if (m == "update.check" && result.value("ok", false))
-      result["update"] = updateStatus("0.31.0", result.at("data"));
+      result["update"] = updateStatus("0.32.0", result.at("data"));
     return result;
   }
   if (m == "git.clone") {
@@ -1581,7 +1636,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto folder = directory / "exports" / ("bug-report-" + uniqueId());
     fs::create_directories(folder);
     Json debug = {{"app", "TangOS Lite"},
-                  {"version", "0.31.0"},
+                  {"version", "0.32.0"},
                   {"portOnly", settings.portOnly},
                   {"project", settings.activeProject},
                   {"connections", Json::array()},
@@ -1717,7 +1772,8 @@ Json Backend::execute(const std::string &m, const Json &a) {
   Descriptor descriptor;
   if (a.contains("descriptor"))
     descriptor = parseDescriptor(a["descriptor"].dump());
-  else if (m.rfind("atlas.", 0) == 0 || m.rfind("tools.", 0) == 0 || m == "preflight")
+  else if (m.rfind("atlas.", 0) == 0 || m.rfind("tools.", 0) == 0 || m == "preflight" ||
+           m == "preflight.fix")
     descriptor = loadDescriptor(repository);
   if (m == "descriptor.preview") {
     Json tools = Json::array();
@@ -1739,8 +1795,80 @@ Json Backend::execute(const std::string &m, const Json &a) {
     saveJson(repository / "tangos.json", valid.document);
     return {{"saved", true}};
   }
-  if (m == "atlas.load")
-    return fileJson(confinedPath(repository, descriptor.database));
+  if (m == "atlas.recentAdds") {
+    double hours = a.value("sinceHours", 24.0);
+    if (!std::isfinite(hours) || hours < 0 || hours > 24 * 3650)
+      throw std::runtime_error("sinceHours must be between 0 and 87600");
+    Runner local;
+    auto &runner = processRunner ? *processRunner : local;
+    auto git = [&](Args args) {
+      args.insert(args.begin() + 1,
+                  {"--no-pager", "-c", "core.quotePath=false", "-c", "color.ui=false"});
+      auto result = runner.run({args, repository});
+      if (!result.code) {
+        auto start = result.output.find('\n', result.output.find("Working directory:"));
+        auto end = result.output.rfind("\n[");
+        if (start != std::string::npos && end > start)
+          result.output = result.output.substr(start + 1, end - start - 1);
+      }
+      return result;
+    };
+    auto head = git({"git", "rev-parse", "--is-inside-work-tree"});
+    if (head.code || trim(head.output) != "true")
+      return Json::array();
+    std::string branch = "main";
+    auto symbolic = git({"git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"});
+    auto ref = trim(symbolic.output);
+    const std::string prefix = "refs/remotes/origin/";
+    if (!symbolic.code && ref.rfind(prefix, 0) == 0)
+      branch = ref.substr(prefix.size());
+    else {
+      for (const auto *candidate : {"main", "master"})
+        if (!git({"git", "rev-parse", "--verify", std::string("origin/") + candidate}).code) {
+          branch = candidate;
+          break;
+        }
+    }
+    // Reading cached history never starts a connection. Fetch is caller opt-in.
+    if (a.value("fetch", false))
+      git({"git", "fetch", "--quiet", "origin", branch});
+    std::ostringstream duration;
+    duration << hours;
+    auto history =
+        git({"git", "log", "origin/" + branch, "--since=" + duration.str() + " hours ago",
+             "--diff-filter=AM", "--name-only", "--pretty=format:", "-z"});
+    Json names = Json::array();
+    if (history.code)
+      return names;
+    std::set<std::string> seen;
+    for (auto path : split(history.output, '\0')) {
+      // Git separates commits with a newline even with NUL-delimited paths.
+      while (!path.empty() && (path.front() == '\n' || path.front() == '\r'))
+        path.erase(path.begin());
+      if (path.rfind("src/", 0) != 0)
+        continue;
+      size_t extension = path.size() >= 4 && path.compare(path.size() - 4, 4, ".cpp") == 0 ? 4
+                         : path.size() >= 2 && path.compare(path.size() - 2, 2, ".c") == 0 ? 2
+                                                                                           : 0;
+      if (!extension)
+        continue;
+      auto name = path.substr(4, path.size() - 4 - extension);
+      if (seen.insert(name).second)
+        names.push_back(name);
+    }
+    return names;
+  }
+  if (m == "atlas.load") {
+    auto path = confinedPath(repository, descriptor.database);
+    try {
+      auto db = fileJson(path, nullptr);
+      return db.is_object() && db.contains("functions") && db["functions"].is_array()
+                 ? db
+                 : Json(nullptr);
+    } catch (const std::exception &) {
+      return nullptr; // Console readAtlas is best-effort for absent/invalid data.
+    }
+  }
   if (m == "atlas.source" && a.contains("id")) {
     if (a.contains("srcPath") && a["srcPath"].is_string() &&
         !a["srcPath"].get<std::string>().empty()) {
@@ -1898,6 +2026,24 @@ Json Backend::execute(const std::string &m, const Json &a) {
     if (m == "checks.list")
       return rows;
     throw std::runtime_error("Unknown discovered check");
+  }
+  if (m == "preflight.fix") {
+    auto command = preflightRepairCommand(repository, descriptor, a);
+    command.activityTool = "preflight.fix";
+    command.activityLabel = "Repair " + a.at("id").get<std::string>();
+    command.activityRepository = repository;
+    Runner local;
+    auto &runner = processRunner ? *processRunner : local;
+    auto log = directory / "logs" / ("repair-" + uniqueId() + ".log");
+    auto result = runner.run(command, progressSink, log);
+    return {{"ok", result.code == 0},
+            {"exit", result.code},
+            {"output", result.output},
+            {"message", result.code == 0 ? "Repair completed; re-check requirements. Python "
+                                           "installation may require restarting for PATH changes."
+                                         : "Repair failed; inspect the complete log and command."},
+            {"log", utf8(log.wstring())},
+            {"cancelled", result.code == ERROR_CANCELLED}};
   }
   if (m == "tools.list") {
     auto prefs = fileJson(directory / "preferences.json");

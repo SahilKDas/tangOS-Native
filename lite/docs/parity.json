@@ -161,8 +161,7 @@
     },
     {
       "contract": "preflightFix",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial", "evidence": ["lite/tests/backend_tests.cpp: confirmed command/input fingerprint, failure and cancellation coverage", "lite/tests/test_repair_reference.py: direct original command construction comparisons", "Native preflight.fix adds caller-confirmed repairs; original chaosdb automatic repair and exact result envelopes remain different"],
       "kind": "api"
     },
     {
@@ -201,8 +200,7 @@
     },
     {
       "contract": "recentAdds",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial", "evidence": ["lite/tests/backend_tests.cpp: upstream selection, nested source stems, deduplication, local work exclusion", "lite/tests/test_atlas_backend_reference.py: original upstream history comparisons", "Network fetch is opt-in rather than implicit; cached local history remains available"],
       "kind": "api"
     },
     {

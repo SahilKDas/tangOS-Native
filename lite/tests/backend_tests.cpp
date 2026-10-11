@@ -159,6 +159,126 @@ int main() {
                                           "{\"claims\":[{\"module\":\"arm9\",\"start\":33554432,"
                                           "\"end\":33554448}],\"echo\":\"local-fixture-secret\"}"};
                     });
+    {
+      expect(backend.invoke("atlas.recentAdds").empty(), "recent source: missing origin is empty");
+      reject([&] { backend.invoke("atlas.recentAdds", {{"sinceHours", -1}}); },
+             "recent source: negative duration rejected");
+      auto historyRepo = dir / "history";
+      fs::create_directories(historyRepo / "src/nested");
+      write(historyRepo / "tangos.json", desc.dump());
+      expect(git.run({{"git", "init", "-b", "main"}, historyRepo}).code == 0, "history init");
+      auto commit = [&] {
+        expect(git.run({{"git", "add", "."}, historyRepo}).code == 0, "history stage");
+        expect(git.run({{"git", "-c", "user.name=Fixture", "-c",
+                         "user.email=fixture@example.invalid", "commit", "-m", "history"},
+                        historyRepo})
+                       .code == 0,
+               "history commit");
+      };
+      write(historyRepo / "src/added.cpp", "first\n");
+      write(historyRepo / "src/nested/space name.c", "first\n");
+      write(historyRepo / "src/ignored.h", "header\n");
+      commit();
+      write(historyRepo / "src/added.cpp", "changed\n");
+      commit();
+      expect(git.run({{"git", "update-ref", "refs/remotes/origin/master", "HEAD"}, historyRepo})
+                     .code == 0,
+             "history remote ref");
+      Backend history(historyRepo, dir / "history-data", settings);
+      auto names = history.invoke("atlas.recentAdds");
+      expect(
+          names == Json::array({"added", "nested/space name"}),
+          "recent source includes modified and added C/C++, deduplicates, preserves nested spaces");
+      write(historyRepo / "src/local-only.cpp", "local\n");
+      commit();
+      expect(history.invoke("atlas.recentAdds") == names,
+             "recent source uses upstream, not local HEAD");
+      expect(history.invoke("atlas.recentAdds", {{"fetch", true}}) == names,
+             "recent source retains cached upstream on failed fetch");
+      expect(
+          git.run({{"git", "update-ref", "refs/remotes/origin/topic", "HEAD"}, historyRepo}).code ==
+                  0 &&
+              git.run({{"git", "symbolic-ref", "refs/remotes/origin/HEAD",
+                        "refs/remotes/origin/topic"},
+                       historyRepo})
+                      .code == 0,
+          "history symbolic default branch");
+      auto topic = history.invoke("atlas.recentAdds");
+      expect(topic.size() == 3 && topic[0] == "local-only",
+             "symbolic remote default branch overrides fallback");
+    }
+    expect(backend.invoke("atlas.load").is_null(), "missing Atlas returns null like Console");
+    for (auto invalid : {"broken json", "null", "[]", "{}", "{\"functions\":{}}"}) {
+      write(repo / "chaos-db.json", invalid);
+      expect(backend.invoke("atlas.load").is_null(), "invalid Atlas returns null like Console");
+    }
+    write(repo / "chaos-db.json", "{\"functions\":[],\"fixture\":true}");
+    expect(backend.invoke("atlas.load").value("fixture", false), "valid Atlas preserves metadata");
+    fs::remove(repo / "chaos-db.json");
+    {
+      auto repair = backend.invoke("preflight.fix", {{"id", "python"}});
+      expect(repair.at("details").at("command").get<std::string>().find("Python.Python.3.12") !=
+                 std::string::npos,
+             "Python repair previews winget without installing");
+      reject([&] { backend.invoke("preflight.fix", {{"id", "pypkgs"}}); },
+             "empty package list rejected");
+      reject([&] { backend.invoke("preflight.fix", {{"id", "unknown"}}); },
+             "unknown repair rejected");
+      reject([&] { backend.invoke("preflight.fix", {{"id", "rom"}}); },
+             "ROM repair needs user-owned input");
+      write(repo / "requirements.txt", "fixture-package==1\n");
+      repair = backend.invoke("preflight.fix", {{"id", "pypkgs"}});
+      expect(repair.at("details").at("command").get<std::string>().find("requirements.txt") !=
+                 std::string::npos,
+             "package repair uses pinned requirements without installing");
+      write(repo / "requirements.txt", "fixture-package==2\n");
+      reject(
+          [&] {
+            backend.invoke("preflight.fix",
+                           {{"id", "pypkgs"}, {"confirmation", repair.at("confirmation")}});
+          },
+          "changed requirements invalidate repair preview before installation");
+      fs::remove(repo / "requirements.txt");
+      auto input = dir / "user input with spaces.bin";
+      write(input, "synthetic non-ROM input\n");
+      write(repo / "tools/unpack.py", "import sys\nprint('fixture repair',sys.argv[1])\n");
+      Json args{{"id", "rom"}, {"filePath", utf8(input.wstring())}};
+      repair = backend.invoke("preflight.fix", args);
+      write(input, "changed synthetic input\n");
+      args["confirmation"] = repair.at("confirmation");
+      reject([&] { backend.invoke("preflight.fix", args); },
+             "changed local input invalidates repair preview");
+      args.erase("confirmation");
+      repair = backend.invoke("preflight.fix", args);
+      args["confirmation"] = repair.at("confirmation");
+      auto result = backend.invoke("preflight.fix", args);
+      expect(result.value("ok", false) &&
+                 fs::is_regular_file(fs::u8path(result.at("log").get<std::string>())) &&
+                 result.at("output").get<std::string>().find("fixture repair") != std::string::npos,
+             "confirmed synthetic repair preserves full log and quoted input path");
+      reject([&] { backend.invoke("preflight.fix", args); }, "repair confirmation single use");
+      write(repo / "tools/unpack.py",
+            "import sys\nprint('tools/unpack.py:7: fixture failure')\nsys.exit(7)\n");
+      args.erase("confirmation");
+      repair = backend.invoke("preflight.fix", args);
+      args["confirmation"] = repair.at("confirmation");
+      result = backend.invoke("preflight.fix", args);
+      expect(!result.value("ok", true) && result.at("exit") == 7 &&
+                 result.at("output").get<std::string>().find("tools/unpack.py:7") !=
+                     std::string::npos,
+             "repair failure preserves actionable diagnostics and exit code");
+      Runner stopped;
+      Backend cancellable(repo, dir / "cancel-repair", settings, {}, requestHttp, &stopped);
+      args.erase("confirmation");
+      repair = cancellable.invoke("preflight.fix", args);
+      args["confirmation"] = repair.at("confirmation");
+      stopped.cancel();
+      result = cancellable.invoke("preflight.fix", args);
+      expect(result.value("cancelled", false) && !result.value("ok", true) &&
+                 fs::is_regular_file(fs::u8path(result.at("log").get<std::string>())),
+             "cancelled repair retains complete log without launching extraction");
+      fs::remove(repo / "tools/unpack.py");
+    }
     reject([&] { backend.invoke("atlas.generate"); },
            "Atlas generation requires a configured command");
     {
@@ -262,8 +382,8 @@ int main() {
     expect(dataCheck.at("exit") == 0 &&
                dataCheck.at("verification").at("state") == "completed-with-differences",
            "zero-exit ROM data differences remain visible in the native backend");
-    expect(read(fs::u8path(dataCheck.at("log").get<std::string>())).find(
-               "[VERIFICATION] completed-with-differences") != std::string::npos,
+    expect(read(fs::u8path(dataCheck.at("log").get<std::string>()))
+                   .find("[VERIFICATION] completed-with-differences") != std::string::npos,
            "interpreted data verdict is preserved in the durable check log");
     fs::remove(repo / "tools/romdata_check.py");
     expect(!enabledTool({{"allowNearMiss", false}}, "nearmiss_stats"),
@@ -568,7 +688,8 @@ int main() {
                  !fs::exists(repo / "port/finished.txt"),
              "check cancellation before launch reaches backend runner");
       expect(before.at("verification").at("state") == "cancelled" &&
-                 before.at("output").get<std::string>().find("[VERIFICATION] cancelled") != std::string::npos,
+                 before.at("output").get<std::string>().find("[VERIFICATION] cancelled") !=
+                     std::string::npos,
              "check result exposes cancellation verdict in API and complete output");
       expect(read(fs::u8path(before.at("log").get<std::string>())).find("CANCELLED") !=
                  std::string::npos,

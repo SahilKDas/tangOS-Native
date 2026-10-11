@@ -70,3 +70,28 @@ Connections, Requirements, Services, queue editing and source/history screens no
 Statistics count unique functions, preserve late first wins in the 16-outcome recent ring, use the reference size buckets and near-miss ratio, and retain per-agent token totals when drivers report them. Driver-declared matches remain explicitly labeled as declarations rather than independent byte proof. Local comparisons against the original statistics implementation require Node only during development; Node is never packaged.
 
 Clone service execution now accepts a caller-owned process runner. The native Services screen lists git.clone and provides Cancel; Stop also cancels clone work, and repository switching is blocked while a service operation is pending. Caller cancellation returns an explicit cancelled flag, retains its durable log even before launch, and resetting the runner permits another clone. Disposable local repositories test cancellation and restart without external authentication. HTTP transport cancellation is not provided by this runner.
+
+## Requirements repairs and upstream activity
+
+`preflight.fix` takes `id: python`, `id: pypkgs`, or `id: rom`. Each operation
+returns a concrete command preview and requires the usual single-use confirmation.
+Python uses the original Windows winget Python 3.12 command. Package repair uses
+requirements.txt when present, otherwise the descriptor's Python package list.
+No installation runs while previewing. ROM extraction additionally requires an
+absolute `filePath` to a user's own local file and the checkout's tools/unpack.py.
+No ROM is included in the app or uploaded by this service. Relevant scripts,
+requirements and local input bytes are fingerprinted; changes expire the preview.
+Execution retains complete logs and accepts the caller's cancellable runner.
+Repository scripts remain trusted code. Atlas data repair uses atlas.generate.
+These methods are available from Services; account configuration remains local.
+
+`atlas.recentAdds` returns C/C++ source stems added or modified on the origin
+remote's default branch during `sinceHours` (default 24). It deduplicates changes,
+preserves nested relative stems, and ignores the local branch's unpublished work.
+Missing upstream history returns an empty array. Cached history is read without
+a connection; `fetch: true` explicitly opts into Git fetch using the user's Git
+configuration. Fetch failure retains usable cached history, as the reference does.
+
+`atlas.load` follows Console's best-effort null response for absent, malformed or
+invalid databases; a valid functions array retains the complete database envelope.
+Protected path and bounded file-read policies still apply.
