@@ -231,7 +231,13 @@ struct ConsoleUI::Impl {
   std::vector<size_t> filtered, cart;
   std::vector<Hit> hits;
   std::string atlasError;
-  std::thread loader, manualWorker;
+  std::thread loader, manualWorker, atlasEventWorker, atlasRefreshWorker;
+  std::atomic<bool> stopAtlasEvents{false}, stopAtlasRefresh{false};
+  Runner atlasRefreshRunner;
+  std::mutex atlasEventMutex;
+  std::map<std::string, Json> atlasEvents;
+  std::string atlasEventConfig;
+  ULONGLONG atlasWorkerPoll = 0;
   Runner manualRunner;
   Runner serviceRunner;
   std::atomic<bool> manualBusy{false}, atlasReady{false};
@@ -470,6 +476,13 @@ struct ConsoleUI::Impl {
         DestroyWindow(popup->window);
     }
     KillTimer(window, 1);
+    stopAtlasEvents = true;
+    stopAtlasRefresh = true;
+    atlasRefreshRunner.cancel();
+    if (atlasEventWorker.joinable())
+      atlasEventWorker.join();
+    if (atlasRefreshWorker.joinable())
+      atlasRefreshWorker.join();
     manualRunner.cancel();
     serviceRunner.cancel();
     if (manualWorker.joinable())
@@ -1153,12 +1166,15 @@ struct ConsoleUI::Impl {
           0, width - 332, 62, 310, height - 132, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
     } else if (screen == Screen::services) {
       std::vector<std::string> methods = {
-          "preflight",       "preflight.fix",   "atlas.recentAdds", "claims.read",
-          "stats.get",       "harvest.list",    "reports.list",     "projects.list",
-          "connections.get", "preferences.get", "git.status",       "git.syncPreview",
-          "git.sync",        "git.clone",       "github.credits",   "atlas.cosmetics",
-          "atlas.counts",    "atlas.progress",  "update.check",     "reports.export",
-          "stats.clear",     "git.backup"};
+          "preflight",       "preflight.fix",       "atlas.recentAdds",
+          "claims.read",     "stats.get",           "harvest.list",
+          "reports.list",    "projects.list",       "connections.get",
+          "preferences.get", "git.status",          "git.syncPreview",
+          "git.sync",        "git.clone",           "atlas.current",
+          "atlas.state",     "atlas.refreshStatus", "atlas.authorizeRefresh",
+          "atlas.refresh",   "github.credits",      "atlas.cosmetics",
+          "atlas.counts",    "atlas.progress",      "update.check",
+          "reports.export",  "stats.clear",         "git.backup"};
       if (std::find(methods.begin(), methods.end(), serviceMethod) == methods.end())
         methods.push_back(serviceMethod);
       auto at = std::find(methods.begin(), methods.end(), serviceMethod) - methods.begin();
@@ -1554,7 +1570,88 @@ struct ConsoleUI::Impl {
     setText(body, description);
     setText(argsBox, defaults.dump(2));
   }
-  void loadAtlas() {
+  void queueAtlasEvent(Json event) {
+    auto type = event.value("event", std::string());
+    if (type != "published" && type != "publish" && type != "claims" && type != "cosmetics" &&
+        type != "counts" && type != "progress" && type != "refreshed" && type != "connection")
+      return;
+    std::lock_guard<std::mutex> lock(atlasEventMutex);
+    atlasEvents[type] = std::move(event); // Bounded coalescing: newest event of each kind wins.
+  }
+  void updateAtlasWorkers() {
+    if (GetTickCount64() - atlasWorkerPoll >= 1000) {
+      atlasWorkerPoll = GetTickCount64();
+      Json profiles = Json::object();
+      try {
+        auto path = data / "connections.json";
+        if (fs::exists(path) && fs::file_size(path) <= 1024 * 1024)
+          profiles = Json::parse(read(path), nullptr, false);
+      } catch (const std::exception &) {
+      }
+      bool enabled = profiles.is_object() && profiles.contains("atlas.events") &&
+                     profiles["atlas.events"].value("enabled", false) &&
+                     policy.value("liveRefresh", false) && (!remoteOnly || liveAtlas);
+      auto keys = vault.values();
+      auto key = enabled ? profiles.dump() + Json(keys).dump() : std::string();
+      if (key != atlasEventConfig) {
+        stopAtlasEvents = true;
+        if (atlasEventWorker.joinable())
+          atlasEventWorker.join();
+        {
+          std::lock_guard<std::mutex> lock(atlasEventMutex);
+          atlasEvents.clear();
+        }
+        atlasEventConfig = key;
+        if (enabled) {
+          stopAtlasEvents = false;
+          auto prefs = settings;
+          atlasEventWorker = std::thread([this, keys, prefs] {
+            Backend backend(repository, data, prefs, keys, transport);
+            backend.streamAtlasEvents(stopAtlasEvents,
+                                      [this](Json e) { queueAtlasEvent(std::move(e)); });
+          });
+        }
+      }
+      if (!remoteOnly && descriptorError.empty() && !descriptor.generatorId.empty() &&
+          !atlasRefreshWorker.joinable()) {
+        auto prefs = settings;
+        atlasRefreshWorker = std::thread([this, keys, prefs] {
+          Backend backend(repository, data, prefs, keys, transport, &atlasRefreshRunner);
+          while (!stopAtlasRefresh) {
+            try {
+              auto result = backend.invoke("atlas.refresh", Json::object(), 1000);
+              if (result.value("refreshed", false))
+                queueAtlasEvent({{"event", "refreshed"}, {"data", result}});
+            } catch (const std::exception &) {
+            } // Service logs retain command failures; retry later.
+            for (int i = 0; i < 100 && !stopAtlasRefresh; ++i)
+              std::this_thread::sleep_for(std::chrono::milliseconds(50));
+          }
+        });
+      }
+    }
+    if (!atlasReady)
+      return;
+    std::map<std::string, Json> events;
+    {
+      std::lock_guard<std::mutex> lock(atlasEventMutex);
+      events.swap(atlasEvents);
+    }
+    bool reload = false, published = false;
+    for (auto &entry : events) {
+      if (entry.first == "connection")
+        cacheNotice = "Live events retrying: " + entry.second["data"].dump();
+      else {
+        reload = true;
+        published |= entry.first == "published" || entry.first == "publish";
+      }
+    }
+    if (reload) {
+      forceLiveReload = published;
+      loadAtlas(!published);
+    }
+  }
+  void loadAtlas(bool cacheOnly = false) {
     if (!atlasReady)
       throw std::runtime_error("Atlas loading is already in progress");
     if (loader.joinable())
@@ -1578,12 +1675,7 @@ struct ConsoleUI::Impl {
     auto prefs = settings;
     bool published = liveAtlas, force = forceLiveReload;
     forceLiveReload = false;
-    loader = std::thread([this, keys, prefs, published, force] {
-      auto cachePath =
-          data / "atlas-cache" /
-          (std::to_string(std::hash<std::string>{}(utf8(repository.wstring()))) + ".json");
-      std::string cacheKey;
-      Json loadedDb;
+    loader = std::thread([this, keys, prefs, published, force, cacheOnly] {
       cacheNotice.clear();
       try {
         Backend backend(repository, data, prefs, keys, transport);
@@ -1591,82 +1683,65 @@ struct ConsoleUI::Impl {
         auto enabled = [&](const std::string &name) {
           return profiles.contains(name) && profiles[name].value("enabled", false);
         };
-        cacheKey = descriptor.document.value("data", Json::object())
-                       .value("committedDbUrl", std::string()) +
-                   "|" + profiles.dump();
-        cacheKey = std::to_string(std::hash<std::string>{}(cacheKey));
-        auto cached = published && !force
-                          ? readAtlasCache(cachePath, cacheKey, std::time(nullptr), 30)
-                          : Json();
-        atlasExtras = Json::object();
-        if (!cached.is_null()) {
-          loadedDb = cached.at("database");
-          atlas = parseAtlas(loadedDb.dump());
-          atlasExtras = cached.value("extras", Json::object());
-          cacheNotice = "Published cache (under 30 seconds old)";
-        } else if (published && enabled("atlas.live")) {
-          auto r = backend.invoke("atlas.live");
-          if (!r.value("ok", false))
-            throw std::runtime_error("Published Atlas service refused the request");
-          loadedDb = r.at("data");
-          atlas = parseAtlas(loadedDb.dump());
-        } else {
-          loadedDb =
-              Json::parse(published ? fetchHttps(descriptor.document.value("data", Json::object())
-                                                     .value("committedDbUrl", std::string()))
-                                    : read(confinedPath(repository, descriptor.database)));
-          atlas = parseAtlas(loadedDb.dump());
-        }
-        if (published && cached.is_null()) {
+        Json db;
+        if (published && !cacheOnly) {
+          auto result =
+              backend.invoke("atlas.live",
+                             {{"force", force},
+                              {"publishedUrl", descriptor.document.value("data", Json::object())
+                                                   .value("committedDbUrl", std::string())}},
+                             1000);
+          db = result.at("data");
+          cacheNotice = result.value("stale", false)
+                            ? "Offline / stale cache: " + result.value("notice", std::string())
+                        : result.value("cached", false) ? "Published cache"
+                                                        : "Published data refreshed";
+        } else
+          db = backend.invoke(published ? "atlas.current" : "atlas.load", Json::object(), 1000);
+        atlas = parseAtlas(db.dump());
+        auto state = backend.invoke("atlas.state", Json::object(), 1000);
+        atlasExtras = state.value("extras", Json::object());
+        if (!cacheOnly)
           for (auto name : {"atlas.cosmetics", "atlas.counts", "atlas.progress", "github.credits"})
             if (enabled(name)) {
               try {
-                auto r = backend.invoke(name);
-                if (r.value("ok", false))
-                  atlasExtras[name] = r["data"];
+                auto result = backend.invoke(name, Json::object(), 1000);
+                if (result.contains("data"))
+                  atlasExtras[name] = result["data"];
               } catch (const std::exception &e) {
                 atlasExtras["notes"].push_back(std::string(name) + ": " + e.what());
               }
             }
-          if (enabled("claims"))
-            try {
-              auto claims = backend.invoke("claims.read", {{"connection", "claims"}});
-              for (auto &f : atlas)
-                if (heldTarget(f.row, claims))
-                  f.row["claim"] = {{"status", "active"}};
-            } catch (const std::exception &e) {
-              atlasExtras["notes"].push_back(e.what());
-            }
-          if (atlasExtras.contains("atlas.progress")) {
-            auto progress = atlasExtras["atlas.progress"];
-            if (progress.value("ready", false) && progress.contains("matched") &&
-                progress["matched"].is_array()) {
-              for (auto &f : atlas) {
-                bool matched = std::find(progress["matched"].begin(), progress["matched"].end(),
-                                         f.id) != progress["matched"].end();
-                f.row["matched"] = matched;
-                f.state = matched ? "matched" : f.row.contains("div") ? "near_miss" : "unmatched";
-              }
-            }
-          }
-        }
-        if (published && !loadedDb.is_null() && cacheNotice.empty()) {
+        // Credits have their own durable cache alongside the feed extras.
+        if (enabled("github.credits") && !atlasExtras.contains("github.credits")) {
           try {
-            writeAtlasCache(cachePath, cacheKey, loadedDb, atlasExtras, std::time(nullptr));
+            atlasExtras["github.credits"] =
+                backend.invoke("github.credits", Json::object(), 1000).at("data");
           } catch (const std::exception &e) {
             atlasExtras["notes"].push_back(e.what());
           }
-          cacheNotice = "Published data refreshed";
         }
+        auto claims = state.value("claims", Json::object());
+        if (!cacheOnly && enabled("claims"))
+          try {
+            claims = backend.invoke("claims.read", {{"connection", "claims"}}, 1000);
+          } catch (const std::exception &e) {
+            atlasExtras["notes"].push_back(e.what());
+          }
+        for (auto &f : atlas)
+          if (heldTarget(f.row, claims))
+            f.row["claim"] = {{"status", "active"}};
+        auto progress = atlasExtras.value("atlas.progress", Json::object());
+        if (progress.value("ready", false) && progress.contains("matched") &&
+            progress["matched"].is_array())
+          for (auto &f : atlas)
+            if (std::find(progress["matched"].begin(), progress["matched"].end(), f.id) !=
+                progress["matched"].end()) {
+              f.row["matched"] = true;
+              f.state = "matched";
+            }
       } catch (const std::exception &e) {
-        auto cached =
-            published ? readAtlasCache(cachePath, cacheKey, std::time(nullptr), -1) : Json();
-        if (!cached.is_null()) {
-          atlas = parseAtlas(cached.at("database").dump());
-          atlasExtras = cached.value("extras", Json::object());
-          cacheNotice = "Offline / stale cache: " + std::string(e.what());
-        } else
-          atlasError = e.what();
+        atlasError = e.what();
       }
       atlasPublished = true;
       atlasReady = true;
@@ -4392,6 +4467,7 @@ struct ConsoleUI::Impl {
     }
   }
   void tick() {
+    updateAtlasWorkers();
     POINT cursor{};
     dpi::cursorPos(&cursor);
     auto under = WindowFromPoint(cursor);

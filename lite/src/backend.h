@@ -31,6 +31,9 @@ class Backend {
   std::function<void(const std::string &)> progressSink;
   std::map<std::string, std::string> secrets;
   Json execute(const std::string &method, const Json &args);
+  std::map<std::string, std::string> connectionHeaders(const Json &connection);
+  fs::path atlasStatePath(const Descriptor &descriptor);
+  Json atlasService(const std::string &method, const Json &args, const Descriptor &descriptor);
 
 public:
   Backend(fs::path repo, fs::path data, Settings prefs,
@@ -39,6 +42,7 @@ public:
   static bool mutation(const std::string &method, const Json &args);
   static Json catalog();
   Json invoke(const std::string &method, Json args = Json::object(), unsigned lockWaitMs = 0);
+  void streamAtlasEvents(std::atomic<bool> &stop, const std::function<void(Json)> &event);
   void resetRecent(const std::string &id);
   void recordAgent(const std::string &id, const fs::path &results, const std::string &phase,
                    int verifiedGates, const std::string &adaptive = "");

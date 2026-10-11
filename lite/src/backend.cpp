@@ -1,4 +1,6 @@
 #include "backend.h"
+#include "live_data.h"
+#include <chrono>
 #include "verification.h"
 #include "controller_view.h"
 #include "help.h"
@@ -113,6 +115,72 @@ Json reportAttachments(const Json &args) {
          {"sha256", fingerprint(bytes)}});
   }
   return result;
+}
+void saveJson(const fs::path &p, const Json &j);
+std::string generatorFingerprint(const fs::path &repo, const Descriptor &d,
+                                 const Settings &settings) {
+  if (d.generatorId.empty())
+    throw std::runtime_error("Configure data.generate before enabling refresh");
+  Json values{{"out", d.database}};
+  validateAtlasOutput(d, values, repo, settings);
+  auto command = toolCommand(d, d.tool(d.generatorId), values, repo, true);
+  std::string identity = d.document.dump() + preview(command);
+  for (auto &arg : command.argv) {
+    if (arg == d.database)
+      continue;
+    try {
+      auto file = confinedPath(repo, arg);
+      if (fs::is_regular_file(file))
+        identity += arg + sha256File(file);
+    } catch (const std::exception &) { /* executable/flags are already in the command */
+    }
+  }
+  return fingerprint(identity);
+}
+int64_t fileStamp(const fs::path &path) {
+  std::error_code ec;
+  auto stamp = fs::last_write_time(path, ec);
+  return ec ? 0 : stamp.time_since_epoch().count();
+}
+int64_t newestAtlasInput(const fs::path &repo) {
+  int64_t newest = fileStamp(repo / "nearmiss/db.jsonl");
+  for (auto folder : {"src", "config"}) {
+    auto root = repo / folder;
+    newest = std::max(newest, fileStamp(root));
+    std::error_code ec;
+    size_t entries = 0;
+    for (fs::recursive_directory_iterator
+             it(root, fs::directory_options::skip_permission_denied, ec),
+         end;
+         !ec && it != end; it.increment(ec)) {
+      if (++entries > 100000)
+        throw std::runtime_error("Atlas input tree exceeds 100000 entries");
+      if (it->is_symlink(ec)) {
+        if (it->is_directory(ec))
+          it.disable_recursion_pending();
+        continue;
+      }
+      if (it->is_regular_file(ec))
+        newest = std::max(newest, fileStamp(it->path()));
+    }
+  }
+  return newest;
+}
+int64_t atlasNow() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+void saveAtlasJson(const fs::path &path, const Json &value) {
+  auto serialized = value.dump();
+  if (serialized.size() > 128 * 1024 * 1024)
+    throw std::runtime_error("Atlas cache exceeds 128 MiB");
+  fs::create_directories(path.parent_path());
+  ULARGE_INTEGER free{};
+  if (!GetDiskFreeSpaceExW(path.parent_path().c_str(), &free, nullptr, nullptr) ||
+      free.QuadPart < 25ull * 1024 * 1024 * 1024 + serialized.size() * 2 + 1024 * 1024)
+    throw std::runtime_error("Atlas cache paused to preserve 25 GiB free storage");
+  saveJson(path, value);
 }
 Command preflightRepairCommand(const fs::path &repository, const Descriptor &descriptor,
                                const Json &args) {
@@ -442,13 +510,14 @@ Backend::Backend(fs::path repo, fs::path data, Settings prefs,
   fs::create_directories(directory);
 }
 bool Backend::mutation(const std::string &m, const Json &) {
-  return m == "preflight.fix" || m == "update.stage" || m == "projects.importZip" ||
-         m == "projects.discover" || m == "projects.download" || m == "projects.open" ||
-         m == "projects.register" || m == "descriptor.write" || m == "preferences.set" ||
-         m == "connections.set" || m == "git.action" || m == "checks.run" || m == "tools.run" ||
-         m == "atlas.generate" || m == "reports.export" || m == "bug.report" ||
-         m == "stats.clear" || m == "network.write" || m == "queue.adopt" || m == "git.clone" ||
-         m == "git.backup" || m == "git.discard" || m == "git.sync";
+  return m == "atlas.authorizeRefresh" || m == "atlas.acceptEvent" || m == "preflight.fix" ||
+         m == "update.stage" || m == "projects.importZip" || m == "projects.discover" ||
+         m == "projects.download" || m == "projects.open" || m == "projects.register" ||
+         m == "descriptor.write" || m == "preferences.set" || m == "connections.set" ||
+         m == "git.action" || m == "checks.run" || m == "tools.run" || m == "atlas.generate" ||
+         m == "reports.export" || m == "bug.report" || m == "stats.clear" || m == "network.write" ||
+         m == "queue.adopt" || m == "git.clone" || m == "git.backup" || m == "git.discard" ||
+         m == "git.sync";
 }
 bool enabledTool(const Json &prefs, const std::string &id) {
   auto hidden = prefs.value("disabledTools", Json::array());
@@ -456,25 +525,83 @@ bool enabledTool(const Json &prefs, const std::string &id) {
          (prefs.value("allowNearMiss", true) || id.rfind("nearmiss_", 0) != 0);
 }
 Json Backend::catalog() {
-  return Json::array(
-      {"projects.importZip", "projects.discover", "projects.download",  "projects.list",
-       "projects.register",  "projects.open",     "descriptor.preview", "descriptor.write",
-       "preferences.get",    "preferences.set",   "connections.get",    "connections.set",
-       "network.read",       "network.write",     "atlas.load",         "atlas.generate",
-       "preflight.fix",      "atlas.source",      "atlas.recentAdds",   "atlas.history",
-       "claims.read",        "preflight",         "git.status",         "git.syncPreview",
-       "git.sync",           "git.action",        "git.clone",          "git.backup",
-       "git.discard",        "tools.list",        "tools.run",          "checks.list",
-       "checks.run",         "policy.presence",   "stats.get",          "stats.session",
-       "stats.clear",        "reports.list",      "reports.export",     "queue.adopt",
-       "policy.classify",    "policy.adaptive",   "policy.pool",        "policy.statistics",
-       "policy.layout",      "policy.color",      "policy.batches",     "policy.source",
-       "policy.usage",       "guide.parse",       "guide.tour",         "guide.tips",
-       "guide.richText",     "projects.get",      "github.credits",     "atlas.cosmetics",
-       "atlas.counts",       "atlas.progress",    "atlas.live",         "update.check",
-       "update.stage",       "bug.report",        "harvest.list",       "activity.snapshot",
-       "policy.activity",    "policy.detail",     "policy.match",       "policy.role",
-       "policy.autoRole",    "policy.effort",     "policy.drive",       "policy.controllerView"});
+  return Json::array({"projects.importZip",
+                      "projects.discover",
+                      "projects.download",
+                      "projects.list",
+                      "projects.register",
+                      "projects.open",
+                      "descriptor.preview",
+                      "descriptor.write",
+                      "preferences.get",
+                      "preferences.set",
+                      "connections.get",
+                      "connections.set",
+                      "network.read",
+                      "network.write",
+                      "atlas.current",
+                      "atlas.state",
+                      "atlas.refreshStatus",
+                      "atlas.authorizeRefresh",
+                      "atlas.refresh",
+                      "atlas.load",
+                      "atlas.generate",
+                      "preflight.fix",
+                      "atlas.source",
+                      "atlas.recentAdds",
+                      "atlas.history",
+                      "claims.read",
+                      "preflight",
+                      "git.status",
+                      "git.syncPreview",
+                      "git.sync",
+                      "git.action",
+                      "git.clone",
+                      "git.backup",
+                      "git.discard",
+                      "tools.list",
+                      "tools.run",
+                      "checks.list",
+                      "checks.run",
+                      "policy.presence",
+                      "stats.get",
+                      "stats.session",
+                      "stats.clear",
+                      "reports.list",
+                      "reports.export",
+                      "queue.adopt",
+                      "policy.classify",
+                      "policy.adaptive",
+                      "policy.pool",
+                      "policy.statistics",
+                      "policy.layout",
+                      "policy.color",
+                      "policy.batches",
+                      "policy.source",
+                      "policy.usage",
+                      "guide.parse",
+                      "guide.tour",
+                      "guide.tips",
+                      "guide.richText",
+                      "projects.get",
+                      "github.credits",
+                      "atlas.cosmetics",
+                      "atlas.counts",
+                      "atlas.progress",
+                      "atlas.live",
+                      "update.check",
+                      "update.stage",
+                      "bug.report",
+                      "harvest.list",
+                      "activity.snapshot",
+                      "policy.activity",
+                      "policy.detail",
+                      "policy.match",
+                      "policy.role",
+                      "policy.autoRole",
+                      "policy.effort",
+                      "policy.drive",
+                      "policy.controllerView"});
 }
 Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
   if (m == "bug.report" && a.contains("description") && a["description"].is_string())
@@ -483,9 +610,10 @@ Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
   HANDLE lock;
   do {
     lock = CreateFileW((directory / "backend.lock").c_str(),
-                       mutation(m, a) ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ,
-                       mutation(m, a) ? 0 : FILE_SHARE_READ, nullptr, OPEN_ALWAYS,
-                       FILE_ATTRIBUTE_NORMAL, nullptr);
+                       (mutation(m, a) || m == "atlas.refresh") ? GENERIC_READ | GENERIC_WRITE
+                                                                : GENERIC_READ,
+                       (mutation(m, a) || m == "atlas.refresh") ? 0 : FILE_SHARE_READ, nullptr,
+                       OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (lock != INVALID_HANDLE_VALUE || GetLastError() != ERROR_SHARING_VIOLATION ||
         GetTickCount64() >= deadline)
       break;
@@ -511,6 +639,32 @@ Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
     return {{"streams", activityStreams(a.value("output", std::string()))},
             {"recommendation", sizeRecommendation(a.value("bySize", Json::object()),
                                                   a.value("bySizeOrder", Json::array()))}};
+  if (m == "policy.liveData") {
+    auto op = a.at("op").get<std::string>();
+    if (op == "feed")
+      return normalizeAtlasFeed(a.at("method"), a.value("data", Json()));
+    if (op == "overlay")
+      return overlayLiveAtlas(a.at("local"), a.at("live"));
+    if (op == "ttl")
+      return reuseLiveAtlas(a.at("savedAt"), a.at("now"), a.value("force", false));
+    if (op == "sse") {
+      SseDecoder decoder;
+      Json frames = Json::array();
+      for (auto &chunk : a.at("chunks"))
+        for (auto &frame : decoder.feed(chunk))
+          frames.push_back(frame);
+      return frames;
+    }
+    if (op == "credits") {
+      GithubCredits credits;
+      credits.contributors(a.value("contributors", Json()));
+      for (auto &rows : a.value("commits", Json::array()))
+        credits.commits(rows);
+      credits.pulls(a.value("pulls", Json()));
+      return credits.value();
+    }
+    throw std::runtime_error("Unknown live-data policy operation");
+  }
   if (m == "policy.role")
     return measuredRole(a.value("stats", Json::object()));
   if (m == "policy.autoRole") {
@@ -589,6 +743,8 @@ Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
       if (a.at("id") == "rom")
         baseline += sha256File(fs::u8path(a.at("filePath").get<std::string>()));
     }
+    if (m == "atlas.authorizeRefresh" && a.value("enabled", true))
+      baseline += generatorFingerprint(repository, loadDescriptor(repository), settings);
     baseline = fingerprint(baseline);
     if (ticket.empty()) {
       Json details = Json::object();
@@ -608,6 +764,18 @@ Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
             {"trustedAssetPrefix", profile.value("assetPrefix", std::string())},
             {"notice",
              "Download only; SHA256 and native executable checks must pass before installation"}};
+      }
+      if (m == "atlas.authorizeRefresh" && a.value("enabled", true)) {
+        auto d = loadDescriptor(repository);
+        if (d.generatorId.empty())
+          throw std::runtime_error("Configure data.generate before enabling refresh");
+        Json values{{"out", d.database}};
+        validateAtlasOutput(d, values, repository, settings);
+        details["command"] =
+            preview(toolCommand(d, d.tool(d.generatorId), values, repository, true));
+        details["notice"] =
+            "Approve this project's generator for background stale-data refresh. "
+            "Changed generator/descriptor inputs require new approval. No connection is enabled.";
       }
       if (m == "preflight.fix") {
         auto command = preflightRepairCommand(repository, loadDescriptor(repository), a);
@@ -1240,6 +1408,378 @@ void Backend::recordAgent(const std::string &id, const fs::path &results, const 
               {"notice", "Driver-declared matches require independent matching proof and user "
                          "review before publication"}});
 }
+
+std::map<std::string, std::string> Backend::connectionHeaders(const Json &connection) {
+  std::map<std::string, std::string> headers;
+  auto key = connection.value("keyEnv", std::string());
+  if (!key.empty()) {
+    auto value = secrets.find(key);
+    if (value == secrets.end()) {
+      auto envName = wide(key);
+      DWORD n = GetEnvironmentVariableW(envName.c_str(), nullptr, 0);
+      if (n && n <= 65536) {
+        std::wstring buffer(n, 0);
+        GetEnvironmentVariableW(envName.c_str(), buffer.data(), n);
+        buffer.resize(n - 1);
+        secrets[key] = utf8(buffer);
+        value = secrets.find(key);
+      }
+    }
+    if (value == secrets.end())
+      throw std::runtime_error("Missing user credential variable: " + key);
+    headers[connection.value("keyHeader", std::string("Authorization"))] =
+        connection.value("keyPrefix", std::string("Bearer ")) + value->second;
+  }
+  return headers;
+}
+
+fs::path Backend::atlasStatePath(const Descriptor &descriptor) {
+  auto profiles = fileJson(directory / "connections.json");
+  for (auto name : {"atlas.live", "atlas.published", "atlas.cosmetics", "atlas.counts",
+                    "atlas.progress", "atlas.events", "github.credits"})
+    if (profiles.contains(name) && profiles[name].value("enabled", false))
+      try {
+        connectionHeaders(profiles[name]);
+      } catch (const std::exception &) {
+      }
+  // Connection and credential changes cannot reuse another principal's cached feed.
+  return directory / "atlas-state" /
+         (fingerprint(utf8(fs::weakly_canonical(repository).wstring()) +
+                      descriptor.document.dump() + profiles.dump() + Json(secrets).dump()) +
+          ".json");
+}
+Json Backend::atlasService(const std::string &m, const Json &a, const Descriptor &d) {
+  static std::recursive_mutex stateMutex;
+  std::unique_lock<std::recursive_mutex> lock(stateMutex);
+  auto path = atlasStatePath(d);
+  fs::create_directories(path.parent_path());
+  struct StateLock {
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    fs::path path;
+    explicit StateLock(fs::path p) : path(std::move(p)) { acquire(); }
+    void acquire() {
+      auto deadline = GetTickCount64() + 1000;
+      do {
+        handle = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS,
+                             FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (handle != INVALID_HANDLE_VALUE)
+          return;
+        if (GetLastError() != ERROR_SHARING_VIOLATION || GetTickCount64() >= deadline)
+          throw std::runtime_error("Another Atlas state operation is active; retry shortly");
+        Sleep(10);
+      } while (true);
+    }
+    void release() {
+      if (handle != INVALID_HANDLE_VALUE)
+        CloseHandle(handle);
+      handle = INVALID_HANDLE_VALUE;
+    }
+    ~StateLock() { release(); }
+  } stateLock(fs::path(path.wstring() + L".lock"));
+  auto state = fileJson(path);
+  auto blobPath = [&](const std::string &kind) {
+    auto p = path;
+    p += "." + kind + ".json";
+    return p;
+  };
+  auto blob = [&](const std::string &kind) {
+    try {
+      return fileJson(blobPath(kind), nullptr);
+    } catch (const std::exception &) {
+      return Json(nullptr);
+    }
+  };
+  auto persist = [&] { saveAtlasJson(path, state); };
+  auto now = atlasNow();
+  auto profiles = fileJson(directory / "connections.json");
+  auto request = [&](const std::string &name) {
+    return execute("network.read", {{"connection", a.value("connection", name)}});
+  };
+  auto local = [&] {
+    auto file = confinedPath(repository, d.database);
+    std::error_code sizeError;
+    auto size = fs::file_size(file, sizeError);
+    auto stamp =
+        std::to_string(fileStamp(file)) + ":" + (sizeError ? "missing" : std::to_string(size));
+    if (!a.value("force", false) && state.value("localStamp", std::string()) == stamp &&
+        fs::exists(blobPath("local")))
+      return blob("local");
+    Json db;
+    try {
+      db = fileJson(file, nullptr);
+      if (!db.is_object() || !db.contains("functions") || !db["functions"].is_array())
+        db = nullptr;
+    } catch (const std::exception &) {
+      db = nullptr;
+    }
+    saveAtlasJson(blobPath("local"), db);
+    state["localStamp"] = stamp;
+    persist();
+    return db;
+  };
+  auto overlay = [&](Json db) {
+    db = overlayLiveAtlas(std::move(db), blob("live"));
+    auto progress = state.value("extras", Json::object()).value("atlas.progress", Json::object());
+    if (db.is_object() && progress.value("ready", false) && progress.contains("matched") &&
+        progress["matched"].is_array()) {
+      std::set<std::string> ids;
+      for (auto &id : progress["matched"])
+        if (id.is_string())
+          ids.insert(id);
+      for (auto &row : db["functions"])
+        if (row.is_object() && row.contains("id") && row["id"].is_string() && ids.count(row["id"]))
+          row["matched"] = true;
+    }
+    return db;
+  };
+  if (m == "atlas.state") {
+    return {{"scope", path.stem().u8string()},
+            {"liveAt", state.value("liveAt", int64_t(0))},
+            {"extras", state.value("extras", Json::object())},
+            {"lastEvent", state.value("lastEvent", Json())},
+            {"claims", state.value("claims", Json::object())},
+            {"hasLive", !blob("live").is_null()},
+            {"localStamp", state.value("localStamp", std::string())}};
+  }
+  if (m == "atlas.load")
+    return overlay(local());
+  if (m == "atlas.current") {
+    auto live = blob("live");
+    return live.is_null() ? overlay(local()) : overlay(live);
+  }
+  if (m == "atlas.acceptEvent") {
+    auto event = a.at("event").get<std::string>();
+    auto value = redactMetadata(a.at("data"), secrets);
+    if (value.dump().size() > 2 * 1024 * 1024)
+      throw std::runtime_error("Live event exceeds 2 MiB");
+    if (event == "published" || event == "publish")
+      state["liveAt"] = 0;
+    else if (event == "cosmetics" || event == "counts" || event == "progress") {
+      auto method = "atlas." + event;
+      state["extras"][method] = normalizeAtlasFeed(method, value);
+      state["feedAt"][method] = now;
+    } else if (event == "claims")
+      state["claims"] = value;
+    state["lastEvent"] = {{"event", event}, {"at", now}};
+    persist();
+    return {{"event", event}, {"data", value}};
+  }
+  if (m == "atlas.live") {
+    auto cached = blob("live");
+    if (!cached.is_null() &&
+        reuseLiveAtlas(state.value("liveAt", int64_t(0)), now, a.value("force", false)))
+      return {{"ok", true}, {"status", 200}, {"data", overlay(cached)}, {"cached", true}};
+    Json result;
+    std::string error;
+    for (auto name : {"atlas.live", "atlas.published"}) {
+      if (!profiles.contains(name) || !profiles[name].value("enabled", false))
+        continue;
+      try {
+        result = request(name);
+        auto db = result.value("data", Json());
+        if (result.value("ok", false) && db.is_object() && db.contains("functions") &&
+            db["functions"].is_array() && (!db.contains("ready") || db["ready"] == true)) {
+          saveAtlasJson(blobPath("live"), db);
+          state["liveAt"] = now;
+          persist();
+          result["data"] = overlay(db);
+          result["cached"] = false;
+          return result;
+        }
+        error = "Live endpoint has no ready Atlas; published fallback requested";
+      } catch (const std::exception &e) {
+        error = e.what();
+      }
+    }
+    auto publishedUrl =
+        d.document.value("data", Json::object()).value("committedDbUrl", std::string());
+    if (a.value("publishedUrl", std::string()) == publishedUrl && !publishedUrl.empty()) {
+      try {
+        auto response = transport(publishedUrl, "GET", {}, {});
+        auto db = Json::parse(response.body);
+        if (response.status != 200 || !db.is_object() || !db.contains("functions") ||
+            !db["functions"].is_array())
+          throw std::runtime_error("Published Atlas response is not a valid database");
+        saveAtlasJson(blobPath("live"), db);
+        state["liveAt"] = now;
+        persist();
+        return {{"ok", true}, {"status", 200}, {"data", overlay(db)}, {"cached", false}};
+      } catch (const std::exception &e) {
+        error = e.what();
+      }
+    }
+    if (!cached.is_null())
+      return {{"ok", true},     {"status", 200}, {"data", overlay(cached)},
+              {"cached", true}, {"stale", true}, {"notice", error}};
+    throw std::runtime_error(
+        error.empty() ? "Configure and enable atlas.live or atlas.published locally" : error);
+  }
+  if (m == "atlas.cosmetics" || m == "atlas.counts" || m == "atlas.progress") {
+    auto connection = a.value("connection", m);
+    if (!profiles.contains(connection) || !profiles[connection].value("enabled", false))
+      throw std::runtime_error("Connection disabled; configure and enable it locally");
+    auto extras = state.value("extras", Json::object());
+    auto at = state.value("feedAt", Json::object()).value(m, int64_t(0));
+    if (m == "atlas.cosmetics" && !a.value("force", false) && extras.contains(m) && at <= now &&
+        now - at < 60000)
+      return {{"ok", true}, {"status", 200}, {"data", extras[m]}, {"cached", true}};
+    Json result;
+    try {
+      result = request(m);
+    } catch (const std::exception &e) {
+      result = {{"ok", false}, {"notice", e.what()}};
+    }
+    auto raw = result.value("ok", false) ? result.value("data", Json())
+               : m == "atlas.cosmetics"  ? extras.value(m, Json())
+                                         : Json();
+    result["data"] = normalizeAtlasFeed(m, raw);
+    if (result.value("ok", false)) {
+      state["extras"][m] = result["data"];
+      state["feedAt"][m] = now;
+      persist();
+    }
+    return result;
+  }
+  if (m == "github.credits") {
+    auto name = a.value("connection", m);
+    if (!profiles.contains(name) || !profiles[name].value("enabled", false))
+      throw std::runtime_error("Configure and enable github.credits locally");
+    if (state.contains("credits") && !a.value("force", false))
+      return {{"ok", true}, {"status", 200}, {"data", state["credits"]}, {"cached", true}};
+    auto profile = profiles[name];
+    if (profile.value("mode", std::string("mapped")) != "github-api") {
+      auto result = request(m);
+      if (result.value("ok", false)) {
+        state["credits"] = result["data"];
+        persist();
+      }
+      return result;
+    }
+    auto base = profile.at("url").get<std::string>();
+    if (base.find('?') != base.npos || base.find('#') != base.npos)
+      throw std::runtime_error(
+          "github-api URL must be a repository API base without query/fragment");
+    while (!base.empty() && base.back() == '/')
+      base.pop_back();
+    auto headers = connectionHeaders(profile);
+    headers["Accept"] = "application/vnd.github+json";
+    GithubCredits credits;
+    Json warnings = Json::array();
+    auto get = [&](const std::string &suffix) {
+      try {
+        auto response = transport(base + suffix, "GET", {}, headers);
+        if (response.status != 200)
+          throw std::runtime_error("GitHub HTTP " + std::to_string(response.status));
+        return Json::parse(redact(response.body, secrets));
+      } catch (const std::exception &e) {
+        warnings.push_back(redact(e.what(), secrets));
+        return Json();
+      }
+    };
+    credits.contributors(get("/contributors?per_page=100"));
+    for (int page = 1; page <= 8; ++page) {
+      auto rows = get("/commits?per_page=100&page=" + std::to_string(page));
+      credits.commits(rows);
+      if (!rows.is_array() || rows.size() < 100)
+        break;
+    }
+    credits.pulls(get("/pulls?state=all&per_page=100"));
+    state["credits"] = credits.value();
+    persist();
+    return {{"ok", true},
+            {"status", 200},
+            {"data", credits.value()},
+            {"warnings", warnings},
+            {"cached", false}};
+  }
+  auto approvalPath = directory / "atlas-approvals" /
+                      (fingerprint(utf8(fs::weakly_canonical(repository).wstring())) + ".json");
+  if (m == "atlas.authorizeRefresh") {
+    if (a.value("enabled", true))
+      saveAtlasJson(approvalPath, {{"fingerprint", generatorFingerprint(repository, d, settings)},
+                                   {"enabled", true}});
+    else
+      saveAtlasJson(approvalPath, {{"enabled", false}});
+    return {{"enabled", a.value("enabled", true)}};
+  }
+  auto approval = fileJson(approvalPath);
+  bool available = !d.generatorId.empty(), authorized = false;
+  std::string commandKey;
+  if (available) {
+    commandKey = generatorFingerprint(repository, d, settings);
+    authorized = approval.value("enabled", false) &&
+                 approval.value("fingerprint", std::string()) == commandKey;
+  }
+  if (m == "atlas.refresh" && !authorized)
+    return {{"skipped", true}, {"authorized", false}};
+  auto file = confinedPath(repository, d.database);
+  auto newest = newestAtlasInput(repository);
+  bool stale = !fs::exists(file) || newest > fileStamp(file);
+  if (m == "atlas.refreshStatus")
+    return {{"available", available},
+            {"authorized", authorized},
+            {"stale", stale},
+            {"inputStamp", newest},
+            {"databaseStamp", fileStamp(file)}};
+  if (m == "atlas.refresh") {
+    if (!stale)
+      return {{"skipped", true}, {"authorized", true}, {"stale", false}};
+    auto attemptKey = commandKey + std::to_string(newest);
+    if (approval.value("failedInput", std::string()) == attemptKey &&
+        now - approval.value("attemptAt", int64_t(0)) < 30000)
+      return {{"skipped", true}, {"retryAfterMs", 30000}};
+    stateLock.release();
+    lock.unlock();
+    auto result = execute("atlas.generate", Json::object());
+    lock.lock();
+    stateLock.acquire();
+    state = fileJson(path);
+    approval["attemptAt"] = now;
+    approval["lastLog"] = result.value("log", std::string());
+    if (result.value("refreshed", false)) {
+      approval.erase("failedInput");
+      state.erase("localStamp");
+      persist();
+      local();
+    } else
+      approval["failedInput"] = attemptKey;
+    saveAtlasJson(approvalPath, approval);
+    return result;
+  }
+  throw std::runtime_error("Unknown Atlas service");
+}
+void Backend::streamAtlasEvents(std::atomic<bool> &stop, const std::function<void(Json)> &event) {
+  while (!stop) {
+    try {
+      auto profiles = fileJson(directory / "connections.json");
+      if (!profiles.contains("atlas.events") || !profiles["atlas.events"].value("enabled", false))
+        return;
+      auto profile = profiles["atlas.events"];
+      if (profile.value("method", std::string("GET")) != "GET")
+        throw std::runtime_error("Atlas events require GET");
+      auto d = loadDescriptor(repository);
+      SseDecoder decoder;
+      auto status = streamHttp(profile.at("url"), connectionHeaders(profile), stop,
+                               [&](const std::string &chunk) {
+                                 for (auto &frame : decoder.feed(chunk)) {
+                                   if (stop)
+                                     break;
+                                   frame["descriptor"] = d.document;
+                                   auto delivered = execute("atlas.acceptEvent", frame);
+                                   event(std::move(delivered));
+                                 }
+                               });
+      if (status != 200 && !stop)
+        event({{"event", "connection"}, {"data", {{"state", "retrying"}, {"status", status}}}});
+    } catch (const std::exception &e) {
+      if (!stop)
+        event({{"event", "connection"},
+               {"data", {{"state", "retrying"}, {"message", redact(e.what(), secrets)}}}});
+    }
+    for (int n = 0; n < 60 && !stop; ++n)
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+}
 Json Backend::execute(const std::string &m, const Json &a) {
   if (m == "guide.parse")
     return parseGuide(a.at("text").get<std::string>(), a.value("tour", true));
@@ -1512,12 +2052,19 @@ Json Backend::execute(const std::string &m, const Json &a) {
     throw std::runtime_error("Unknown registered project");
   }
   if (m == "github.credits" || m == "atlas.cosmetics" || m == "atlas.counts" ||
-      m == "atlas.progress" || m == "atlas.live" || m == "update.check") {
+      m == "atlas.progress" || m == "atlas.live" || m == "atlas.current" || m == "atlas.state" ||
+      m == "atlas.acceptEvent" || m == "atlas.refreshStatus" || m == "atlas.refresh" ||
+      m == "atlas.authorizeRefresh") {
+    auto d = a.contains("descriptor") ? parseDescriptor(a["descriptor"].dump())
+                                      : loadDescriptor(repository);
+    return atlasService(m, a, d);
+  }
+  if (m == "update.check") {
     auto args = a;
     if (!args.contains("connection"))
       args["connection"] = m;
     auto result = execute("network.read", args);
-    if (m == "update.check" && result.value("ok", false))
+    if (result.value("ok", false))
       result["update"] = updateStatus("0.32.0", result.at("data"));
     return result;
   }
@@ -1564,26 +2111,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       for (auto it = a["query"].begin(); it != a["query"].end(); ++it)
         url += (url.find('?') == url.npos ? "?" : "&") + encode(it.key()) + "=" +
                encode(it.value().is_string() ? it.value().get<std::string>() : it.value().dump());
-    std::map<std::string, std::string> headers;
-    auto key = connection.value("keyEnv", std::string());
-    if (!key.empty()) {
-      auto value = secrets.find(key);
-      if (value == secrets.end()) {
-        auto envName = wide(key);
-        DWORD n = GetEnvironmentVariableW(envName.c_str(), nullptr, 0);
-        if (n && n <= 65536) {
-          std::wstring buffer(n, 0);
-          GetEnvironmentVariableW(envName.c_str(), buffer.data(), n);
-          buffer.resize(n - 1);
-          secrets[key] = utf8(buffer);
-          value = secrets.find(key);
-        }
-      }
-      if (value == secrets.end())
-        throw std::runtime_error("Missing user credential variable: " + key);
-      headers[connection.value("keyHeader", std::string("Authorization"))] =
-          connection.value("keyPrefix", std::string("Bearer ")) + value->second;
-    }
+    auto headers = connectionHeaders(connection);
     auto response =
         transport(url, method, a.contains("body") ? a["body"].dump() : std::string(), headers);
     auto clean = redact(response.body, secrets);
@@ -1858,17 +2386,8 @@ Json Backend::execute(const std::string &m, const Json &a) {
     }
     return names;
   }
-  if (m == "atlas.load") {
-    auto path = confinedPath(repository, descriptor.database);
-    try {
-      auto db = fileJson(path, nullptr);
-      return db.is_object() && db.contains("functions") && db["functions"].is_array()
-                 ? db
-                 : Json(nullptr);
-    } catch (const std::exception &) {
-      return nullptr; // Console readAtlas is best-effort for absent/invalid data.
-    }
-  }
+  if (m == "atlas.load")
+    return atlasService(m, a, descriptor);
   if (m == "atlas.source" && a.contains("id")) {
     if (a.contains("srcPath") && a["srcPath"].is_string() &&
         !a["srcPath"].get<std::string>().empty()) {
