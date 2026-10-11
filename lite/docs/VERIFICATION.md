@@ -1,5 +1,25 @@
 # Windows release verification — 2026-10-10
 
+## 0.29.0 verified portable package — 2026-10-10
+
+Code checkpoint **9d64923** produced two identical clean Windows x64 builds:
+**6,843,904 bytes (6.844 decimal MB)**, SHA256
+**C2E425B5DEE992C9DD1308CA68B1F64860B32C4AFA88A1689A76F782715E3D05**.
+All seven native suites passed (207.47 seconds), together with 12,407 Console
+reference comparisons and packaged backend/Git/ZIP workflows. The packaged
+repository/status/check/log workflow passed with valid, missing and invalid
+descriptors (11, 11 and 12 responsive timer ticks). Slow project-switch overlay
+hold/release, replay and window cleanup passed native-window tests.
+
+The default `lite/release` package is 0.29.0. Release builds now retain the first
+clean executable's hash, delete that tree before building the second, then remove
+successful build trees, GUI captures and explicitly identified disposable test
+fixtures after preserving compact evidence. A 20-GiB free-space floor plus
+0.75 GiB headroom is checked before major phases. Observed free space stayed
+above 22 GiB during this run. Evidence is in `lite/release/verification-evidence`.
+Exact background/menu rendering, unusual DPI and the external limitations below
+still prevent a full-parity claim.
+
 ## 0.28.0 verified portable package — 2026-10-10
 
 Code checkpoint **fbbedbf** produced two identical clean Windows x64 builds:
@@ -9,7 +29,8 @@ All seven release suites passed (142.48 seconds), together with 12,407 Console
 reference comparisons, packaged backend/Git/ZIP workflows and the new safety
 regressions. The portable executable launched successfully and passed the full
 repository/status/check/log workflow with valid, missing and invalid descriptors
-(12 responsive timer ticks each). The default `lite/release` package is 0.28.0.
+(12 responsive timer ticks each). This is an earlier verified checkpoint;
+the default package is now 0.29.0 above.
 
 Native checks now append interpreted outcomes to both the UI stream and durable
 logs; `checks.run` exposes a structured `verification` result. Zero-exit ROM-data
