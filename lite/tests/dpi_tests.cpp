@@ -62,6 +62,9 @@ int main() {
     auto owner = dpi::createWindow(0, wc.lpszClassName, L"DPI fixture", WS_POPUP, 0, 0, 320, 200,
                                    nullptr, nullptr, wc.hInstance, nullptr);
     expect(owner != nullptr, "native fixture could not be created");
+    expect(AreDpiAwarenessContextsEqual(GetWindowDpiAwarenessContext(owner),
+                                       DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2),
+           "native window did not enter per-monitor v2 awareness");
     auto field = dpi::createWindow(0, L"EDIT", L"Scaled Nunito", WS_CHILD, 12, 15, 100, 32, owner,
                                    nullptr, wc.hInstance, nullptr);
     skin::controlFont(field, 16);
