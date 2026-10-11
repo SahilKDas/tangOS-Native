@@ -1,3 +1,4 @@
+#include "dpi.h"
 #include "tour_overlay.h"
 #include "window_capture.h"
 #include <algorithm>
@@ -27,9 +28,9 @@ struct TourOverlay::Impl {
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpszClassName = L"TangOSLiteTour";
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    RegisterClassW(&wc);
+    dpi::registerClass(&wc);
     window =
-        CreateWindowExW(0, wc.lpszClassName, L"Tango's tour", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0,
+        dpi::createWindow(0, wc.lpszClassName, L"Tango's tour", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0,
                         0, width, height, owner, nullptr, wc.hInstance, this);
     if (!window)
       throw std::runtime_error("Cannot create Tango tour overlay");
@@ -53,15 +54,15 @@ struct TourOverlay::Impl {
   void capture() {
     clearBackdrop();
     RECT bounds{};
-    GetClientRect(owner, &bounds);
+    dpi::clientRect(owner, &bounds);
     width = std::max(1L, bounds.right);
     height = std::max(1L, bounds.bottom);
     if (window)
       ShowWindow(window, SW_HIDE);
     RedrawWindow(owner, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
-    auto dc = GetDC(owner);
-    backdrop = CreateCompatibleDC(dc);
-    bitmap = CreateCompatibleBitmap(dc, width, height);
+    auto dc = dpi::getDC(owner);
+    backdrop = dpi::compatibleDC(dc);
+    bitmap = dpi::compatibleBitmap(dc, width, height);
     previousBitmap = SelectObject(backdrop, bitmap);
     renderWindowTree(owner, backdrop, window);
     ReleaseDC(owner, dc);
@@ -69,7 +70,7 @@ struct TourOverlay::Impl {
       ShowWindow(window, SW_SHOW);
   }
   void layout() {
-    auto dc = GetDC(owner);
+    auto dc = dpi::getDC(owner);
     titleHeight =
         std::max(20, skin::wrappedLabelHeight(
                          dc, wide(steps.at(index).value("title", std::string())), 252, 15, true));
@@ -166,7 +167,7 @@ struct TourOverlay::Impl {
         return 1;
       if (msg == WM_PAINT || msg == WM_PRINTCLIENT) {
         PAINTSTRUCT ps{};
-        auto dc = msg == WM_PAINT ? BeginPaint(h, &ps) : reinterpret_cast<HDC>(w);
+        auto dc = msg == WM_PAINT ? dpi::beginPaint(h, &ps) : reinterpret_cast<HDC>(w);
         self->paint(dc);
         if (msg == WM_PAINT)
           EndPaint(h, &ps);
@@ -213,7 +214,7 @@ void TourOverlay::resize() {
     return;
   impl->capture();
   impl->layout();
-  SetWindowPos(impl->window, HWND_TOP, 0, 0, impl->width, impl->height, SWP_NOACTIVATE);
+  dpi::setWindowPos(impl->window, HWND_TOP, 0, 0, impl->width, impl->height, SWP_NOACTIVATE);
 }
 Json TourOverlay::snapshot() const {
   return {{"open", open()},
@@ -232,12 +233,12 @@ void TourOverlay::smoke(const fs::path &directory,
   if (!open() || impl->steps.size() < 10)
     throw std::runtime_error("Native tour did not open");
   capture(directory / "tour-overlay-centered.bmp");
-  SendMessageW(impl->window, WM_KEYDOWN, VK_RIGHT, 0);
+  dpi::sendMessage(impl->window, WM_KEYDOWN, VK_RIGHT, 0);
   if (!impl->hasSpot || impl->index != 1)
     throw std::runtime_error("Native tour toggle spotlight missing");
   write(directory / "tour-spotlight.json", snapshot().dump(2));
   capture(directory / "tour-overlay-spotlight.bmp");
-  SendMessageW(impl->window, WM_KEYDOWN, VK_LEFT, 0);
+  dpi::sendMessage(impl->window, WM_KEYDOWN, VK_LEFT, 0);
   if (impl->index != 0 || impl->hasSpot)
     throw std::runtime_error("Native tour back did not recenter");
   for (size_t step = 0; step < impl->steps.size(); ++step) {

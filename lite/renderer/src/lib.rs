@@ -1,4 +1,10 @@
 use tiny_skia::*;
+thread_local! { static PIXEL_SCALE: std::cell::Cell<f32> = const { std::cell::Cell::new(1.) }; }
+#[no_mangle]
+pub extern "C" fn tangos_set_scale(scale: f32) {
+    PIXEL_SCALE.with(|value| value.set(if scale.is_finite() && (0.5..=8.).contains(&scale) { scale } else { 1. }));
+}
+fn pixel_scale() -> f32 { PIXEL_SCALE.with(|value| value.get()) }
 
 // CSS box-shadow uses sigma = blur / 2. Cache alpha masks, never caller pixels.
 // The opaque box geometry clips outer shadows even when its fill is translucent.
@@ -55,10 +61,10 @@ fn shadow_mask(w: usize, h: usize, padding: usize, radius: f32, blur: f32) -> Ve
 #[no_mangle]
 pub unsafe extern "C" fn tangos_shadow(data: *mut u8, w: u32, h: u32, padding: u32,
     radius: f32, blur: f32, offset_y: i32, opacity: f32) {
-    if data.is_null() || padding > 64 || w <= padding * 2 || h <= padding * 2 || w > 4096 || h > 4096 ||
-        w as usize * h as usize > 1_048_576 || !radius.is_finite() || radius < 0. ||
-        !blur.is_finite() || !(0. ..=64.).contains(&blur) || !opacity.is_finite() ||
-        !(0. ..=1.).contains(&opacity) || !(-64..=64).contains(&offset_y) { return; }
+    if data.is_null() || padding > 256 || w <= padding * 2 || h <= padding * 2 || w > 4096 || h > 4096 ||
+        w as usize * h as usize > 4_194_304 || !radius.is_finite() || radius < 0. ||
+        !blur.is_finite() || !(0. ..=256.).contains(&blur) || !opacity.is_finite() ||
+        !(0. ..=1.).contains(&opacity) || !(-256..=256).contains(&offset_y) { return; }
     type Entry = ((u32, u32, u32, u32, u32), Vec<f32>);
     static CACHE: std::sync::OnceLock<std::sync::Mutex<Vec<Entry>>> = std::sync::OnceLock::new();
     let key = (w, h, padding, radius.to_bits(), blur.to_bits());
@@ -214,17 +220,17 @@ pub unsafe extern "C" fn tangos_gradient_frame(data: *mut u8, w: u32, h: u32, ra
 pub unsafe extern "C" fn tangos_glass(data: *mut u8, w: u32, h: u32, gloss: u32, panel: u32, border: u32, kind: u32) {
     if kind == 1 {
         // Controller overrides .aero-panel in app.css: 15%, 4%, muted 20% edge.
-        gradient_shape(data, w, h, 18., (gloss & 0x00ffffff) | 0x26000000,
+        gradient_shape(data, w, h, 18. * pixel_scale(), (gloss & 0x00ffffff) | 0x26000000,
             Some((gloss & 0x00ffffff) | 0x0a000000), panel, (gloss & 0x00ffffff) | 0x33000000);
         return;
     }
     if kind == 2 {
         // The elastic agent task area uses uniform 40% gloss and a 10px radius.
         let fill = (gloss & 0x00ffffff) | 0x66000000;
-        gradient_shape(data, w, h, 10., fill, None, fill, border);
+        gradient_shape(data, w, h, 10. * pixel_scale(), fill, None, fill, border);
         return;
     }
-    gradient_shape(data, w, h, 18., (gloss & 0x00ffffff) | 0x8c000000,
+    gradient_shape(data, w, h, 18. * pixel_scale(), (gloss & 0x00ffffff) | 0x8c000000,
         Some((gloss & 0x00ffffff) | 0x0f000000), panel, border);
 }
 
@@ -285,7 +291,7 @@ unsafe fn gradient_shape(
     );
     if border != 0 {
         let mut paint = Paint::default(); paint.set_color(color(border));
-        pixmap.stroke_path(&path, &paint, &Stroke { width: 2., ..Stroke::default() }, Transform::identity(), None);
+        pixmap.stroke_path(&path, &paint, &Stroke { width: 2. * pixel_scale(), ..Stroke::default() }, Transform::identity(), None);
     }
     for p in bytes.chunks_exact_mut(4) {
         p.swap(0, 2);

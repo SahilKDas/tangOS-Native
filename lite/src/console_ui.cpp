@@ -1,3 +1,4 @@
+#include "dpi.h"
 #include "console_ui.h"
 #include "help.h"
 #include "helper_overlay.h"
@@ -47,35 +48,35 @@ void updateLiveText(HWND h, const std::string &s) {
   SCROLLINFO scroll{sizeof(SCROLLINFO), SIF_RANGE | SIF_PAGE | SIF_POS};
   GetScrollInfo(h, SB_VERT, &scroll);
   bool follow = scroll.nPos + static_cast<int>(scroll.nPage) >= scroll.nMax - 3;
-  auto first = SendMessageW(h, EM_GETFIRSTVISIBLELINE, 0, 0);
+  auto first = dpi::sendMessage(h, EM_GETFIRSTVISIBLELINE, 0, 0);
   DWORD begin = 0, end = 0;
-  SendMessageW(h, EM_GETSEL, reinterpret_cast<WPARAM>(&begin), reinterpret_cast<LPARAM>(&end));
+  dpi::sendMessage(h, EM_GETSEL, reinterpret_cast<WPARAM>(&begin), reinterpret_cast<LPARAM>(&end));
   SetWindowTextW(h, wide(normalized).c_str());
   if (follow) {
     auto length = GetWindowTextLengthW(h);
-    SendMessageW(h, EM_SETSEL, length, length);
-    SendMessageW(h, EM_SCROLLCARET, 0, 0);
+    dpi::sendMessage(h, EM_SETSEL, length, length);
+    dpi::sendMessage(h, EM_SCROLLCARET, 0, 0);
   } else {
-    SendMessageW(h, EM_SETSEL, begin, end);
-    SendMessageW(h, EM_LINESCROLL, 0, first - SendMessageW(h, EM_GETFIRSTVISIBLELINE, 0, 0));
+    dpi::sendMessage(h, EM_SETSEL, begin, end);
+    dpi::sendMessage(h, EM_LINESCROLL, 0, first - dpi::sendMessage(h, EM_GETFIRSTVISIBLELINE, 0, 0));
   }
 }
 void appendText(HWND h, const std::string &s) {
   if (GetWindowTextLengthW(h) > 200000)
     SetWindowTextW(h, L"[Older output preserved in complete logs.]\r\n");
   auto n = GetWindowTextLengthW(h);
-  SendMessageW(h, EM_SETSEL, n, n);
+  dpi::sendMessage(h, EM_SETSEL, n, n);
   auto wideText = wide(s);
-  SendMessageW(h, EM_REPLACESEL, FALSE, (LPARAM)wideText.c_str());
+  dpi::sendMessage(h, EM_REPLACESEL, FALSE, (LPARAM)wideText.c_str());
 }
-int choice(HWND h) { return (int)SendMessageW(h, CB_GETCURSEL, 0, 0); }
+int choice(HWND h) { return (int)dpi::sendMessage(h, CB_GETCURSEL, 0, 0); }
 std::string selected(HWND h) {
   int i = choice(h);
   if (i < 0)
     return text(h);
-  int n = (int)SendMessageW(h, CB_GETLBTEXTLEN, i, 0);
+  int n = (int)dpi::sendMessage(h, CB_GETLBTEXTLEN, i, 0);
   std::wstring s(n + 1, 0);
-  SendMessageW(h, CB_GETLBTEXT, i, (LPARAM)s.data());
+  dpi::sendMessage(h, CB_GETLBTEXT, i, (LPARAM)s.data());
   s.resize(n);
   return utf8(s);
 }
@@ -441,8 +442,8 @@ struct ConsoleUI::Impl {
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpszClassName = L"TangOSLiteConsole";
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    RegisterClassW(&wc);
-    window = CreateWindowExW(WS_EX_CONTROLPARENT, wc.lpszClassName, L"", WS_CHILD | WS_CLIPCHILDREN,
+    dpi::registerClass(&wc);
+    window = dpi::createWindow(WS_EX_CONTROLPARENT, wc.lpszClassName, L"", WS_CHILD | WS_CLIPCHILDREN,
                              14, 66, 800, 720, parent, nullptr, wc.hInstance, this);
     fieldBrush = CreateSolidBrush(skin::field());
     SetTimer(window, 1, 50, nullptr);
@@ -509,10 +510,10 @@ struct ConsoleUI::Impl {
         windowsTitle += '\r';
       windowsTitle += title[i];
     }
-    auto c = CreateWindowExW(0, kind, wide(windowsTitle).c_str(),
+    auto c = dpi::createWindow(0, kind, wide(windowsTitle).c_str(),
                              WS_CHILD | WS_VISIBLE | WS_TABSTOP | style, x, y, w, h, window,
                              (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr);
-    SendMessageW(c, WM_SETFONT, (WPARAM)font, TRUE);
+    dpi::sendMessage(c, WM_SETFONT, (WPARAM)font, TRUE);
     SetWindowSubclass(c, childKeyboard, 2, reinterpret_cast<DWORD_PTR>(this));
     controls.push_back(c);
     return c;
@@ -527,8 +528,8 @@ struct ConsoleUI::Impl {
   HWND combo(const std::vector<std::string> &values, int id, int x, int y, int w, int active = 0) {
     auto c = control(L"COMBOBOX", "", id, x, y, w, 300, CBS_DROPDOWNLIST | WS_VSCROLL);
     for (auto &v : values)
-      SendMessageW(c, CB_ADDSTRING, 0, (LPARAM)wide(v).c_str());
-    SendMessageW(c, CB_SETCURSEL, active, 0);
+      dpi::sendMessage(c, CB_ADDSTRING, 0, (LPARAM)wide(v).c_str());
+    dpi::sendMessage(c, CB_SETCURSEL, active, 0);
     return c;
   }
   void label(const std::string &s, int x, int y, int w, int h = 22) {
@@ -584,7 +585,7 @@ struct ConsoleUI::Impl {
       storeBatchDraft();
     screen = next;
     if (next == Screen::controller || next == Screen::atlas)
-      SendMessageW(parent, CONSOLE_TAB_STATE, next == Screen::atlas, 0);
+      dpi::sendMessage(parent, CONSOLE_TAB_STATE, next == Screen::atlas, 0);
     scroll = 0;
     build();
   }
@@ -610,7 +611,7 @@ struct ConsoleUI::Impl {
                        GetDlgItem(window, CONTROLLER_PUSH)};
           else if (selector == "[data-tour=\"controller\"]" && screen == Screen::controller) {
             POINT origin{};
-            MapWindowPoints(window, parent, &origin, 1);
+            dpi::mapWindowPoints(window, parent, &origin, 1);
             return RECT{origin.x, origin.y, origin.x + controllerWidth(), origin.y + height};
           }
           std::optional<RECT> result;
@@ -618,8 +619,7 @@ struct ConsoleUI::Impl {
             if (!IsWindow(control) || !(GetWindowLongPtrW(control, GWL_STYLE) & WS_VISIBLE))
               continue;
             RECT bounds{};
-            GetWindowRect(control, &bounds);
-            MapWindowPoints(nullptr, parent, reinterpret_cast<POINT *>(&bounds), 2);
+            dpi::relativeRect(control, parent, &bounds);
             if (result)
               UnionRect(&*result, &*result, &bounds);
             else
@@ -675,9 +675,8 @@ struct ConsoleUI::Impl {
       for (int controlId = 5000 + int(i) * 16; controlId < 5000 + int(i + 1) * 16; ++controlId)
         if (auto child = GetDlgItem(window, controlId)) {
           RECT childBounds{};
-          GetWindowRect(child, &childBounds);
-          MapWindowPoints(nullptr, window, reinterpret_cast<POINT *>(&childBounds), 2);
-          SetWindowPos(child, nullptr, childBounds.left, childBounds.top + delta, 0, 0,
+          dpi::relativeRect(child, window, &childBounds);
+          dpi::setWindowPos(child, nullptr, childBounds.left, childBounds.top + delta, 0, 0,
                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         }
     }
@@ -771,7 +770,7 @@ struct ConsoleUI::Impl {
                                  base + 1, x + w - 37, y + 12, 24, 24);
           skin::iconButton(details, skin::Icon::chart);
           if (advancedMode) {
-            auto dc = GetDC(window);
+            auto dc = dpi::getDC(window);
             int chipX = x + 29 + controllerNameWidth(dc, a, w) + 7 +
                         (a.spec.kind == "api" ? 38 : 0) + (a.active && a.spec.loop ? 29 : 0);
             auto roles = assignedRoles(a.spec);
@@ -792,7 +791,7 @@ struct ConsoleUI::Impl {
             skin::controlFont(profileFields[a.id + "Count"], 15, 800);
             skin::compactEdit(profileFields[a.id + "Count"]);
             if (!advancedMode)
-              SendMessageW(profileFields[a.id + "Count"], EM_SETCUEBANNER, TRUE,
+              dpi::sendMessage(profileFields[a.id + "Count"], EM_SETCUEBANNER, TRUE,
                            reinterpret_cast<LPARAM>(L"∞"));
             auto go = control(L"BUTTON", a.active ? "Stop" : "Go", base, x + 78,
                               y + h - (advancedMode ? 48 : 55) - cartOffset, w - 91,
@@ -851,7 +850,7 @@ struct ConsoleUI::Impl {
                      rowY, 54, 26, ES_AUTOHSCROLL | ES_CENTER);
             skin::controlFont(profileFields[a.id + "Count"], 11, 800);
             skin::compactEdit(profileFields[a.id + "Count"]);
-            SendMessageW(profileFields[a.id + "Count"], EM_SETCUEBANNER, TRUE,
+            dpi::sendMessage(profileFields[a.id + "Count"], EM_SETCUEBANNER, TRUE,
                          reinterpret_cast<LPARAM>(a.spec.loop ? L"∞" : L"16"));
             EnableWindow(profileFields[a.id + "Count"], !a.spec.loop);
             auto loopButton = control(L"BUTTON", "∞", base + 9, x + 74, rowY, 26, 26);
@@ -961,7 +960,7 @@ struct ConsoleUI::Impl {
         ShowWindow(authorChoice, SW_HIDE);
         draftsChoice = control(L"BUTTON", "near-misses", ATLAS_DRAFTS, width - 285, 294, 260, 28,
                                BS_AUTOCHECKBOX);
-        SendMessageW(draftsChoice, BM_SETCHECK, atlasDrafts ? BST_CHECKED : BST_UNCHECKED, 0);
+        dpi::sendMessage(draftsChoice, BM_SETCHECK, atlasDrafts ? BST_CHECKED : BST_UNCHECKED, 0);
       }
       button(!remoteOnly && !liveAtlas && !descriptor.generatorId.empty() ? "Regenerate" : "Reload",
              ATLAS_LOAD, width - 130, 18, 108);
@@ -987,8 +986,8 @@ struct ConsoleUI::Impl {
         contributorList = control(L"LISTBOX", "", ATLAS_CONTRIBUTORS, 18, 102, width - 36, 32,
                                   LBS_NOTIFY | LBS_MULTICOLUMN | WS_HSCROLL | LBS_NOINTEGRALHEIGHT |
                                       LBS_OWNERDRAWFIXED | LBS_HASSTRINGS);
-        SendMessageW(contributorList, LB_SETITEMHEIGHT, 0, 28);
-        SendMessageW(contributorList, LB_SETCOLUMNWIDTH, 200, 0);
+        dpi::sendMessage(contributorList, LB_SETITEMHEIGHT, 0, 28);
+        dpi::sendMessage(contributorList, LB_SETCOLUMNWIDTH, 200, 0);
       }
       cachedLayout.clear();
     } else if (screen == Screen::encyclopedia) {
@@ -1011,13 +1010,13 @@ struct ConsoleUI::Impl {
       label("Decomp repo", 18, 53, cw - 36);
       body = edit(utf8(repository.wstring()), 0, 18, 80, cw - 36);
       advanced = control(L"BUTTON", "Advanced interface", 0, 18, 130, cw - 36, 28, BS_AUTOCHECKBOX);
-      SendMessageW(advanced, BM_SETCHECK, advancedMode, 0);
+      dpi::sendMessage(advanced, BM_SETCHECK, advancedMode, 0);
       writes = control(L"BUTTON", "Allow agent execution and mutating tools in isolated worktrees",
                        0, 18, 168, cw - 36, 48, BS_AUTOCHECKBOX);
-      SendMessageW(writes, BM_SETCHECK, allowWrites, 0);
+      dpi::sendMessage(writes, BM_SETCHECK, allowWrites, 0);
       portOnly = control(L"BUTTON", "Port only · refuse src/ changes at review", 0, 18, 226,
                          cw - 36, 28, BS_AUTOCHECKBOX);
-      SendMessageW(portOnly, BM_SETCHECK, settings.portOnly, 0);
+      dpi::sendMessage(portOnly, BM_SETCHECK, settings.portOnly, 0);
       label(
           "Every commit and push requires review. Destructive Git operations require confirmation.",
           18, 274, cw - 36, 54);
@@ -1031,9 +1030,9 @@ struct ConsoleUI::Impl {
           keys.push_back(key.first);
       keyChoice = control(L"COMBOBOX", "", 0, 18, 378, cw - 36, 300, CBS_DROPDOWN | WS_VSCROLL);
       for (auto &key : keys)
-        SendMessageW(keyChoice, CB_ADDSTRING, 0, (LPARAM)wide(key).c_str());
+        dpi::sendMessage(keyChoice, CB_ADDSTRING, 0, (LPARAM)wide(key).c_str());
       if (!keys.empty())
-        SendMessageW(keyChoice, CB_SETCURSEL, 0, 0);
+        dpi::sendMessage(keyChoice, CB_SETCURSEL, 0, 0);
       keyEdit = edit("", 0, 18, 419, cw - 36, 30, ES_PASSWORD | ES_AUTOHSCROLL);
       button("Store key", VAULT_SAVE, 18, 460, 108);
       button("Remove key", VAULT_REMOVE, 136, 460, 118);
@@ -1053,7 +1052,7 @@ struct ConsoleUI::Impl {
                {"autoLand", "Auto-land in agent worktree"},
                {"liveRefresh", "Live refresh (enabled profiles)"}}) {
         auto h = control(L"BUTTON", entry.second, 0, width - 332, py, 310, 32, BS_AUTOCHECKBOX);
-        SendMessageW(h, BM_SETCHECK,
+        dpi::sendMessage(h, BM_SETCHECK,
                      policy.value(entry.first, entry.first == "animateBackground" ||
                                                    entry.first == "allowNearMiss"),
                      0);
@@ -1088,7 +1087,7 @@ struct ConsoleUI::Impl {
       toolList = control(L"LISTBOX", "", 0, 18, 62, cw - 36, height - 190, LBS_NOTIFY | WS_VSCROLL);
       if (a)
         for (auto &row : a->queue)
-          SendMessageW(toolList, LB_ADDSTRING, 0,
+          dpi::sendMessage(toolList, LB_ADDSTRING, 0,
                        (LPARAM)wide(row.value("module", std::string()) + " · " +
                                     row.value("name", row.value("id", std::string("target"))))
                            .c_str());
@@ -1111,7 +1110,7 @@ struct ConsoleUI::Impl {
                          LBS_NOTIFY | WS_VSCROLL);
       for (auto it = connectionProfiles.begin(); it != connectionProfiles.end(); ++it) {
         connectionNames.push_back(it.key());
-        SendMessageW(toolList, LB_ADDSTRING, 0, (LPARAM)wide(it.key()).c_str());
+        dpi::sendMessage(toolList, LB_ADDSTRING, 0, (LPARAM)wide(it.key()).c_str());
       }
       int y = 58;
       for (auto field :
@@ -1277,9 +1276,9 @@ struct ConsoleUI::Impl {
         auto name = wide(batch.at("status").get<std::string>() + " · " +
                          batch.at("title").get<std::string>() + " · " + std::to_string(worked) +
                          "/" + std::to_string(batch.at("items").size()));
-        auto index = SendMessageW(batchList, LB_ADDSTRING, 0, (LPARAM)name.c_str());
+        auto index = dpi::sendMessage(batchList, LB_ADDSTRING, 0, (LPARAM)name.c_str());
         if (batch.at("id") == selectedBatch)
-          SendMessageW(batchList, LB_SETCURSEL, index, 0);
+          dpi::sendMessage(batchList, LB_SETCURSEL, index, 0);
       }
       label("Draft title", 291, 62, cw - 309);
       batchTitle = edit(staged.value("title", std::string("Batch draft")), 0, 291, 90, cw - 309);
@@ -1355,7 +1354,7 @@ struct ConsoleUI::Impl {
         auto v = argumentDraft.contains(a.name) ? argumentDraft[a.name] : a.value;
         if (a.type == "boolean") {
           auto h = control(L"BUTTON", "Enabled", 0, 184, yy, cw - 204, 28, BS_AUTOCHECKBOX);
-          SendMessageW(h, BM_SETCHECK, v.is_boolean() && v.get<bool>(), 0);
+          dpi::sendMessage(h, BM_SETCHECK, v.is_boolean() && v.get<bool>(), 0);
           argumentFields[a.name] = h;
         } else if (a.type == "enum") {
           std::vector<std::string> options;
@@ -1497,7 +1496,7 @@ struct ConsoleUI::Impl {
     field("Workers", std::to_string(spec.jobs));
     loop = control(L"BUTTON", "Continuous batches until Stop", 0, 148, y, cw - 166, 28,
                    BS_AUTOCHECKBOX);
-    SendMessageW(loop, BM_SETCHECK, spec.loop, 0);
+    dpi::sendMessage(loop, BM_SETCHECK, spec.loop, 0);
     button("Save AI", SAVE_PROFILE, 18, height - 48, 108);
     button("Cancel", CANCEL_PROFILE, 136, height - 48, 100);
     body = edit("API: uses the repository's console.driver and scheduler. Configure a model "
@@ -1513,7 +1512,7 @@ struct ConsoleUI::Impl {
       return;
     auto needle = search ? text(search) : "";
     std::transform(needle.begin(), needle.end(), needle.begin(), ::tolower);
-    SendMessageW(toolList, LB_RESETCONTENT, 0, 0);
+    dpi::sendMessage(toolList, LB_RESETCONTENT, 0, 0);
     shownTools.clear();
     for (auto &t : descriptor.tools) {
       auto hay = t.category + " " + t.id + " " + t.label + " " + t.description;
@@ -1524,15 +1523,15 @@ struct ConsoleUI::Impl {
         continue;
       shownTools.push_back(t.id);
       auto title = t.category + " · " + t.label;
-      SendMessageW(toolList, LB_ADDSTRING, 0, (LPARAM)wide(title).c_str());
+      dpi::sendMessage(toolList, LB_ADDSTRING, 0, (LPARAM)wide(title).c_str());
     }
     if (!shownTools.empty()) {
-      SendMessageW(toolList, LB_SETCURSEL, 0, 0);
+      dpi::sendMessage(toolList, LB_SETCURSEL, 0, 0);
       selectTool();
     }
   }
   void selectTool() {
-    auto at = (int)SendMessageW(toolList, LB_GETCURSEL, 0, 0);
+    auto at = (int)dpi::sendMessage(toolList, LB_GETCURSEL, 0, 0);
     if (at < 0 || at >= (int)shownTools.size())
       return;
     toolId = shownTools[at];
@@ -1702,9 +1701,9 @@ struct ConsoleUI::Impl {
         return 1;
       if (msg == WM_PAINT) {
         PAINTSTRUCT ps;
-        auto dc = BeginPaint(h, &ps);
+        auto dc = dpi::beginPaint(h, &ps);
         RECT r;
-        GetClientRect(h, &r);
+        dpi::clientRect(h, &r);
         skin::background(dc, r.right, r.bottom);
         skin::label(dc, L"Chaos Viewer · module", 18, 18, r.right - 36, 30, 18, true);
         EndPaint(h, &ps);
@@ -1719,9 +1718,9 @@ struct ConsoleUI::Impl {
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpszClassName = L"TangOSLiteModule";
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    RegisterClassW(&wc);
+    dpi::registerClass(&wc);
     auto popup = std::make_unique<Popup>();
-    auto h = CreateWindowExW(0, wc.lpszClassName, wide(module + " · Chaos Viewer").c_str(),
+    auto h = dpi::createWindow(0, wc.lpszClassName, wide(module + " · Chaos Viewer").c_str(),
                              WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
                              1160, 820, parent, nullptr, wc.hInstance, popup.get());
     if (!h)
@@ -1741,7 +1740,7 @@ struct ConsoleUI::Impl {
           InvalidateRect(window, nullptr, FALSE);
         });
     RECT r;
-    GetClientRect(h, &r);
+    dpi::clientRect(h, &r);
     popup->ui->resize(r.right - 28, r.bottom - 86);
     popup->ui->show(true, true);
     popups.push_back(std::move(popup));
@@ -1766,7 +1765,7 @@ struct ConsoleUI::Impl {
       return 0;
     }
     if (msg == WM_MOUSEWHEEL) {
-      SendMessageW(self->settingsPopover, msg, w, l);
+      dpi::sendMessage(self->settingsPopover, msg, w, l);
       return 0;
     }
     if (msg == WM_NCDESTROY)
@@ -1836,7 +1835,7 @@ struct ConsoleUI::Impl {
       GetScrollInfo(self->settingsPopover, SB_VERT, &range);
       self->settingsScroll = std::clamp(next, 0, std::max(0, range.nMax - int(range.nPage) + 1));
       SetScrollPos(self->settingsPopover, SB_VERT, self->settingsScroll, TRUE);
-      SetWindowPos(self->settingsContent, nullptr, 0, -self->settingsScroll, 0, 0,
+      dpi::setWindowPos(self->settingsContent, nullptr, 0, -self->settingsScroll, 0, 0,
                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
       return 0;
     }
@@ -1871,16 +1870,16 @@ struct ConsoleUI::Impl {
       return reinterpret_cast<LRESULT>(GetStockObject(NULL_BRUSH));
     case WM_PRINTCLIENT: {
       RECT r;
-      GetClientRect(h, &r);
+      dpi::clientRect(h, &r);
       skin::background(reinterpret_cast<HDC>(w), r.right, r.bottom);
       skin::panel(reinterpret_cast<HDC>(w), 0, 0, r.right, r.bottom, true);
       return 0;
     }
     case WM_PAINT: {
       PAINTSTRUCT ps;
-      auto dc = BeginPaint(h, &ps);
+      auto dc = dpi::beginPaint(h, &ps);
       RECT r;
-      GetClientRect(h, &r);
+      dpi::clientRect(h, &r);
       skin::background(dc, r.right, r.bottom);
       skin::panel(dc, 0, 0, r.right, r.bottom, true);
       EndPaint(h, &ps);
@@ -1898,16 +1897,16 @@ struct ConsoleUI::Impl {
     if (settingsContent)
       DestroyWindow(settingsContent);
     settingsContent =
-        CreateWindowExW(0, L"TangOSLiteSettings", L"", WS_CHILD | WS_VISIBLE, 0, -settingsScroll,
+        dpi::createWindow(0, L"TangOSLiteSettings", L"", WS_CHILD | WS_VISIBLE, 0, -settingsScroll,
                         320, 1600, settingsPopover, nullptr, GetModuleHandleW(nullptr), this);
     int y = 16;
     auto add = [&](const wchar_t *kind, const std::string &title, int id, DWORD style,
                    int height = 28) {
       auto child =
-          CreateWindowExW(0, kind, wide(title).c_str(), WS_CHILD | WS_VISIBLE | style, 16, y, 288,
+          dpi::createWindow(0, kind, wide(title).c_str(), WS_CHILD | WS_VISIBLE | style, 16, y, 288,
                           height, settingsContent, reinterpret_cast<HMENU>(INT_PTR(id)),
                           GetModuleHandleW(nullptr), nullptr);
-      SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+      dpi::sendMessage(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
       SetWindowSubclass(child, settingsKeyboard, 3, reinterpret_cast<DWORD_PTR>(this));
       y += height + 6;
       return child;
@@ -1924,7 +1923,7 @@ struct ConsoleUI::Impl {
     };
     auto check = [&](int id, const std::string &title, bool checked) {
       auto child = add(L"BUTTON", title, id, BS_AUTOCHECKBOX | WS_TABSTOP);
-      SendMessageW(child, BM_SETCHECK, checked ? BST_CHECKED : BST_UNCHECKED, 0);
+      dpi::sendMessage(child, BM_SETCHECK, checked ? BST_CHECKED : BST_UNCHECKED, 0);
     };
     section("Settings");
     section("Decomp repo");
@@ -1944,9 +1943,9 @@ struct ConsoleUI::Impl {
     section("Theme");
     auto theme = add(L"COMBOBOX", "", 7004, CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 28);
     for (auto name : {L"aero", L"sunset", L"deepsea", L"bubblegum", L"lemonlime"})
-      SendMessageW(theme, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name));
-    SendMessageW(theme, CB_SETCURSEL, settings.themeIndex, 0);
-    SetWindowPos(theme, nullptr, 0, 0, 288, 200, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+      dpi::sendMessage(theme, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name));
+    dpi::sendMessage(theme, CB_SETCURSEL, settings.themeIndex, 0);
+    dpi::setWindowPos(theme, nullptr, 0, 0, 288, 200, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     check(7011, "Animate the background", policy.value("animateBackground", true));
     info(7104, "Drifting gradients and glass bubbles pause while the window is hidden. Turn motion "
                "off for a flat background.");
@@ -1981,15 +1980,15 @@ struct ConsoleUI::Impl {
     add(L"BUTTON", "Open debug folder", 7016, BS_OWNERDRAW | WS_TABSTOP);
     add(L"BUTTON", "Advanced settings and key vault…", 7015, BS_OWNERDRAW | WS_TABSTOP);
     y += 12;
-    SetWindowPos(settingsContent, nullptr, 0, -settingsScroll, 320, y,
+    dpi::setWindowPos(settingsContent, nullptr, 0, -settingsScroll, 320, y,
                  SWP_NOZORDER | SWP_NOACTIVATE);
     RECT bounds;
-    GetClientRect(settingsPopover, &bounds);
+    dpi::clientRect(settingsPopover, &bounds);
     SCROLLINFO scroll{sizeof(scroll), SIF_RANGE | SIF_PAGE | SIF_POS, 0, y - 1, UINT(bounds.bottom),
                       settingsScroll};
     SetScrollInfo(settingsPopover, SB_VERT, &scroll, TRUE);
     settingsScroll = GetScrollPos(settingsPopover, SB_VERT);
-    SetWindowPos(settingsContent, nullptr, 0, -settingsScroll, 0, 0,
+    dpi::setWindowPos(settingsContent, nullptr, 0, -settingsScroll, 0, 0,
                  SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     skin::invalidateBackdrop(settingsContent);
     InvalidateRect(settingsPopover, nullptr, TRUE);
@@ -2016,7 +2015,7 @@ struct ConsoleUI::Impl {
                                               {7014, "reports"}};
     if (flags.count(id) && notification == BN_CLICKED)
       change[flags.at(id)] =
-          SendMessageW(GetDlgItem(settingsContent, id), BM_GETCHECK, 0, 0) == BST_CHECKED;
+          dpi::sendMessage(GetDlgItem(settingsContent, id), BM_GETCHECK, 0, 0) == BST_CHECKED;
     else if (id == 7005 && notification == EN_KILLFOCUS) {
       auto value = text(GetDlgItem(settingsContent, id));
       if (!value.empty())
@@ -2098,12 +2097,12 @@ struct ConsoleUI::Impl {
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpszClassName = L"TangOSLiteSettings";
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    RegisterClassW(&wc);
+    dpi::registerClass(&wc);
     RECT bounds;
-    GetWindowRect(parent, &bounds);
+    dpi::windowRect(parent, &bounds);
     settingsScroll = 0;
     clearStatsArmedUntil = clearStatsDoneUntil = 0;
-    settingsPopover = CreateWindowExW(
+    settingsPopover = dpi::createWindow(
         WS_EX_TOOLWINDOW, wc.lpszClassName, L"Settings", WS_POPUP | WS_CLIPCHILDREN | WS_VSCROLL,
         bounds.right - 542, bounds.top + 56, 340,
         std::max(220, std::min(700, int(bounds.bottom - bounds.top) - 82)), parent, nullptr,
@@ -2121,7 +2120,7 @@ struct ConsoleUI::Impl {
         {{"title", text(batchTitle)}, {"prompt", text(batchPrompt)}, {"items", draftRows}});
   }
   void selectBatch() {
-    auto index = SendMessageW(batchList, LB_GETCURSEL, 0, 0);
+    auto index = dpi::sendMessage(batchList, LB_GETCURSEL, 0, 0);
     if (index < 0 || size_t(index) >= batchRows.size())
       return;
     auto &batch = batchRows.at(size_t(index));
@@ -2288,16 +2287,16 @@ struct ConsoleUI::Impl {
       models.push_back(model.get<std::string>());
     if (models != detailModels) {
       detailModels = models;
-      SendMessageW(detailModel, CB_RESETCONTENT, 0, 0);
+      dpi::sendMessage(detailModel, CB_RESETCONTENT, 0, 0);
       int active = 0;
       for (size_t i = 0; i < models.size(); ++i) {
         auto label = wide(i == 0 ? "All" : models[i]);
-        SendMessageW(detailModel, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        dpi::sendMessage(detailModel, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
         if (models[i] == detailTab)
           active = static_cast<int>(i);
       }
       detailTab = models[active];
-      SendMessageW(detailModel, CB_SETCURSEL, active, 0);
+      dpi::sendMessage(detailModel, CB_SETCURSEL, active, 0);
     }
     if (!detailStreams.at("byTab").contains(detailTab))
       detailTab = "all";
@@ -2310,15 +2309,15 @@ struct ConsoleUI::Impl {
     auto encoded = metadata.dump();
     if (encoded != detailRunsEncoded) {
       detailRunsEncoded = encoded;
-      SendMessageW(detailRuns, LB_RESETCONTENT, 0, 0);
+      dpi::sendMessage(detailRuns, LB_RESETCONTENT, 0, 0);
       for (size_t i = 0; i < metadata.size(); ++i) {
         auto &run = detailActivity[i];
         auto label =
             wide(run.value("status", std::string()) + " · " + run.value("label", std::string()) +
                  " · " + run.value("commandPreview", std::string()));
-        SendMessageW(detailRuns, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        dpi::sendMessage(detailRuns, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
         if (run.at("runId") == detailRunId)
-          SendMessageW(detailRuns, LB_SETCURSEL, i, 0);
+          dpi::sendMessage(detailRuns, LB_SETCURSEL, i, 0);
       }
     }
     for (auto &run : detailActivity)
@@ -2407,7 +2406,7 @@ struct ConsoleUI::Impl {
     }
   }
   void selectConnection() {
-    auto at = (int)SendMessageW(toolList, LB_GETCURSEL, 0, 0);
+    auto at = (int)dpi::sendMessage(toolList, LB_GETCURSEL, 0, 0);
     if (at < 0 || at >= (int)connectionNames.size())
       return;
     auto name = connectionNames[at];
@@ -2425,11 +2424,11 @@ struct ConsoleUI::Impl {
                                                                   : std::string()));
     std::vector<std::string> methods = {"GET", "POST", "PUT", "PATCH", "DELETE"};
     auto it = std::find(methods.begin(), methods.end(), c.value("method", std::string("GET")));
-    SendMessageW(profileFields["Method"], CB_SETCURSEL,
+    dpi::sendMessage(profileFields["Method"], CB_SETCURSEL,
                  it == methods.end() ? 0 : it - methods.begin(), 0);
-    SendMessageW(profileFields["Enabled"], BM_SETCHECK, c.value("enabled", false), 0);
-    SendMessageW(profileFields["Automatic"], BM_SETCHECK, c.value("automatic", false), 0);
-    SendMessageW(
+    dpi::sendMessage(profileFields["Enabled"], BM_SETCHECK, c.value("enabled", false), 0);
+    dpi::sendMessage(profileFields["Automatic"], BM_SETCHECK, c.value("automatic", false), 0);
+    dpi::sendMessage(
         profileFields["Descriptors"], BM_SETCHECK,
         c.value(name == "update.check" ? "allowUpdateDownloads" : "allowDescriptorDownloads",
                 false),
@@ -2921,18 +2920,18 @@ struct ConsoleUI::Impl {
         if (functionRows.size() > 500)
           functionRows.resize(500); // Original Viewer roster cap.
         if (functionList) {
-          SendMessageW(functionList, WM_SETREDRAW, FALSE, 0);
-          SendMessageW(functionList, LB_RESETCONTENT, 0, 0);
+          dpi::sendMessage(functionList, WM_SETREDRAW, FALSE, 0);
+          dpi::sendMessage(functionList, LB_RESETCONTENT, 0, 0);
           for (size_t i = 0; i < functionRows.size(); ++i) {
             auto &f = atlas[functionRows[i]];
             auto item =
                 wide(f.name + " · " + f.module + " · " + std::to_string(f.size) + "b · " + f.state);
-            SendMessageW(functionList, LB_ADDSTRING, 0, (LPARAM)item.c_str());
+            dpi::sendMessage(functionList, LB_ADDSTRING, 0, (LPARAM)item.c_str());
             if (functionRows[i] == pickedFunction)
-              SendMessageW(functionList, LB_SETCURSEL, i, 0);
+              dpi::sendMessage(functionList, LB_SETCURSEL, i, 0);
           }
-          SendMessageW(functionList, LB_SETHORIZONTALEXTENT, 900, 0);
-          SendMessageW(functionList, WM_SETREDRAW, TRUE, 0);
+          dpi::sendMessage(functionList, LB_SETHORIZONTALEXTENT, 900, 0);
+          dpi::sendMessage(functionList, WM_SETREDRAW, TRUE, 0);
           InvalidateRect(functionList, nullptr, TRUE);
         }
         tiles = atlasLayout(atlas, filtered, w, h, atlasMode, aliases);
@@ -2989,8 +2988,8 @@ struct ConsoleUI::Impl {
         }
         contributorRank = ranked;
         if (contributorList) {
-          SendMessageW(contributorList, LB_RESETCONTENT, 0, 0);
-          SendMessageW(contributorList, LB_ADDSTRING, 0, (LPARAM)L"Everyone");
+          dpi::sendMessage(contributorList, LB_RESETCONTENT, 0, 0);
+          dpi::sendMessage(contributorList, LB_ADDSTRING, 0, (LPARAM)L"Everyone");
           int at = 1;
           for (auto &entry : ranked) {
             auto daily =
@@ -2998,23 +2997,23 @@ struct ConsoleUI::Impl {
             int recent = daily.value(entry.first, 0);
             auto name = wide(entry.first + " " + std::to_string(entry.second) +
                              (recent > 0 ? "  ▲" + std::to_string(recent) : ""));
-            SendMessageW(contributorList, LB_ADDSTRING, 0, (LPARAM)name.c_str());
+            dpi::sendMessage(contributorList, LB_ADDSTRING, 0, (LPARAM)name.c_str());
             if (entry.first == authorFilter)
-              SendMessageW(contributorList, LB_SETCURSEL, at, 0);
+              dpi::sendMessage(contributorList, LB_SETCURSEL, at, 0);
             ++at;
           }
         }
         if (authorChoice) {
-          SendMessageW(authorChoice, CB_RESETCONTENT, 0, 0);
-          SendMessageW(authorChoice, CB_ADDSTRING, 0, (LPARAM)L"Everyone");
+          dpi::sendMessage(authorChoice, CB_RESETCONTENT, 0, 0);
+          dpi::sendMessage(authorChoice, CB_ADDSTRING, 0, (LPARAM)L"Everyone");
           int index = 0;
           for (auto &entry : ranked) {
             auto name = wide(entry.first);
-            auto added = SendMessageW(authorChoice, CB_ADDSTRING, 0, (LPARAM)name.c_str());
+            auto added = dpi::sendMessage(authorChoice, CB_ADDSTRING, 0, (LPARAM)name.c_str());
             if (entry.first == authorFilter)
               index = (int)added;
           }
-          SendMessageW(authorChoice, CB_SETCURSEL, index, 0);
+          dpi::sendMessage(authorChoice, CB_SETCURSEL, index, 0);
         }
         cachedLayout = key;
       }
@@ -3237,7 +3236,7 @@ struct ConsoleUI::Impl {
         continue;
       auto h = it->second;
       if (a.type == "boolean")
-        argumentDraft[a.name] = SendMessageW(h, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        argumentDraft[a.name] = dpi::sendMessage(h, BM_GETCHECK, 0, 0) == BST_CHECKED;
       else {
         auto value = a.type == "enum" ? selected(h) : text(h);
         if (value.empty()) {
@@ -3366,7 +3365,7 @@ struct ConsoleUI::Impl {
       return;
     }
     if (id == CONTROLLER_PICK) {
-      SendMessageW(parent, CONSOLE_PICK_VIEWER, 0, 0);
+      dpi::sendMessage(parent, CONSOLE_PICK_VIEWER, 0, 0);
       return;
     }
     if (id == DETAIL_OPERATIONS) {
@@ -3384,8 +3383,8 @@ struct ConsoleUI::Impl {
                                                         {REMOVE_AGENT, L"Remove agent"}})
         AppendMenuW(menu, MF_STRING, entry.first, entry.second);
       RECT bounds{};
-      GetWindowRect(GetDlgItem(window, DETAIL_OPERATIONS), &bounds);
-      auto selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, bounds.left,
+      dpi::windowRect(GetDlgItem(window, DETAIL_OPERATIONS), &bounds);
+      auto selected = dpi::trackPopup(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, bounds.left,
                                      bounds.bottom, 0, window, nullptr);
       DestroyMenu(menu);
       if (selected)
@@ -3408,13 +3407,13 @@ struct ConsoleUI::Impl {
       return;
     }
     if (id == DETAIL_RECENT && notification == LBN_SELCHANGE) {
-      auto index = SendMessageW(detailRuns, LB_GETCURSEL, 0, 0);
+      auto index = dpi::sendMessage(detailRuns, LB_GETCURSEL, 0, 0);
       if (index >= 0 && static_cast<size_t>(index) < detailActivity.size()) {
         auto selected = detailActivity[index].at("runId").get<std::string>();
         detailRunId = detailRunId == selected ? std::string() : selected;
         if (detailRunId.empty()) {
           setText(detailRunOutput, "Select a recent run to expand its output.");
-          SendMessageW(detailRuns, LB_SETCURSEL, -1, 0);
+          dpi::sendMessage(detailRuns, LB_SETCURSEL, -1, 0);
         }
         refreshDetailActivity();
       }
@@ -3510,7 +3509,7 @@ struct ConsoleUI::Impl {
         (notification == CBN_SELCHANGE || notification == BN_CLICKED)) {
       atlasColorBy = selected(colorChoice);
       authorFilter = choice(authorChoice) <= 0 ? std::string() : selected(authorChoice);
-      atlasDrafts = SendMessageW(draftsChoice, BM_GETCHECK, 0, 0) == BST_CHECKED;
+      atlasDrafts = dpi::sendMessage(draftsChoice, BM_GETCHECK, 0, 0) == BST_CHECKED;
       auto path = data / "console-ui.json";
       auto prefs = fs::exists(path) ? Json::parse(read(path), nullptr, false) : Json::object();
       if (!prefs.is_object())
@@ -3536,18 +3535,18 @@ struct ConsoleUI::Impl {
       return;
     }
     if (id == ATLAS_CONTRIBUTORS && notification == LBN_SELCHANGE) {
-      auto row = SendMessageW(contributorList, LB_GETCURSEL, 0, 0);
+      auto row = dpi::sendMessage(contributorList, LB_GETCURSEL, 0, 0);
       auto selected = row <= 0 || size_t(row) > contributorRank.size()
                           ? std::string()
                           : contributorRank[size_t(row) - 1].first;
       authorFilter = authorFilter == selected ? std::string() : selected;
-      SendMessageW(contributorList, LB_SETCURSEL, authorFilter.empty() ? 0 : row, 0);
+      dpi::sendMessage(contributorList, LB_SETCURSEL, authorFilter.empty() ? 0 : row, 0);
       InvalidateRect(window, nullptr, FALSE);
       return;
     }
     if (id == ATLAS_FUNCTION_LIST &&
         (notification == LBN_SELCHANGE || notification == LBN_DBLCLK)) {
-      auto row = SendMessageW(functionList, LB_GETCURSEL, 0, 0);
+      auto row = dpi::sendMessage(functionList, LB_GETCURSEL, 0, 0);
       if (row >= 0 && (size_t)row < functionRows.size()) {
         pickedFunction = functionRows[(size_t)row];
         if (notification == LBN_DBLCLK)
@@ -3618,7 +3617,7 @@ struct ConsoleUI::Impl {
     case QUEUE_REMOVE: {
       if (!fleet)
         break;
-      auto index = (int)SendMessageW(toolList, LB_GETCURSEL, 0, 0);
+      auto index = (int)dpi::sendMessage(toolList, LB_GETCURSEL, 0, 0);
       if (index < 0)
         throw std::runtime_error("Select a queued target");
       if (id == QUEUE_TOP || id == QUEUE_BOTTOM) {
@@ -3690,10 +3689,10 @@ struct ConsoleUI::Impl {
       c["keyPrefix"] = text(profileFields["Key prefix"]);
       if (name == "update.check")
         c["assetPrefix"] = text(profileFields["Update asset prefix"]);
-      c["enabled"] = SendMessageW(profileFields["Enabled"], BM_GETCHECK, 0, 0) == BST_CHECKED;
-      c["automatic"] = SendMessageW(profileFields["Automatic"], BM_GETCHECK, 0, 0) == BST_CHECKED;
+      c["enabled"] = dpi::sendMessage(profileFields["Enabled"], BM_GETCHECK, 0, 0) == BST_CHECKED;
+      c["automatic"] = dpi::sendMessage(profileFields["Automatic"], BM_GETCHECK, 0, 0) == BST_CHECKED;
       c[name == "update.check" ? "allowUpdateDownloads" : "allowDescriptorDownloads"] =
-          SendMessageW(profileFields["Descriptors"], BM_GETCHECK, 0, 0) == BST_CHECKED;
+          dpi::sendMessage(profileFields["Descriptors"], BM_GETCHECK, 0, 0) == BST_CHECKED;
       c["bodyTemplate"] = Json::parse(text(profileFields["Template"]));
       serviceMethod = "connections.set";
       serviceRequest = connectionProfiles;
@@ -3856,7 +3855,7 @@ struct ConsoleUI::Impl {
     case DETAIL_LIVE:
       detailRunId.clear();
       setText(detailRunOutput, "Select a recent run to expand its output.");
-      SendMessageW(detailRuns, LB_SETCURSEL, -1, 0);
+      dpi::sendMessage(detailRuns, LB_SETCURSEL, -1, 0);
       break;
     case DETAIL_REVEAL:
       for (auto &run : detailActivity)
@@ -4011,7 +4010,7 @@ struct ConsoleUI::Impl {
       s.count = std::stoi(text(profileFields.at("Batch count")));
       s.attempts = std::stoi(text(profileFields.at("Attempts")));
       s.jobs = std::stoi(text(profileFields.at("Workers")));
-      s.loop = SendMessageW(loop, BM_GETCHECK, 0, 0) == BST_CHECKED;
+      s.loop = dpi::sendMessage(loop, BM_GETCHECK, 0, 0) == BST_CHECKED;
       if (s.name.empty())
         throw std::runtime_error("Give this AI a name");
       if (profileId.empty())
@@ -4043,7 +4042,7 @@ struct ConsoleUI::Impl {
       Json nextPolicy = Json::object();
       for (auto field : {"animateBackground", "allowNearMiss", "allowGhidra", "safeMode", "reports",
                          "useAgents", "autoLand", "liveRefresh"})
-        nextPolicy[field] = SendMessageW(profileFields.at(std::string("policy:") + field),
+        nextPolicy[field] = dpi::sendMessage(profileFields.at(std::string("policy:") + field),
                                          BM_GETCHECK, 0, 0) == BST_CHECKED;
       nextPolicy["agentFanout"] = std::stoi(text(profileFields.at("policy:agentFanout")));
       Backend backend(repository, data, settings, vault.values());
@@ -4054,9 +4053,9 @@ struct ConsoleUI::Impl {
       nextPolicy["confirmation"] = policyPreview.at("confirmation");
       policy = backend.invoke("preferences.set", nextPolicy);
       skin::animate(policy.value("animateBackground", true));
-      advancedMode = SendMessageW(advanced, BM_GETCHECK, 0, 0) == BST_CHECKED;
-      allowWrites = SendMessageW(writes, BM_GETCHECK, 0, 0) == BST_CHECKED;
-      bool next = SendMessageW(portOnly, BM_GETCHECK, 0, 0) == BST_CHECKED;
+      advancedMode = dpi::sendMessage(advanced, BM_GETCHECK, 0, 0) == BST_CHECKED;
+      allowWrites = dpi::sendMessage(writes, BM_GETCHECK, 0, 0) == BST_CHECKED;
+      bool next = dpi::sendMessage(portOnly, BM_GETCHECK, 0, 0) == BST_CHECKED;
       settings.portOnly = next;
       if (fleet)
         fleet->setPolicy(settings);
@@ -4247,7 +4246,7 @@ struct ConsoleUI::Impl {
       navigate(Screen::encyclopedia);
       for (size_t i = 0; i < shownTools.size(); ++i)
         if (shownTools[i] == id) {
-          SendMessageW(toolList, LB_SETCURSEL, i, 0);
+          dpi::sendMessage(toolList, LB_SETCURSEL, i, 0);
           selectTool();
           break;
         }
@@ -4348,7 +4347,7 @@ struct ConsoleUI::Impl {
         auto at = std::find(shownTools.begin(), shownTools.end(), descriptor.generatorId);
         if (at == shownTools.end())
           throw std::runtime_error("Atlas generator is not available in the tool catalog");
-        SendMessageW(toolList, LB_SETCURSEL, at - shownTools.begin(), 0);
+        dpi::sendMessage(toolList, LB_SETCURSEL, at - shownTools.begin(), 0);
         selectTool();
         auto values = Json::parse(text(argsBox));
         values["out"] = descriptor.database;
@@ -4390,11 +4389,11 @@ struct ConsoleUI::Impl {
   }
   void tick() {
     POINT cursor{};
-    GetCursorPos(&cursor);
+    dpi::cursorPos(&cursor);
     auto under = WindowFromPoint(cursor);
     bool cardEligible = IsWindowVisible(window) && IsWindowEnabled(parent) &&
                         (under == window || IsChild(window, under));
-    ScreenToClient(window, &cursor);
+    dpi::screenToClient(window, &cursor);
     updateCardHover(cursor, cardEligible, GetTickCount64());
     if (tourOverlay && !tourOverlay->open()) {
       tourOverlay.reset();
@@ -4415,13 +4414,13 @@ struct ConsoleUI::Impl {
       if (encoded != batchShown) {
         batchShown = encoded;
         batchRows = fresh;
-        SendMessageW(batchList, LB_RESETCONTENT, 0, 0);
+        dpi::sendMessage(batchList, LB_RESETCONTENT, 0, 0);
         for (auto &batch : batchRows) {
           auto label = wide(batch.at("status").get<std::string>() + " · " +
                             batch.at("title").get<std::string>());
-          auto index = SendMessageW(batchList, LB_ADDSTRING, 0, (LPARAM)label.c_str());
+          auto index = dpi::sendMessage(batchList, LB_ADDSTRING, 0, (LPARAM)label.c_str());
           if (batch.at("id") == selectedBatch)
-            SendMessageW(batchList, LB_SETCURSEL, index, 0);
+            dpi::sendMessage(batchList, LB_SETCURSEL, index, 0);
         }
         selectBatch();
       }
@@ -4732,8 +4731,8 @@ struct ConsoleUI::Impl {
                                  " queued\nLog: " + utf8(a->log.wstring()) +
                                  "\nTools called:" + called + "\n\n" + statisticsSummary(a->id));
         if (detailProgress) {
-          SendMessageW(detailProgress, PBM_SETRANGE32, 0, std::max(1, a->total));
-          SendMessageW(detailProgress, PBM_SETPOS, a->completed, 0);
+          dpi::sendMessage(detailProgress, PBM_SETRANGE32, 0, std::max(1, a->total));
+          dpi::sendMessage(detailProgress, PBM_SETPOS, a->completed, 0);
         }
       }
     }
@@ -4757,12 +4756,12 @@ struct ConsoleUI::Impl {
       case WM_PAINT: {
         skin::invalidateBackdrop(h);
         PAINTSTRUCT ps;
-        auto dc = BeginPaint(h, &ps);
-        HDC buffer = CreateCompatibleDC(dc);
-        HBITMAP bitmap = CreateCompatibleBitmap(dc, self->width, self->height);
+        auto dc = dpi::beginPaint(h, &ps);
+        HDC buffer = dpi::compatibleDC(dc);
+        HBITMAP bitmap = dpi::compatibleBitmap(dc, self->width, self->height);
         auto prev = SelectObject(buffer, bitmap);
         POINT origin{};
-        MapWindowPoints(h, self->parent, &origin, 1);
+        dpi::mapWindowPoints(h, self->parent, &origin, 1);
         skin::background(buffer, self->width, self->height, origin.y, self->height + origin.y);
         self->paint(buffer);
         BitBlt(dc, 0, 0, self->width, self->height, buffer, 0, 0, SRCCOPY);
@@ -4776,7 +4775,7 @@ struct ConsoleUI::Impl {
         if (!GetPropW(h, L"TangOSBackdropRendering"))
           skin::invalidateBackdrop(h);
         POINT origin{};
-        MapWindowPoints(h, self->parent, &origin, 1);
+        dpi::mapWindowPoints(h, self->parent, &origin, 1);
         skin::background((HDC)w, self->width, self->height, origin.y, self->height + origin.y);
         self->paint((HDC)w);
         return 0;
@@ -4818,9 +4817,9 @@ struct ConsoleUI::Impl {
             bounds.left += 20;
           } else
             bounds.left += 6;
-          auto length = SendMessageW(item->hwndItem, LB_GETTEXTLEN, item->itemID, 0);
+          auto length = dpi::sendMessage(item->hwndItem, LB_GETTEXTLEN, item->itemID, 0);
           std::wstring title(size_t(std::max<LRESULT>(0, length)) + 1, 0);
-          SendMessageW(item->hwndItem, LB_GETTEXT, item->itemID, (LPARAM)title.data());
+          dpi::sendMessage(item->hwndItem, LB_GETTEXT, item->itemID, (LPARAM)title.data());
           auto oldFont = SelectObject(item->hDC, self->font);
           SetBkMode(item->hDC, TRANSPARENT);
           SetTextColor(item->hDC, skin::text());
@@ -4845,12 +4844,12 @@ struct ConsoleUI::Impl {
         if (item->CtlType == ODT_COMBOBOX) {
           FillRect(item->hDC, &item->rcItem, self->fieldBrush);
           if (item->itemID != (UINT)-1) {
-            int n = (int)SendMessageW(item->hwndItem, CB_GETLBTEXTLEN, item->itemID, 0);
+            int n = (int)dpi::sendMessage(item->hwndItem, CB_GETLBTEXTLEN, item->itemID, 0);
             std::wstring title(std::max(0, n) + 1, 0);
             if (n >= 0)
-              SendMessageW(item->hwndItem, CB_GETLBTEXT, item->itemID, (LPARAM)title.data());
+              dpi::sendMessage(item->hwndItem, CB_GETLBTEXT, item->itemID, (LPARAM)title.data());
             auto controlFont =
-                reinterpret_cast<HFONT>(SendMessageW(item->hwndItem, WM_GETFONT, 0, 0));
+                reinterpret_cast<HFONT>(dpi::sendMessage(item->hwndItem, WM_GETFONT, 0, 0));
             auto oldFont = SelectObject(item->hDC, controlFont ? controlFont : self->font);
             SetTextColor(item->hDC, skin::text());
             SetBkMode(item->hDC, TRANSPARENT);
@@ -4899,7 +4898,7 @@ struct ConsoleUI::Impl {
       case WM_MOUSEWHEEL:
         if (self->screen == Screen::atlas) {
           POINT p{(short)LOWORD(l), (short)HIWORD(l)};
-          ScreenToClient(h, &p);
+          dpi::screenToClient(h, &p);
           self->camera.zoomAt(GET_WHEEL_DELTA_WPARAM(w) > 0 ? 1.25 : .8, p.x - 18,
                               p.y - self->mapTop(), self->mapWidth(), self->mapHeight());
           InvalidateRect(h, nullptr, FALSE);
@@ -4946,7 +4945,7 @@ struct ConsoleUI::Impl {
       }
       case WM_RBUTTONUP:
         if (self->marquee)
-          return SendMessageW(h, WM_LBUTTONUP, w, l);
+          return dpi::sendMessage(h, WM_LBUTTONUP, w, l);
         return 0;
       case WM_CONTEXTMENU:
         if (self->screen == Screen::controller &&
@@ -4961,8 +4960,8 @@ struct ConsoleUI::Impl {
                    {SUPPORT, L"Help, updates and reports"}})
             AppendMenuW(menu, MF_STRING, entry.first, entry.second);
           RECT bounds{};
-          GetWindowRect(GetDlgItem(h, ENCYCLOPEDIA), &bounds);
-          auto selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, bounds.left,
+          dpi::windowRect(GetDlgItem(h, ENCYCLOPEDIA), &bounds);
+          auto selected = dpi::trackPopup(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, bounds.left,
                                          bounds.top, 0, h, nullptr);
           DestroyMenu(menu);
           if (selected)
@@ -5164,7 +5163,7 @@ void ConsoleUI::smokeDisplay(const fs::path &directory,
   if (!impl->fleet)
     return; // Descriptor recovery is verified by its separate GUI workflow.
   RECT original;
-  GetWindowRect(impl->parent, &original);
+  dpi::windowRect(impl->parent, &original);
   Json report{{"monitors", Json::array()}, {"layouts", Json::array()}};
   EnumDisplayMonitors(
       nullptr, nullptr,
@@ -5191,7 +5190,9 @@ void ConsoleUI::smokeDisplay(const fs::path &directory,
   bool unusualScale = false;
   for (auto &monitor : report["monitors"]) {
     unusualScale |= monitor.at("scalePercent") != 0 && monitor.at("scalePercent") != 100;
-    MoveWindow(impl->parent, monitor.at("left"), monitor.at("top"), 1180, 820, TRUE);
+    dpi::moveWindow(impl->parent, dpi::logical(monitor.at("left"), dpi::current()),
+                     dpi::logical(monitor.at("top"), dpi::current()), 1180, 820, TRUE);
+    dpi::Scope scale(dpi::forWindow(impl->parent));
     impl->navigate(Screen::support);
     capture(directory /
             fs::u8path("display-monitor-" + std::to_string(report["layouts"].size()) + ".bmp"));
@@ -5199,7 +5200,7 @@ void ConsoleUI::smokeDisplay(const fs::path &directory,
                                  {"windowDpi", GetDpiForWindow(impl->parent)}});
   }
   for (auto size : {std::pair<int, int>{980, 720}, {1475, 1025}, {1770, 1230}}) {
-    MoveWindow(impl->parent, original.left, original.top, size.first, size.second, TRUE);
+    dpi::moveWindow(impl->parent, original.left, original.top, size.first, size.second, TRUE);
     for (auto screen : {Screen::batches, Screen::support, Screen::reference}) {
       impl->navigate(screen);
       auto state = debugState();
@@ -5222,12 +5223,12 @@ void ConsoleUI::smokeDisplay(const fs::path &directory,
     }
     capture(directory / fs::u8path("display-layout-" + std::to_string(size.first) + ".bmp"));
   }
-  MoveWindow(impl->parent, original.left, original.top, original.right - original.left,
+  dpi::moveWindow(impl->parent, original.left, original.top, original.right - original.left,
              original.bottom - original.top, TRUE);
   impl->navigate(Screen::controller);
   report["unusualDpi"] =
       unusualScale ? "exercised on attached monitor" : "unverified: no attached non-100% monitor";
-  report["awareness"] = "Windows DPI virtualization; per-monitor raster sharpness is not verified";
+  report["awareness"] = "Per-monitor v2; physical-resolution TinySkia and GDI buffers";
   write(directory / "display-validation.json", report.dump(2));
 }
 void ConsoleUI::resize(int width, int height) {
@@ -5237,7 +5238,7 @@ void ConsoleUI::resize(int width, int height) {
     impl->storeBatchDraft();
   impl->width = width;
   impl->height = height;
-  MoveWindow(impl->window, 14, 72, width, height, TRUE);
+  dpi::moveWindow(impl->window, 14, 72, width, height, TRUE);
   impl->build();
   if (impl->tourOverlay)
     impl->tourOverlay->resize();
@@ -5313,8 +5314,7 @@ Json ConsoleUI::debugState() const {
       [](HWND child, LPARAM raw) -> BOOL {
         auto &context = *reinterpret_cast<Context *>(raw);
         RECT bounds;
-        GetWindowRect(child, &bounds);
-        MapWindowPoints(nullptr, context.root, reinterpret_cast<POINT *>(&bounds), 2);
+        dpi::relativeRect(child, context.root, &bounds);
         wchar_t kind[64]{};
         GetClassNameW(child, kind, 64);
         context.layout->push_back({{"id", GetDlgCtrlID(child)},
@@ -5473,7 +5473,7 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     impl->helper->smoke(directory);
     capture(directory / "helper-floating-tips.bmp");
   }
-  HWND logFixture = CreateWindowExW(
+  HWND logFixture = dpi::createWindow(
       0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY, 0, 0, 400,
       160, impl->window, nullptr, GetModuleHandleW(nullptr), nullptr);
   if (!logFixture)
@@ -5482,22 +5482,22 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
   for (int i = 0; i < 300; ++i)
     lines += "Log line " + std::to_string(i) + "\n";
   setText(logFixture, lines);
-  SendMessageW(logFixture, EM_SETSEL, 10, 20);
-  SendMessageW(logFixture, EM_LINESCROLL, 0, 40);
-  auto firstLine = SendMessageW(logFixture, EM_GETFIRSTVISIBLELINE, 0, 0);
+  dpi::sendMessage(logFixture, EM_SETSEL, 10, 20);
+  dpi::sendMessage(logFixture, EM_LINESCROLL, 0, 40);
+  auto firstLine = dpi::sendMessage(logFixture, EM_GETFIRSTVISIBLELINE, 0, 0);
   updateLiveText(logFixture, lines + "New output\n");
   DWORD selectionStart = 0, selectionEnd = 0;
-  SendMessageW(logFixture, EM_GETSEL, reinterpret_cast<WPARAM>(&selectionStart),
+  dpi::sendMessage(logFixture, EM_GETSEL, reinterpret_cast<WPARAM>(&selectionStart),
                reinterpret_cast<LPARAM>(&selectionEnd));
-  if (SendMessageW(logFixture, EM_GETFIRSTVISIBLELINE, 0, 0) != firstLine || selectionStart != 10 ||
+  if (dpi::sendMessage(logFixture, EM_GETFIRSTVISIBLELINE, 0, 0) != firstLine || selectionStart != 10 ||
       selectionEnd != 20)
     throw std::runtime_error("Live log refresh moved the reader or selection");
   auto length = GetWindowTextLengthW(logFixture);
-  SendMessageW(logFixture, EM_SETSEL, length, length);
-  SendMessageW(logFixture, EM_SCROLLCARET, 0, 0);
-  SendMessageW(logFixture, EM_LINESCROLL, 0, 300);
+  dpi::sendMessage(logFixture, EM_SETSEL, length, length);
+  dpi::sendMessage(logFixture, EM_SCROLLCARET, 0, 0);
+  dpi::sendMessage(logFixture, EM_LINESCROLL, 0, 300);
   updateLiveText(logFixture, lines + "New output\nNewest output\n");
-  SendMessageW(logFixture, EM_GETSEL, reinterpret_cast<WPARAM>(&selectionStart),
+  dpi::sendMessage(logFixture, EM_GETSEL, reinterpret_cast<WPARAM>(&selectionStart),
                reinterpret_cast<LPARAM>(&selectionEnd));
   if (selectionEnd != static_cast<DWORD>(GetWindowTextLengthW(logFixture)))
     throw std::runtime_error("Live log stopped following output at the bottom");
@@ -5560,7 +5560,7 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
       throw std::runtime_error("Local Atlas does not expose descriptor regeneration");
     impl->action(ATLAS_LOAD, BN_CLICKED);
     auto values = Json::parse(text(impl->argsBox));
-    auto toolIndex = SendMessageW(impl->toolList, LB_GETCURSEL, 0, 0);
+    auto toolIndex = dpi::sendMessage(impl->toolList, LB_GETCURSEL, 0, 0);
     if (impl->screen != Screen::encyclopedia || toolIndex < 0 ||
         impl->shownTools.at(toolIndex) != impl->descriptor.generatorId ||
         values.at("out") != impl->descriptor.database)
@@ -5600,10 +5600,14 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
               {(impl->controllerWidth() - 355) / 2, impl->height - 61,
                (impl->controllerWidth() - 355) / 2 + 115, impl->height - 31}}}) {
       RECT actual{};
-      GetWindowRect(GetDlgItem(impl->window, entry.first), &actual);
-      MapWindowPoints(nullptr, impl->window, reinterpret_cast<POINT *>(&actual), 2);
+      dpi::relativeRect(GetDlgItem(impl->window, entry.first), impl->window, &actual);
       if (!EqualRect(&actual, &entry.second))
-        throw std::runtime_error("Controller control differs from reference geometry");
+        throw std::runtime_error("Controller control differs from reference geometry: id=" +
+            std::to_string(entry.first) + " actual=" + std::to_string(actual.left) + "," +
+            std::to_string(actual.top) + "," + std::to_string(actual.right) + "," +
+            std::to_string(actual.bottom) + " expected=" + std::to_string(entry.second.left) + "," +
+            std::to_string(entry.second.top) + "," + std::to_string(entry.second.right) + "," +
+            std::to_string(entry.second.bottom));
     }
     capture(directory / "controller-reference-idle.bmp");
     {
@@ -5614,13 +5618,13 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
       auto resting = impl->agentCardBounds(0, false);
       RECT before{};
       auto detailControl = GetDlgItem(impl->window, 5001);
-      GetWindowRect(detailControl, &before);
+      dpi::windowRect(detailControl, &before);
       POINT inside{resting.left + 8, resting.top + 8};
       impl->updateCardHover(inside, true, now + 200);
       impl->updateCardHover(inside, true, now + 300);
       auto lifted = impl->agentCardBounds(0);
       RECT after{};
-      GetWindowRect(detailControl, &after);
+      dpi::windowRect(detailControl, &after);
       if (lifted.top != resting.top - 2 || after.top != before.top - 2 ||
           after.left != before.left || after.bottom - after.top != before.bottom - before.top)
         throw std::runtime_error(
@@ -5635,9 +5639,9 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
             "PASS: reference 2px hover lift and 100ms easing move painted cards and native "
             "controls together; leave restores geometry");
     }
-    auto badgeDC = CreateCompatibleDC(nullptr);
-    auto windowDC = GetDC(impl->window);
-    auto badgeBitmap = CreateCompatibleBitmap(windowDC, 31, 16);
+    auto badgeDC = dpi::compatibleDC(nullptr);
+    auto windowDC = dpi::getDC(impl->window);
+    auto badgeBitmap = dpi::compatibleBitmap(windowDC, 31, 16);
     ReleaseDC(impl->window, windowDC);
     auto previousBitmap = SelectObject(badgeDC, badgeBitmap);
     RECT badgeBounds{0, 0, 31, 16};
@@ -5664,24 +5668,23 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
       impl->navigate(Screen::controller);
       auto card = impl->agentCardBounds(0);
       RECT count{};
-      GetWindowRect(GetDlgItem(impl->window, 5004), &count);
-      MapWindowPoints(nullptr, impl->window, reinterpret_cast<POINT *>(&count), 2);
+      dpi::relativeRect(GetDlgItem(impl->window, 5004), impl->window, &count);
       RECT expected{card.left + 13, card.top + 196, card.left + 67, card.top + 222};
       if (!EqualRect(&count, &expected) || IsWindowEnabled(GetDlgItem(impl->window, 5000)) ||
           text(GetDlgItem(impl->window, 5000)) != "Drive queue (0)")
         throw std::runtime_error("Advanced API queue controls differ from the reference");
       RECT scope{}, mcp{}, overlap{};
-      GetWindowRect(GetDlgItem(impl->window, CONTROLLER_ALL), &scope);
-      GetWindowRect(GetDlgItem(impl->window, OPEN_MCP), &mcp);
+      dpi::windowRect(GetDlgItem(impl->window, CONTROLLER_ALL), &scope);
+      dpi::windowRect(GetDlgItem(impl->window, OPEN_MCP), &mcp);
       if (IntersectRect(&overlap, &scope, &mcp))
         throw std::runtime_error("Advanced MCP button overlaps statistics scope");
       capture(directory / "controller-reference-advanced.bmp");
       auto keyboardCount = impl->profileFields.at(referenceId + "Count");
-      SendMessageW(keyboardCount, EM_SETSEL, 0, -1);
-      SendMessageW(keyboardCount, WM_CHAR, '7', 1);
+      dpi::sendMessage(keyboardCount, EM_SETSEL, 0, -1);
+      dpi::sendMessage(keyboardCount, WM_CHAR, '7', 1);
       if (text(keyboardCount) != "7")
         throw std::runtime_error("Compact count lost native keyboard editing");
-      SendMessageW(keyboardCount, WM_KILLFOCUS, 0, 0);
+      dpi::sendMessage(keyboardCount, WM_KILLFOCUS, 0, 0);
       bool savedKeyboardCount = false;
       for (auto &agent : impl->fleet->snapshot())
         if (agent.id == referenceId)
@@ -5689,23 +5692,23 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
       if (!savedKeyboardCount)
         throw std::runtime_error("Compact count lost native focus-based persistence");
       setText(keyboardCount, "16");
-      SendMessageW(keyboardCount, WM_KILLFOCUS, 0, 0);
+      dpi::sendMessage(keyboardCount, WM_KILLFOCUS, 0, 0);
       auto keyboardRole = impl->profileFields.at(referenceId + "Role");
       RECT keyboardBounds{};
-      GetWindowRect(keyboardRole, &keyboardBounds);
+      dpi::windowRect(keyboardRole, &keyboardBounds);
       if (keyboardBounds.bottom - keyboardBounds.top != 26)
         throw std::runtime_error("Compact role field must keep the measured 26-pixel height");
-      SendMessageW(keyboardRole, WM_KEYDOWN, VK_DOWN, 1);
+      dpi::sendMessage(keyboardRole, WM_KEYDOWN, VK_DOWN, 1);
       if (assignedRoles(impl->activeAgent()->spec) != Args{"Hard matcher"})
         throw std::runtime_error("Compact role field lost native arrow-key selection");
       impl->action(5010, BN_CLICKED);
       for (auto &role : Args{"Drafter", "Refiner"}) {
         auto picker = impl->profileFields.at(referenceId + "Role");
-        auto index = SendMessageW(picker, CB_FINDSTRINGEXACT, WPARAM(-1),
+        auto index = dpi::sendMessage(picker, CB_FINDSTRINGEXACT, WPARAM(-1),
                                   reinterpret_cast<LPARAM>(wide(role).c_str()));
         if (index == CB_ERR)
           throw std::runtime_error("Advanced role picker is missing an unassigned role");
-        SendMessageW(picker, CB_SETCURSEL, index, 0);
+        dpi::sendMessage(picker, CB_SETCURSEL, index, 0);
         impl->action(5002, CBN_SELCHANGE);
       }
       if (assignedRoles(impl->activeAgent()->spec) != Args{"Drafter", "Refiner"})
@@ -5716,7 +5719,7 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
           impl->activeAgent()->spec.role != "Refiner")
         throw std::runtime_error("Removing a role chip did not preserve the remaining role");
       auto effortField = impl->profileFields.at(referenceId + "Effort");
-      SendMessageW(effortField, CB_SETCURSEL, 0, 0);
+      dpi::sendMessage(effortField, CB_SETCURSEL, 0, 0);
       auto selectedEffort = selected(effortField);
       impl->action(5003, CBN_SELCHANGE);
       if (impl->activeAgent()->spec.effort != selectedEffort)
@@ -5773,8 +5776,7 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     int runningBase = 5000 + int(runningAt - impl->cardIds.begin()) * 16;
     if (auto runningAgent = impl->activeAgent(); runningAgent && runningAgent->active) {
       RECT stopBounds{};
-      GetWindowRect(GetDlgItem(impl->window, runningBase), &stopBounds);
-      MapWindowPoints(nullptr, impl->window, reinterpret_cast<POINT *>(&stopBounds), 2);
+      dpi::relativeRect(GetDlgItem(impl->window, runningBase), impl->window, &stopBounds);
       auto card = impl->agentCardBounds(size_t(runningAt - impl->cardIds.begin()));
       if (GetDlgItem(impl->window, runningBase + 4) || stopBounds.left != card.left + 13 ||
           stopBounds.right != card.right - 13 || stopBounds.bottom - stopBounds.top != 44)
@@ -5812,9 +5814,8 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
       for (size_t i = 0; i < impl->agents.size(); ++i) {
         auto button = GetDlgItem(impl->window, 5000 + int(i) * 16);
         RECT actual{};
-        if (!button || !GetWindowRect(button, &actual))
+        if (!button || !dpi::relativeRect(button, impl->window, &actual))
           throw std::runtime_error("Grid card lost Go/Stop control");
-        MapWindowPoints(nullptr, impl->window, (POINT *)&actual, 2);
         auto card = impl->agentCardBounds(i);
         if (!advanced && actual.bottom - actual.top != 44)
           throw std::runtime_error(
@@ -5871,7 +5872,7 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
                 .dump(2));
       throw std::runtime_error("Agent detail did not hydrate the latest real run output");
     }
-    SendMessageW(impl->detailRuns, LB_SETCURSEL, 0, 0);
+    dpi::sendMessage(impl->detailRuns, LB_SETCURSEL, 0, 0);
     impl->action(DETAIL_RECENT, LBN_SELCHANGE);
     if (text(impl->detailRunOutput).find("fleet workflow") == std::string::npos)
       throw std::runtime_error("Recent run expansion lost retained output");
@@ -5893,7 +5894,7 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
                            {"runId", runId},
                            {"chunk", u8"⟦vendor/one⟧ first model\n⟦vendor/two⟧ second model\n"}});
     impl->refreshDetailActivity();
-    SendMessageW(impl->detailModel, CB_SETCURSEL, 2, 0);
+    dpi::sendMessage(impl->detailModel, CB_SETCURSEL, 2, 0);
     impl->action(DETAIL_MODEL, CBN_SELCHANGE);
     if (text(impl->logBox).find("second model") == std::string::npos ||
         text(impl->logBox).find("first model") != std::string::npos)
@@ -5903,7 +5904,7 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
                            {"status", "ok"},
                            {"exitCode", 0},
                            {"finishedAt", activityNow()}});
-    SendMessageW(impl->detailScope, CB_SETCURSEL, 1, 0);
+    dpi::sendMessage(impl->detailScope, CB_SETCURSEL, 1, 0);
     impl->action(DETAIL_SCOPE, CBN_SELCHANGE);
     if (!impl->detailLifetime || text(impl->body).find("Lifetime statistics") == std::string::npos)
       throw std::runtime_error("Agent detail statistics scope did not switch");
@@ -5916,7 +5917,7 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
               std::to_string(pumps));
     capture(directory / "console-4.bmp");
     SetFocus(impl->logBox);
-    SendMessageW(impl->logBox, WM_KEYDOWN, VK_ESCAPE, 0);
+    dpi::sendMessage(impl->logBox, WM_KEYDOWN, VK_ESCAPE, 0);
     MSG escapeMessage;
     while (PeekMessageW(&escapeMessage, nullptr, 0, 0, PM_REMOVE)) {
       TranslateMessage(&escapeMessage);
@@ -5952,18 +5953,18 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     impl->openSettingsPopover();
     if (!impl->settingsPopover || impl->screen != Screen::controller)
       throw std::runtime_error("Settings overlay replaced Controller");
-    SendMessageW(impl->settingsPopover, WM_VSCROLL, SB_PAGEDOWN, 0);
+    dpi::sendMessage(impl->settingsPopover, WM_VSCROLL, SB_PAGEDOWN, 0);
     if (impl->settingsScroll <= 0)
       throw std::runtime_error("Settings overlay did not scroll");
     impl->settingsAction(7106, BN_CLICKED);
     if (!impl->settingsInfo.count(7106))
       throw std::runtime_error("Settings explanation did not expand");
     auto delegated = impl->policy.value("useAgents", false);
-    SendMessageW(GetDlgItem(impl->settingsContent, 7012), BM_SETCHECK, !delegated, 0);
+    dpi::sendMessage(GetDlgItem(impl->settingsContent, 7012), BM_SETCHECK, !delegated, 0);
     impl->settingsAction(7012, BN_CLICKED);
     if (impl->policy.value("useAgents", false) == delegated)
       throw std::runtime_error("Settings overlay did not persist delegation");
-    SendMessageW(GetDlgItem(impl->settingsContent, 7012), BM_SETCHECK, delegated, 0);
+    dpi::sendMessage(GetDlgItem(impl->settingsContent, 7012), BM_SETCHECK, delegated, 0);
     impl->settingsAction(7012, BN_CLICKED);
     impl->settingsAction(7007, BN_CLICKED);
     if (impl->clearStatsArmedUntil <= GetTickCount64())
@@ -6045,9 +6046,8 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
   auto &modulePopup = *impl->popups.back();
   auto assertModuleBounds = [&] {
     RECT client{}, child{};
-    GetClientRect(modulePopup.window, &client);
-    GetWindowRect(modulePopup.ui->impl->window, &child);
-    MapWindowPoints(nullptr, modulePopup.window, reinterpret_cast<POINT *>(&child), 2);
+    dpi::clientRect(modulePopup.window, &client);
+    dpi::relativeRect(modulePopup.ui->impl->window, modulePopup.window, &child);
     if (child.left != 14 || child.top != 72 || child.right != client.right - 14 ||
         child.bottom != client.bottom - 14)
       throw std::runtime_error("Module Viewer escapes its real native window after resize");
@@ -6055,10 +6055,10 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
   assertModuleBounds();
   RECT moduleSize{0, 0, 880, 760};
   AdjustWindowRectEx(&moduleSize, WS_OVERLAPPEDWINDOW, FALSE, 0);
-  SetWindowPos(modulePopup.window, nullptr, 0, 0, moduleSize.right - moduleSize.left,
+  dpi::setWindowPos(modulePopup.window, nullptr, 0, 0, moduleSize.right - moduleSize.left,
                moduleSize.bottom - moduleSize.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
   assertModuleBounds();
-  SendMessageW(modulePopup.window, WM_CLOSE, 0, 0);
+  dpi::sendMessage(modulePopup.window, WM_CLOSE, 0, 0);
   write(directory / "module-window-report.txt",
         "PASS: initial and resized native module window contain their Viewer with 14px margins");
   {
@@ -6069,7 +6069,7 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     dialog.saveSnapshot(directory / "report-overlay-empty.bmp");
     auto field = GetDlgItem(dialog.window(), 7200);
     RECT bounds{};
-    GetWindowRect(field, &bounds);
+    dpi::windowRect(field, &bounds);
     if (!dialog.isOpen() || IsWindowEnabled(impl->parent) || bounds.right - bounds.left != 482 ||
         bounds.bottom - bounds.top != 120 || IsWindowEnabled(GetDlgItem(dialog.window(), 7203)))
       throw std::runtime_error("Report overlay geometry or empty-description guard failed");
@@ -6113,7 +6113,7 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
   }
   impl->navigate(Screen::atlas);
   capture(directory / "atlas-contributors.bmp");
-  if (SendMessageW(impl->functionList, LB_GETCOUNT, 0, 0) != (LRESULT)impl->atlas.size())
+  if (dpi::sendMessage(impl->functionList, LB_GETCOUNT, 0, 0) != (LRESULT)impl->atlas.size())
     throw std::runtime_error("Viewer function list is incomplete");
   auto selectionBeforeFull = impl->pickedFunction;
   auto cartBeforeFull = impl->cart;
@@ -6143,14 +6143,14 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
   impl->cachedLayout.clear();
   capture(directory / "atlas-large-database.bmp");
   auto renderMs = GetTickCount64() - renderStarted;
-  if (SendMessageW(impl->functionList, LB_GETCOUNT, 0, 0) != 500 || renderMs > 10000)
+  if (dpi::sendMessage(impl->functionList, LB_GETCOUNT, 0, 0) != 500 || renderMs > 10000)
     throw std::runtime_error("Large Viewer database exceeded the capped roster or render budget");
   write(directory / "viewer-large-database.json",
         Json{{"functions", 25000}, {"roster", 500}, {"elapsedMs", renderMs}}.dump(2));
   impl->atlas = std::move(smallAtlas);
   impl->cachedLayout.clear();
   capture(directory / "atlas-restored-small.bmp");
-  SendMessageW(impl->functionSort, CB_SETCURSEL, 2, 0);
+  dpi::sendMessage(impl->functionSort, CB_SETCURSEL, 2, 0);
   impl->action(ATLAS_FUNCTION_SORT, CBN_SELCHANGE);
   capture(directory / "atlas-function-list.bmp");
   if (impl->functionRows.empty() || impl->atlas[impl->functionRows.front()].size != 60)
@@ -6158,20 +6158,20 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
   auto listPrefs = Json::parse(read(impl->data / "console-ui.json"));
   if (listPrefs.value("functionSort", std::string()) != "size-asc")
     throw std::runtime_error("Viewer list sort did not persist");
-  SendMessageW(impl->functionList, LB_SETCURSEL, 0, 0);
+  dpi::sendMessage(impl->functionList, LB_SETCURSEL, 0, 0);
   impl->action(ATLAS_FUNCTION_LIST, LBN_SELCHANGE);
   if (impl->pickedFunction != impl->functionRows.front())
     throw std::runtime_error("Viewer list selection did not select its target");
   RECT authorBounds{}, draftBounds{}, overlap{};
-  GetWindowRect(impl->authorChoice, &authorBounds);
-  GetWindowRect(impl->draftsChoice, &draftBounds);
+  dpi::windowRect(impl->authorChoice, &authorBounds);
+  dpi::windowRect(impl->draftsChoice, &draftBounds);
   if (IntersectRect(&overlap, &authorBounds, &draftBounds))
     throw std::runtime_error("Viewer contributor and draft controls overlap");
-  SendMessageW(impl->functionSort, CB_SETCURSEL, 0, 0);
+  dpi::sendMessage(impl->functionSort, CB_SETCURSEL, 0, 0);
   impl->action(ATLAS_FUNCTION_SORT, CBN_SELCHANGE);
 
-  SendMessageW(impl->colorChoice, CB_SETCURSEL, 1, 0);
-  SendMessageW(impl->draftsChoice, BM_SETCHECK, BST_UNCHECKED, 0);
+  dpi::sendMessage(impl->colorChoice, CB_SETCURSEL, 1, 0);
+  dpi::sendMessage(impl->draftsChoice, BM_SETCHECK, BST_UNCHECKED, 0);
   impl->action(ATLAS_COLOR, CBN_SELCHANGE);
   if (impl->atlasColorBy != "author" || impl->atlasDrafts)
     throw std::runtime_error("Independent Viewer color/draft controls failed");
@@ -6179,9 +6179,9 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
   if (viewerPrefs.value("atlasColorBy", std::string()) != "author" ||
       viewerPrefs.value("atlasDrafts", true))
     throw std::runtime_error("Viewer settings did not persist");
-  if (SendMessageW(impl->authorChoice, CB_GETCOUNT, 0, 0) < 2)
+  if (dpi::sendMessage(impl->authorChoice, CB_GETCOUNT, 0, 0) < 2)
     throw std::runtime_error("Contributor legend did not include fixture author");
-  SendMessageW(impl->authorChoice, CB_SETCURSEL, 1, 0);
+  dpi::sendMessage(impl->authorChoice, CB_SETCURSEL, 1, 0);
   impl->action(ATLAS_AUTHOR, CBN_SELCHANGE);
   if (impl->authorFilter != "FixtureContributor")
     throw std::runtime_error("Contributor selection failed");
@@ -6235,11 +6235,11 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     throw std::runtime_error("Draft assignment did not enqueue batch");
   impl->selectedBatch = history.back().at("id").get<std::string>();
   capture(directory / "batch-history.bmp");
-  SendMessageW(impl->agentChoice, CB_SETCURSEL, 0, 0);
+  dpi::sendMessage(impl->agentChoice, CB_SETCURSEL, 0, 0);
   impl->action(BATCH_HANDOFF, BN_CLICKED);
   if (impl->fleet->batches().back().at("agentId") != "")
     throw std::runtime_error("Native global handoff failed");
-  SendMessageW(impl->agentChoice, CB_SETCURSEL, 1, 0);
+  dpi::sendMessage(impl->agentChoice, CB_SETCURSEL, 1, 0);
   impl->action(BATCH_HANDOFF, BN_CLICKED);
   if (impl->fleet->batches().back().at("agentId") == "")
     throw std::runtime_error("Native agent handoff failed");
@@ -6261,7 +6261,7 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
   popup.ui->impl->action(ATLAS_CART, BN_CLICKED);
   if (impl->cart.empty() || popup.ui->impl->fleet)
     throw std::runtime_error("Module popout cart relay or controller isolation failed");
-  SendMessageW(popup.window, WM_CLOSE, 0, 0);
+  dpi::sendMessage(popup.window, WM_CLOSE, 0, 0);
   impl->navigate(Screen::services);
   impl->serviceRunner.reset();
   impl->action(SERVICE_CANCEL, BN_CLICKED);
@@ -6299,8 +6299,7 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
         if (!(GetWindowLongW(control, GWL_STYLE) & WS_VISIBLE))
           continue;
         RECT bounds{};
-        GetWindowRect(control, &bounds);
-        MapWindowPoints(nullptr, impl->window, (POINT *)&bounds, 2);
+        dpi::relativeRect(control, impl->window, &bounds);
         if (bounds.left < 0 || bounds.top < 0 || bounds.right > impl->width ||
             bounds.bottom > impl->height)
           throw std::runtime_error(

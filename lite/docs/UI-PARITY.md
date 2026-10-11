@@ -1,5 +1,28 @@
 # Console parity audit
 
+## Per-monitor rendering — 0.31.0
+
+The native UI now uses per-monitor v2 awareness and an isolated logical/pixel
+boundary for fonts, controls, input, menus, overlays and captures. TinySkia
+surfaces render at physical resolution rather than stretching 96-DPI bitmaps.
+Background and button-backdrop caches include DPI. Fractional conversion maps
+child bounds in physical space once, then converts position and size separately.
+Compact combos preserve the reference outer height using measured native borders.
+Status labels restore the parent backdrop before drawing, eliminating their
+opaque strip without leaving old text. Tooltips also use Nunito.
+
+Tests cover physical renderer surfaces at 100/125/150/175/200/250/300 percent,
+simulated DPI-change sequences, native field/font/input alignment and status
+replacement. The full native workflow has passed at the attached 125% monitor.
+Only one monitor is currently attached: real mixed-DPI transitions and physical
+175%/250% displays remain unverified. Popup opening animation/outer composition,
+background motion fidelity and other recorded UI differences remain unfinished.
+
+Backend coverage is not a full-parity certification. Passing deterministic
+comparisons, disposable workflows, a local provider and an MCP Inspector run do
+not prove all provider/client combinations or hosted updates. ROM/compiler
+checks retain the failures and missing prerequisites documented in VERIFICATION.md.
+
 ## Native field reflow and project rows — 0.30.0
 
 Compact edits and selectors now refresh their rounded window regions after

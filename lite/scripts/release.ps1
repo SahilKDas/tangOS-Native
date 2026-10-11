@@ -1,4 +1,4 @@
-param([string]$OutputDir = "$PSScriptRoot/../release", [double]$MinimumFreeGiB = 20, [switch]$KeepBuildArtifacts)
+param([string]$OutputDir = "$PSScriptRoot/../release", [double]$MinimumFreeGiB = 25, [switch]$KeepBuildArtifacts)
 $ErrorActionPreference = 'Stop'
 $source = [IO.Path]::GetFullPath("$PSScriptRoot/..")
 $out = [IO.Path]::GetFullPath($OutputDir)
@@ -25,7 +25,11 @@ foreach ($name in @('build-b', 'build-a')) {
   Assert-FreeSpace
   cmake -S $source -B "$out/$name" -G 'MinGW Makefiles' -DCMAKE_BUILD_TYPE=Release
   if ($LASTEXITCODE) { throw 'Configure failed' }
-  cmake --build "$out/$name" -j 2
+  if ($name -eq 'build-b') {
+    cmake --build "$out/$name" --target TangOSLite -j 2
+  } else {
+    cmake --build "$out/$name" -j 2
+  }
   if ($LASTEXITCODE) { throw 'Build failed' }
   if ($name -eq 'build-b') {
     $referenceHash = (Get-FileHash -LiteralPath "$out/$name/TangOSLite.exe" -Algorithm SHA256).Hash
@@ -95,7 +99,7 @@ Assert-FreeSpace
 $imports = & objdump -p "$out/TangOSLite.exe" | Select-String 'DLL Name:' | ForEach-Object { $_.Line.Trim() }
 $compiler = (& g++ --version | Select-Object -First 1)
 $cmake = (& cmake --version | Select-Object -First 1)
-$report = "TangOS Lite 0.30.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
+$report = "TangOS Lite 0.31.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
 Set-Content -LiteralPath "$out/SIZE.txt" -Value $report -Encoding utf8
 Copy-Item -LiteralPath "$source/README.md" -Destination "$out/README.md"
 Copy-Item -LiteralPath "$source/../LICENSE" -Destination "$out/LICENSE"

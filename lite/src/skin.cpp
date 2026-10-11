@@ -1,3 +1,4 @@
+#include "dpi.h"
 #include "skin.h"
 #include "help.h"
 #include <commctrl.h>
@@ -19,8 +20,42 @@ extern "C" void tangos_shadow(unsigned char *, unsigned, unsigned, unsigned, flo
 extern "C" void tangos_icon(unsigned char *, unsigned, unsigned, unsigned, uint32_t);
 extern "C" void tangos_glass(unsigned char *, unsigned, unsigned, uint32_t, uint32_t, uint32_t,
                              unsigned);
+extern "C" void tangos_set_scale(float);
 namespace skin {
 namespace {
+UINT rasterDpi = 96;
+unsigned rasterPixels(unsigned value) { return dpi::pixels(int(value), rasterDpi); }
+float rasterScale() { return rasterDpi / 96.f; }
+void rasterFrame(unsigned char *data, unsigned w, unsigned h, float radius, uint32_t fill,
+                  uint32_t border) {
+  tangos_frame(data, rasterPixels(w), rasterPixels(h), radius * rasterScale(), fill, border);
+}
+void rasterShape(unsigned char *data, unsigned w, unsigned h, float radius, uint32_t top,
+                  uint32_t bottom) {
+  tangos_shape(data, rasterPixels(w), rasterPixels(h), radius * rasterScale(), top, bottom);
+}
+void rasterGradient(unsigned char *data, unsigned w, unsigned h, float radius, uint32_t top,
+                     uint32_t bottom, uint32_t border) {
+  tangos_gradient_frame(data, rasterPixels(w), rasterPixels(h), radius * rasterScale(), top, bottom, border);
+}
+void rasterIcon(unsigned char *data, unsigned w, unsigned h, unsigned icon, uint32_t ink) {
+  tangos_icon(data, rasterPixels(w), rasterPixels(h), icon, ink);
+}
+void rasterImage(unsigned char *data, unsigned w, unsigned h, const unsigned char *image, size_t size) {
+  tangos_image(data, rasterPixels(w), rasterPixels(h), image, size);
+}
+void rasterMesh(unsigned char *data, unsigned w, unsigned h, float phase, unsigned palette) {
+  tangos_mesh(data, rasterPixels(w), rasterPixels(h), phase, palette);
+}
+void rasterGlass(unsigned char *data, unsigned w, unsigned h, uint32_t gloss, uint32_t panel,
+                  uint32_t border, unsigned kind) {
+  tangos_glass(data, rasterPixels(w), rasterPixels(h), gloss, panel, border, kind);
+}
+void rasterShadow(unsigned char *data, unsigned w, unsigned h, unsigned padding, float radius,
+                   float blur, int offset, float opacity) {
+  tangos_shadow(data, rasterPixels(w), rasterPixels(h), rasterPixels(padding), radius * rasterScale(),
+                 blur * rasterScale(), dpi::pixels(offset, rasterDpi), opacity);
+}
 struct Color {
   uint32_t value;
   Color(int r, int g, int b) : Color(255, r, g, b) {}
@@ -59,15 +94,19 @@ struct Surface {
   HBITMAP bitmap;
   HGDIOBJ previous;
   unsigned char *data = nullptr;
-  int x, y, w, h;
+  int x, y, w, h, pixelWidth, pixelHeight;
   Surface(HDC dest, int xx, int yy, int ww, int hh) : target(dest), x(xx), y(yy), w(ww), h(hh) {
+    rasterDpi = dpi::forDC(dest);
+    tangos_set_scale(rasterScale());
+    pixelWidth = dpi::pixels(w, rasterDpi);
+    pixelHeight = dpi::pixels(h, rasterDpi);
     BITMAPINFO info{};
     info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    info.bmiHeader.biWidth = w;
-    info.bmiHeader.biHeight = -h;
+    info.bmiHeader.biWidth = pixelWidth;
+    info.bmiHeader.biHeight = -pixelHeight;
     info.bmiHeader.biPlanes = 1;
     info.bmiHeader.biBitCount = 32;
-    dc = CreateCompatibleDC(dest);
+    dc = dpi::compatibleDC(dest);
     bitmap = CreateDIBSection(dest, &info, DIB_RGB_COLORS, (void **)&data, nullptr, 0);
     previous = SelectObject(dc, bitmap);
     BitBlt(dc, 0, 0, w, h, dest, x, y, SRCCOPY);
@@ -86,6 +125,7 @@ struct Backdrop {
   HGDIOBJ previous = nullptr;
   int width = 0, height = 0;
   ULONGLONG rendered = 0;
+  UINT dpi = 96;
   ~Backdrop() {
     if (dc) {
       SelectObject(dc, previous);
@@ -109,9 +149,9 @@ std::map<HWND, std::unique_ptr<IconTooltip>> iconTooltips;
 // the current DPI policy; do not scale them a second time.
 void refreshCompactRegion(HWND window) {
   RECT bounds{};
-  if (!GetWindowRect(window, &bounds))
+  if (!dpi::windowRect(window, &bounds))
     return;
-  auto region = CreateRoundRectRgn(0, 0, bounds.right - bounds.left + 1,
+  auto region = dpi::roundRegion(0, 0, bounds.right - bounds.left + 1,
                                    bounds.bottom - bounds.top + 1, 16, 16);
   if (!SetWindowRgn(window, region, TRUE))
     DeleteObject(region);
@@ -119,21 +159,22 @@ void refreshCompactRegion(HWND window) {
 void buttonBackground(const DRAWITEMSTRUCT &item) {
   HWND parent = GetParent(item.hwndItem);
   RECT parentBounds{}, bounds{};
-  if (!parent || !GetClientRect(parent, &parentBounds) || !GetWindowRect(item.hwndItem, &bounds))
+  if (!parent || !dpi::clientRect(parent, &parentBounds) || !dpi::relativeRect(item.hwndItem, parent, &bounds))
     return;
-  MapWindowPoints(nullptr, parent, reinterpret_cast<POINT *>(&bounds), 2);
   auto &cached = buttonBackdrops[parent];
-  if (!cached || cached->width != parentBounds.right || cached->height != parentBounds.bottom) {
+  if (!cached || cached->width != parentBounds.right || cached->height != parentBounds.bottom ||
+      cached->dpi != dpi::forDC(item.hDC)) {
     cached = std::make_unique<Backdrop>();
     cached->width = parentBounds.right;
     cached->height = parentBounds.bottom;
-    cached->dc = CreateCompatibleDC(item.hDC);
-    cached->bitmap = CreateCompatibleBitmap(item.hDC, cached->width, cached->height);
+    cached->dpi = dpi::forDC(item.hDC);
+    cached->dc = dpi::compatibleDC(item.hDC);
+    cached->bitmap = dpi::compatibleBitmap(item.hDC, cached->width, cached->height);
     cached->previous = SelectObject(cached->dc, cached->bitmap);
   }
   if (!cached->rendered) {
     SetPropW(parent, L"TangOSBackdropRendering", reinterpret_cast<HANDLE>(1));
-    SendMessageW(parent, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(cached->dc), PRF_CLIENT);
+    dpi::sendMessage(parent, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(cached->dc), PRF_CLIENT);
     RemovePropW(parent, L"TangOSBackdropRendering");
     cached->rendered = 1;
   }
@@ -165,9 +206,47 @@ LRESULT CALLBACK hoverButton(HWND window, UINT message, WPARAM w, LPARAM l, UINT
   }
   return DefSubclassProc(window, message, w, l);
 }
+LRESULT CALLBACK backgroundLabelProc(HWND window, UINT message, WPARAM w, LPARAM l, UINT_PTR id,
+                                      DWORD_PTR) {
+  dpi::Scope scope(dpi::forWindow(window));
+  if (message == WM_PAINT || message == WM_PRINT || message == WM_PRINTCLIENT) {
+    PAINTSTRUCT paint{};
+    auto dc = message == WM_PAINT ? dpi::beginPaint(window, &paint) : reinterpret_cast<HDC>(w);
+    auto saved = SaveDC(dc);
+    dpi::configureDC(dc, dpi::current());
+    DRAWITEMSTRUCT background{};
+    background.hwndItem = window;
+    background.hDC = dc;
+    dpi::clientRect(window, &background.rcItem);
+    buttonBackground(background);
+    std::wstring text(GetWindowTextLengthW(window) + 1, 0);
+    GetWindowTextW(window, text.data(), int(text.size()));
+    auto previous = SelectObject(dc, dpi::paintFont(window));
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, rgb(colors.muted));
+    DrawTextW(dc, text.c_str(), -1, &background.rcItem,
+              DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    SelectObject(dc, previous);
+    RestoreDC(dc, saved);
+    if (message == WM_PAINT) EndPaint(window, &paint);
+    return 0;
+  }
+  if (message == WM_ERASEBKGND) return 1;
+  if (message == WM_SETTEXT) {
+    auto result = DefSubclassProc(window, message, w, l);
+    invalidateBackdrop(GetParent(window));
+    InvalidateRect(window, nullptr, FALSE);
+    return result;
+  }
+  if (message == WM_NCDESTROY) {
+    RemovePropW(window, L"TangOSBackgroundLabel");
+    RemoveWindowSubclass(window, backgroundLabelProc, id);
+  }
+  return DefSubclassProc(window, message, w, l);
+}
 void paintCompactCombo(HWND window, HDC dc) {
   RECT bounds{};
-  GetClientRect(window, &bounds);
+  dpi::clientRect(window, &bounds);
   DRAWITEMSTRUCT background{};
   background.hwndItem = window;
   background.hDC = dc;
@@ -183,12 +262,12 @@ void paintCompactCombo(HWND window, HDC dc) {
       GetPropW(window, L"TangOSNeedsRole") ? Color(255, 234, 179, 8) : borders[paletteIndex];
   Surface surface(dc, 0, 0, bounds.right, bounds.bottom);
   if (surface.data)
-    tangos_frame(surface.data, bounds.right, bounds.bottom, 8,
+    rasterFrame(surface.data, bounds.right, bounds.bottom, 8,
                  Color(140, fill.GetR(), fill.GetG(), fill.GetB()).value, edge.value);
   std::wstring value(GetWindowTextLengthW(window) + 1, 0);
   GetWindowTextW(window, value.data(), int(value.size()));
   auto previous =
-      SelectObject(surface.dc, reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0)));
+      SelectObject(surface.dc, reinterpret_cast<HFONT>(dpi::sendMessage(window, WM_GETFONT, 0, 0)));
   SetBkMode(surface.dc, TRANSPARENT);
   SetTextColor(surface.dc, rgb(IsWindowEnabled(window) ? colors.ink : colors.muted));
   RECT textBounds{6, 0, bounds.right - 21, bounds.bottom};
@@ -205,17 +284,22 @@ void paintCompactCombo(HWND window, HDC dc) {
 }
 LRESULT CALLBACK compactComboProc(HWND window, UINT message, WPARAM w, LPARAM l, UINT_PTR id,
                                   DWORD_PTR) {
+  dpi::Scope scope(dpi::forWindow(window));
   if (message == WM_SIZE)
     refreshCompactRegion(window);
   if (message == WM_PAINT) {
     PAINTSTRUCT paint{};
-    auto dc = BeginPaint(window, &paint);
+    auto dc = dpi::beginPaint(window, &paint);
     paintCompactCombo(window, dc);
     EndPaint(window, &paint);
     return 0;
   }
   if (message == WM_PRINT || message == WM_PRINTCLIENT) {
-    paintCompactCombo(window, reinterpret_cast<HDC>(w));
+    auto dc = reinterpret_cast<HDC>(w);
+    auto saved = SaveDC(dc);
+    dpi::configureDC(dc, dpi::current());
+    paintCompactCombo(window, dc);
+    RestoreDC(dc, saved);
     return 0;
   }
   if (message == WM_ERASEBKGND)
@@ -233,7 +317,7 @@ LRESULT CALLBACK compactComboProc(HWND window, UINT message, WPARAM w, LPARAM l,
 }
 void paintCompactEdit(HWND window, HDC dc) {
   RECT bounds{};
-  GetWindowRect(window, &bounds);
+  dpi::windowRect(window, &bounds);
   int width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
   DRAWITEMSTRUCT background{};
   background.hwndItem = window;
@@ -243,28 +327,31 @@ void paintCompactEdit(HWND window, HDC dc) {
   auto tint = compactField();
   Surface surface(dc, 0, 0, width, height);
   if (surface.data)
-    tangos_frame(surface.data, width, height, 8,
+    rasterFrame(surface.data, width, height, 8,
                  Color(166, GetRValue(tint), GetGValue(tint), GetBValue(tint)).value,
                  paletteIndex == 2 ? Color(56, 120, 190, 230).value
                                    : Color(217, 255, 255, 255).value);
 }
 LRESULT CALLBACK compactEditProc(HWND window, UINT message, WPARAM w, LPARAM l, UINT_PTR id,
                                  DWORD_PTR) {
+  dpi::Scope scope(dpi::forWindow(window));
   if (message == WM_SIZE)
     refreshCompactRegion(window);
   if (message == WM_SETFONT) {
     auto result = DefSubclassProc(window, message, w, l);
     // Recalculate vertical centering when accessibility/font scaling changes.
-    SetWindowPos(window, nullptr, 0, 0, 0, 0,
+    dpi::setWindowPos(window, nullptr, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
     return result;
   }
   if (message == WM_NCCALCSIZE) {
     auto bounds =
         w ? &reinterpret_cast<NCCALCSIZE_PARAMS *>(l)->rgrc[0] : reinterpret_cast<RECT *>(l);
-    auto dc = GetDC(window);
+    *bounds = {dpi::logical(bounds->left, dpi::current()), dpi::logical(bounds->top, dpi::current()),
+                dpi::logical(bounds->right, dpi::current()), dpi::logical(bounds->bottom, dpi::current())};
+    auto dc = dpi::getDC(window);
     auto previous =
-        SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0)));
+        SelectObject(dc, reinterpret_cast<HFONT>(dpi::sendMessage(window, WM_GETFONT, 0, 0)));
     TEXTMETRICW metrics{};
     GetTextMetricsW(dc, &metrics);
     SelectObject(dc, previous);
@@ -276,15 +363,17 @@ LRESULT CALLBACK compactEditProc(HWND window, UINT message, WPARAM w, LPARAM l, 
     bounds->right -= 6;
     bounds->top += top;
     bounds->bottom -= bottom;
+    *bounds = {dpi::pixels(bounds->left, dpi::current()), dpi::pixels(bounds->top, dpi::current()),
+                dpi::pixels(bounds->right, dpi::current()), dpi::pixels(bounds->bottom, dpi::current())};
     return 0;
   }
   if (message == WM_NCPAINT) {
-    auto dc = GetWindowDC(window);
+    auto dc = dpi::getWindowDC(window);
     RECT client{}, bounds{};
-    GetClientRect(window, &client);
-    GetWindowRect(window, &bounds);
+    dpi::clientRect(window, &client);
+    dpi::windowRect(window, &bounds);
     POINT origin{};
-    ClientToScreen(window, &origin);
+    dpi::clientToScreen(window, &origin);
     int saved = SaveDC(dc);
     ExcludeClipRect(dc, origin.x - bounds.left, origin.y - bounds.top,
                     origin.x - bounds.left + client.right, origin.y - bounds.top + client.bottom);
@@ -295,13 +384,15 @@ LRESULT CALLBACK compactEditProc(HWND window, UINT message, WPARAM w, LPARAM l, 
   }
   if (message == WM_PRINT) {
     auto dc = reinterpret_cast<HDC>(w);
+    auto saved = SaveDC(dc);
+    dpi::configureDC(dc, dpi::current());
     paintCompactEdit(window, dc);
     RECT bounds{};
-    GetWindowRect(window, &bounds);
+    dpi::windowRect(window, &bounds);
     POINT origin{};
-    ClientToScreen(window, &origin);
-    auto saved = SaveDC(dc);
-    OffsetViewportOrgEx(dc, origin.x - bounds.left, origin.y - bounds.top, nullptr);
+    dpi::clientToScreen(window, &origin);
+    dpi::offsetViewportOrigin(dc, origin.x - bounds.left, origin.y - bounds.top, nullptr);
+    SetMapMode(dc, MM_TEXT);
     auto result = DefSubclassProc(window, WM_PRINTCLIENT, w, PRF_CLIENT);
     RestoreDC(dc, saved);
     return result;
@@ -317,7 +408,7 @@ void shape(HDC dc, int x, int y, int w, int h, float radius, Color top, Color bo
     return;
   Surface s(dc, x, y, w, h);
   if (s.data)
-    tangos_shape(s.data, w, h, radius, top.value, bottom.value);
+    rasterShape(s.data, w, h, radius, top.value, bottom.value);
 }
 } // namespace
 void projectMenuRow(HDC dc, const RECT &bounds, const std::wstring &title,
@@ -423,7 +514,7 @@ static void drawBackground(HDC dc, int w, int h) {
   if (w > 0 && h > 0) {
     Surface surface(dc, 0, 0, w, h);
     if (surface.data)
-      tangos_mesh(surface.data, w, h, animationEnabled() ? phase : 0, paletteIndex);
+      rasterMesh(surface.data, w, h, animationEnabled() ? phase : 0, paletteIndex);
     return;
   }
 }
@@ -436,10 +527,11 @@ struct BackgroundFrame {
   unsigned palette;
   float time;
   bool animated;
+  UINT dpi;
   BackgroundFrame(HDC target, int width, int height)
-      : w(width), h(height), palette(~0u), time(-1), animated(false) {
-    dc = CreateCompatibleDC(target);
-    bitmap = CreateCompatibleBitmap(target, w, h);
+      : w(width), h(height), palette(~0u), time(-1), animated(false), dpi(dpi::forDC(target)) {
+    dc = dpi::compatibleDC(target);
+    bitmap = dpi::compatibleBitmap(target, w, h);
     previous = SelectObject(dc, bitmap);
   }
   ~BackgroundFrame() {
@@ -457,7 +549,7 @@ void background(HDC dc, int w, int h, int offsetY, int totalHeight) {
   int sourceHeight = std::max(h + std::max(0, offsetY), totalHeight);
   BackgroundFrame *frame = nullptr;
   for (auto &item : backgroundFrames)
-    if (item->w == w && item->h == sourceHeight) {
+    if (item->w == w && item->h == sourceHeight && item->dpi == dpi::forDC(dc)) {
       frame = item.get();
       break;
     }
@@ -496,7 +588,7 @@ void panel(HDC dc, int x, int y, int w, int h, bool solid, PanelStyle style) {
     shape(dc, x, y, w, h, 18, base[paletteIndex], base[paletteIndex]);
   Surface surface(dc, x, y, w, h);
   if (surface.data)
-    tangos_glass(surface.data, w, h, gloss[paletteIndex].value, tint[paletteIndex].value,
+    rasterGlass(surface.data, w, h, gloss[paletteIndex].value, tint[paletteIndex].value,
                  edge[paletteIndex].value, unsigned(style));
 }
 void scrim(HDC dc, int w, int h) {
@@ -505,15 +597,18 @@ void scrim(HDC dc, int w, int h) {
   Surface surface(dc, 0, 0, w, h);
   if (!surface.data)
     return;
+  w = surface.pixelWidth;
+  h = surface.pixelHeight;
   std::vector<unsigned char> horizontal(size_t(w) * h * 4);
-  constexpr int radius = 3;
+  int radius = std::max(1, dpi::pixels(3, dpi::forDC(dc)));
+  int divisor = radius * 2 + 1;
   for (int y = 0; y < h; ++y)
     for (int channel = 0; channel < 3; ++channel) {
       int sum = 0;
       for (int dx = -radius; dx <= radius; ++dx)
         sum += surface.data[(size_t(y) * w + std::clamp(dx, 0, w - 1)) * 4 + channel];
       for (int x = 0; x < w; ++x) {
-        horizontal[(size_t(y) * w + x) * 4 + channel] = (unsigned char)(sum / 7);
+        horizontal[(size_t(y) * w + x) * 4 + channel] = (unsigned char)(sum / divisor);
         sum -= surface.data[(size_t(y) * w + std::clamp(x - radius, 0, w - 1)) * 4 + channel];
         sum += surface.data[(size_t(y) * w + std::clamp(x + radius + 1, 0, w - 1)) * 4 + channel];
       }
@@ -524,7 +619,7 @@ void scrim(HDC dc, int w, int h) {
       for (int dy = -radius; dy <= radius; ++dy)
         sum += horizontal[(size_t(std::clamp(dy, 0, h - 1)) * w + x) * 4 + channel];
       for (int y = 0; y < h; ++y) {
-        surface.data[(size_t(y) * w + x) * 4 + channel] = (unsigned char)(sum * .68 / 7);
+        surface.data[(size_t(y) * w + x) * 4 + channel] = (unsigned char)(sum * .68 / divisor);
         sum -= horizontal[(size_t(std::clamp(y - radius, 0, h - 1)) * w + x) * 4 + channel];
         sum += horizontal[(size_t(std::clamp(y + radius + 1, 0, h - 1)) * w + x) * 4 + channel];
       }
@@ -535,7 +630,7 @@ void agentCard(HDC dc, int x, int y, int w, int h, COLORREF tint, bool hovered) 
     constexpr int padding = 40;
     Surface shadow(dc, x - padding, y - padding, w + padding * 2, h + padding * 2);
     if (shadow.data)
-      tangos_shadow(shadow.data, shadow.w, shadow.h, padding, 14, hovered ? 20 : 12,
+      rasterShadow(shadow.data, shadow.w, shadow.h, padding, 14, hovered ? 20 : 12,
                      hovered ? 8 : 4, hovered ? .13f : .08f);
   }
   static const Color gloss[] = {Color(234, 244, 253), Color(250, 208, 172), Color(20, 44, 70),
@@ -543,7 +638,7 @@ void agentCard(HDC dc, int x, int y, int w, int h, COLORREF tint, bool hovered) 
   auto fill = gloss[paletteIndex];
   Surface surface(dc, x, y, w, h);
   if (surface.data)
-    tangos_frame(surface.data, w, h, 14, Color(230, fill.GetR(), fill.GetG(), fill.GetB()).value,
+    rasterFrame(surface.data, w, h, 14, Color(230, fill.GetR(), fill.GetG(), fill.GetB()).value,
                  Color(255, GetRValue(tint), GetGValue(tint), GetBValue(tint)).value);
 }
 void splashBubble(HDC dc, int x, int y, int size, double opacity) {
@@ -551,7 +646,7 @@ void splashBubble(HDC dc, int x, int y, int size, double opacity) {
     return;
   Surface surface(dc, x, y, size, size);
   if (surface.data)
-    tangos_frame(surface.data, size, size, size / 2.f,
+    rasterFrame(surface.data, size, size, size / 2.f,
                  Color(int(76 * opacity), 255, 255, 255).value,
                  Color(int(140 * opacity), 255, 255, 255).value);
 }
@@ -576,7 +671,7 @@ void progressBar(HDC dc, int x, int y, int width, double percent, COLORREF tint)
   Surface surface(dc, x, y, width, 6);
   if (!surface.data)
     return;
-  tangos_frame(surface.data, width, 6, 3, Color(26, 0, 0, 0).value, 0);
+  rasterFrame(surface.data, width, 6, 3, Color(26, 0, 0, 0).value, 0);
   int filled = int(std::round(width * std::clamp(percent, 0., 100.) / 100.));
   if (filled > 0) {
     auto clip = SaveDC(surface.dc);
@@ -613,7 +708,7 @@ void taskNote(HDC dc, const std::wstring &value, int x, int y, int width) {
   int height = taskNoteHeight(dc, value, width);
   Surface surface(dc, x, y, width, height);
   if (surface.data)
-    tangos_frame(surface.data, width, height, 8, Color(41, 234, 179, 8).value,
+    rasterFrame(surface.data, width, height, 8, Color(41, 234, 179, 8).value,
                  Color(115, 234, 179, 8).value);
   auto previous = SelectObject(surface.dc, uiFont(11, false, 600));
   SetBkMode(surface.dc, TRANSPARENT);
@@ -639,10 +734,10 @@ void helperPanel(HDC dc, int x, int y, int width, int height) {
   Surface surface(dc, x, y, width, height);
   if (!surface.data)
     return;
-  tangos_frame(surface.data, width, height, 15, Color(251, 255, 246).value,
+  rasterFrame(surface.data, width, height, 15, Color(251, 255, 246).value,
                Color(94, 194, 46).value);
   auto saved = SaveDC(surface.dc);
-  auto clip = CreateRoundRectRgn(0, 0, width, height, 30, 30);
+  auto clip = dpi::roundRegion(0, 0, width, height, 30, 30);
   SelectClipRgn(surface.dc, clip);
   for (int row = 2; row < 35; ++row) {
     double t = double(row - 2) / 32;
@@ -658,15 +753,15 @@ void helperPanel(HDC dc, int x, int y, int width, int height) {
 void tourPanel(HDC dc, int x, int y, int width, int height) {
   Surface surface(dc, x, y, width, height);
   if (surface.data)
-    tangos_frame(surface.data, width, height, 14, Color(251, 255, 246).value,
+    rasterFrame(surface.data, width, height, 14, Color(251, 255, 246).value,
                  Color(94, 194, 46).value);
 }
 void tourShade(HDC dc, int width, int height, const RECT *spot) {
   auto saved = SaveDC(dc);
   HRGN outside = nullptr, hole = nullptr;
   if (spot) {
-    outside = CreateRectRgn(0, 0, width, height);
-    hole = CreateRoundRectRgn(spot->left, spot->top, spot->right, spot->bottom, 24, 24);
+    outside = dpi::rectRegion(0, 0, width, height);
+    hole = dpi::roundRegion(spot->left, spot->top, spot->right, spot->bottom, 24, 24);
     CombineRgn(outside, outside, hole, RGN_DIFF);
     SelectClipRgn(dc, outside);
   }
@@ -679,7 +774,7 @@ void tourShade(HDC dc, int width, int height, const RECT *spot) {
   if (spot && spot->right > spot->left && spot->bottom > spot->top) {
     Surface border(dc, spot->left, spot->top, spot->right - spot->left, spot->bottom - spot->top);
     if (border.data)
-      tangos_frame(border.data, border.w, border.h, 12, 0, Color(230, 255, 255, 255).value);
+      rasterFrame(border.data, border.w, border.h, 12, 0, Color(230, 255, 255, 255).value);
   }
 }
 namespace {
@@ -753,7 +848,7 @@ void gradientText(HDC dc, const RichPart &part, int x, int y, int size, int heig
   Surface mask(dc, x - 1, y, std::min(part.width, available) + 4, height);
   if (!mask.data)
     return;
-  std::vector<unsigned char> background(mask.data, mask.data + mask.w * mask.h * 4);
+  std::vector<unsigned char> background(mask.data, mask.data + mask.pixelWidth * mask.pixelHeight * 4);
   PatBlt(mask.dc, 0, 0, mask.w, mask.h, BLACKNESS);
   auto prior = SelectObject(mask.dc, uiFont(size, false, 0, true));
   SetTextColor(mask.dc, RGB(255, 255, 255));
@@ -767,16 +862,16 @@ void gradientText(HDC dc, const RichPart &part, int x, int y, int size, int heig
   GdiFlush();
   static const Color accents[] = {Color(127, 196, 0), Color(255, 179, 71), Color(45, 224, 138),
                                   Color(129, 140, 248), Color(230, 210, 0)};
-  for (int column = 0; column < mask.w; ++column) {
+  for (int column = 0; column < mask.pixelWidth; ++column) {
     double u = std::fmod(
-        column / double(2 * std::max(1, part.width)) + (animationEnabled() ? phase / 3.2 : 0), 1.0);
+        column / double(2 * std::max(1, dpi::pixels(part.width, dpi::forDC(dc)))) + (animationEnabled() ? phase / 3.2 : 0), 1.0);
     double blend = u < .5 ? 2 * u : 2 * (1 - u);
     auto first = colors.primary, second = accents[paletteIndex];
     int tint[] = {int(first.GetB() + (second.GetB() - first.GetB()) * blend),
                   int(first.GetG() + (second.GetG() - first.GetG()) * blend),
                   int(first.GetR() + (second.GetR() - first.GetR()) * blend)};
-    for (int row = 0; row < mask.h; ++row) {
-      size_t pixel = (size_t(row) * mask.w + column) * 4;
+    for (int row = 0; row < mask.pixelHeight; ++row) {
+      size_t pixel = (size_t(row) * mask.pixelWidth + column) * 4;
       for (int channel = 0; channel < 3; ++channel) {
         int alpha = mask.data[pixel + channel];
         mask.data[pixel + channel] =
@@ -832,7 +927,8 @@ void compactCombo(HWND window, bool needsRole) {
   SetPropW(window, L"TangOSCompactCombo", reinterpret_cast<HANDLE>(1));
   if (needsRole)
     SetPropW(window, L"TangOSNeedsRole", reinterpret_cast<HANDLE>(1));
-  SendMessageW(window, CB_SETITEMHEIGHT, WPARAM(-1), 20);
+  dpi::sendMessage(window, CB_SETITEMHEIGHT, WPARAM(-1), 20);
+  dpi::compactComboHeight(window, 26);
   refreshCompactRegion(window);
   SetWindowSubclass(window, compactComboProc, 3, 0);
 }
@@ -845,9 +941,13 @@ void compactEdit(HWND window) {
   SetPropW(window, L"TangOSCompactEdit", reinterpret_cast<HANDLE>(1));
   SetWindowSubclass(window, compactEditProc, 4, 0);
   SetWindowLongPtrW(window, GWL_STYLE, GetWindowLongPtrW(window, GWL_STYLE) | WS_BORDER);
-  SetWindowPos(window, nullptr, 0, 0, 0, 0,
+  dpi::setWindowPos(window, nullptr, 0, 0, 0, 0,
                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
   refreshCompactRegion(window);
+}
+void backgroundLabel(HWND window) {
+  SetPropW(window, L"TangOSBackgroundLabel", reinterpret_cast<HANDLE>(1));
+  SetWindowSubclass(window, backgroundLabelProc, 5, 0);
 }
 void iconButton(HWND window, Icon icon) {
   SetPropW(window, L"TangOSIcon", (HANDLE)(uintptr_t(unsigned(icon) + 1)));
@@ -859,16 +959,17 @@ void iconButton(HWND window, Icon icon) {
   auto tooltip = std::make_unique<IconTooltip>();
   tooltip->text.resize(GetWindowTextLengthW(window) + 1);
   GetWindowTextW(window, tooltip->text.data(), int(tooltip->text.size()));
-  tooltip->window = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr,
+  tooltip->window = dpi::createWindow(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr,
                                     WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX, CW_USEDEFAULT,
                                     CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, GetParent(window),
                                     nullptr, GetModuleHandleW(nullptr), nullptr);
+  controlFont(tooltip->window, 12);
   TOOLINFOW info{sizeof(info)};
   info.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
   info.hwnd = GetParent(window);
   info.uId = reinterpret_cast<UINT_PTR>(window);
   info.lpszText = tooltip->text.data();
-  SendMessageW(tooltip->window, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&info));
+  dpi::sendMessage(tooltip->window, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&info));
   iconTooltips[window] = std::move(tooltip);
 }
 void iconTextButton(HWND window, Icon icon) {
@@ -896,7 +997,7 @@ void rule(HDC dc, int x, int y, int width) {
 void drawIcon(HDC dc, Icon icon, int x, int y, int size) {
   Surface surface(dc, x, y, size, size);
   if (surface.data)
-    tangos_icon(surface.data, size, size, unsigned(icon), colors.ink.value);
+    rasterIcon(surface.data, size, size, unsigned(icon), colors.ink.value);
 }
 void buttonFont(HWND window, int size, int weight) {
   SetPropW(window, L"TangOSFontSize", reinterpret_cast<HANDLE>(uintptr_t(std::clamp(size, 8, 24))));
@@ -904,7 +1005,7 @@ void buttonFont(HWND window, int size, int weight) {
            reinterpret_cast<HANDLE>(uintptr_t(std::clamp(weight, 100, 900))));
 }
 void controlFont(HWND window, int size, int weight) {
-  SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(uiFont(size, false, weight)), TRUE);
+  dpi::sendMessage(window, WM_SETFONT, reinterpret_cast<WPARAM>(uiFont(size, false, weight)), TRUE);
 }
 int textWidth(HDC dc, const std::wstring &text, int size, int weight) {
   auto previous = SelectObject(dc, uiFont(size, false, weight));
@@ -917,7 +1018,7 @@ void badge(HDC dc, const std::wstring &text, int x, int y, int width, int height
   {
     Surface surface(dc, x, y, width, height);
     if (surface.data)
-      tangos_frame(
+      rasterFrame(
           surface.data, width, height, height / 2.f,
           Color(36, colors.primary.GetR(), colors.primary.GetG(), colors.primary.GetB()).value,
           Color(77, colors.primary.GetR(), colors.primary.GetG(), colors.primary.GetB()).value);
@@ -955,7 +1056,7 @@ void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
     auto border = policy == 1 ? Color(255, 255, 255) : bottom;
     Surface surface(i.hDC, x, y, w, h);
     if (surface.data)
-      tangos_gradient_frame(
+      rasterGradient(
           surface.data, w, h, h / 2.f,
           Color(hover         ? 160
                 : policy == 1 ? 128
@@ -967,18 +1068,18 @@ void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
   } else if (GetPropW(i.hwndItem, L"TangOSRoleChip")) {
     Surface surface(i.hDC, x, y, w, h);
     if (surface.data)
-      tangos_frame(surface.data, w, h, h / 2.f, Color(hover ? 55 : 36, 59, 130, 246).value,
+      rasterFrame(surface.data, w, h, h / 2.f, Color(hover ? 55 : 36, 59, 130, 246).value,
                    Color(102, 59, 130, 246).value);
   } else if (stopControl) {
     Surface surface(i.hDC, x, y, w, h);
     if (surface.data) {
       auto fill = Color(stopping ? 230 : 255, base.GetR(), base.GetG(), base.GetB());
-      tangos_frame(surface.data, w, h, h / 2.f, fill.value, fill.value);
+      rasterFrame(surface.data, w, h, h / 2.f, fill.value, fill.value);
     }
   } else if ((i.itemState & ODS_DISABLED) && primary) {
     Surface surface(i.hDC, x, y, w, h);
     if (surface.data)
-      tangos_frame(surface.data, w, h, h / 2.f,
+      rasterFrame(surface.data, w, h, h / 2.f,
                    Color(26, base.GetR(), base.GetG(), base.GetB()).value,
                    Color(56, base.GetR(), base.GetG(), base.GetB()).value);
   } else if (!flat || hover || (i.itemState & ODS_SELECTED)) {
@@ -994,7 +1095,7 @@ void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
     int size = 15;
     Surface surface(i.hDC, x + (w - size) / 2, y + (h - size) / 2, size, size);
     if (surface.data)
-      tangos_icon(surface.data, size, size, unsigned(icon - 1),
+      rasterIcon(surface.data, size, size, unsigned(icon - 1),
                   (i.itemState & ODS_DISABLED) ? colors.muted.value
                   : danger || primary          ? 0xffffffff
                                                : colors.ink.value);
@@ -1019,7 +1120,7 @@ void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
     int left = x + std::max(4, (w - textSize - 21) / 2);
     Surface surface(i.hDC, left, y + (h - 14) / 2, 14, 14);
     if (surface.data)
-      tangos_icon(surface.data, 14, 14, unsigned(icon - 1),
+      rasterIcon(surface.data, 14, 14, unsigned(icon - 1),
                   (i.itemState & ODS_DISABLED) && !stopControl ? colors.muted.value
                   : primary || danger                          ? 0xffffffff
                                                                : colors.ink.value);
@@ -1047,7 +1148,7 @@ void mascot(HDC dc, int x, int y, int size, const std::string &emotion) {
   int height = (size * 673 + 310) / 620; // Bundled frames share the original aspect ratio.
   Surface s(dc, x, y, size, height);
   if (s.data)
-    tangos_image(s.data, size, height,
+    rasterImage(s.data, size, height,
                  (const unsigned char *)LockResource(LoadResource(nullptr, r)),
                  SizeofResource(nullptr, r));
 }

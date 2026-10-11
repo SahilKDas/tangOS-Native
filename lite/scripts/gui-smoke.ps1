@@ -79,8 +79,11 @@ $pixels = [IO.File]::ReadAllBytes((Join-Path $fixture 'helper-floating-tips.bmp'
 $pixelWidth = [BitConverter]::ToInt32($pixels, 18)
 $pixelHeight = [BitConverter]::ToInt32($pixels, 22)
 if ([BitConverter]::ToInt16($pixels, 28) -ne 32 -or $pixelHeight -le 0) { throw 'Unexpected native capture format' }
-$sampleX = [int]$helper.panel.x + 130
-$sampleY = [int]$helper.panel.y + 20
+$dpiMatch = [regex]::Match($result, '(?m)^DPI: ([0-9]+)')
+if (-not $dpiMatch.Success) { throw 'Native DPI evidence missing' }
+$renderScale = [int]$dpiMatch.Groups[1].Value / 96.0
+$sampleX = [int][math]::Round(([int]$helper.panel.x + 130) * $renderScale)
+$sampleY = [int][math]::Round(([int]$helper.panel.y + 20) * $renderScale)
 if ($sampleX -ge $pixelWidth -or $sampleY -ge $pixelHeight) { throw 'Floating helper is outside the capture' }
 $pixel = [BitConverter]::ToInt32($pixels, 10) + (($pixelHeight - 1 - $sampleY) * $pixelWidth + $sampleX) * 4
 if ($pixels[$pixel] -ge 100 -or $pixels[$pixel + 1] -lt 190 -or $pixels[$pixel + 1] - $pixels[$pixel + 2] -lt 70) { throw 'Floating helper was painted behind the Console pane' }

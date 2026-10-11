@@ -1,3 +1,4 @@
+#include "dpi.h"
 #include "helper_overlay.h"
 #include "window_capture.h"
 #include <algorithm>
@@ -29,8 +30,8 @@ struct HelperOverlay::Impl {
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpszClassName = L"TangOSLiteHelper";
     wc.hCursor = LoadCursorW(nullptr, IDC_HAND);
-    RegisterClassW(&wc);
-    window = CreateWindowExW(0, wc.lpszClassName, L"Tango tips", WS_CHILD | WS_TABSTOP, 0, 0, 232,
+    dpi::registerClass(&wc);
+    window = dpi::createWindow(0, wc.lpszClassName, L"Tango tips", WS_CHILD | WS_TABSTOP, 0, 0, 232,
                              443, parent, nullptr, wc.hInstance, this);
     if (!window)
       throw std::runtime_error("Cannot create Tango helper");
@@ -41,11 +42,11 @@ struct HelperOverlay::Impl {
       DestroyWindow(window);
   }
   void region() {
-    auto shape = CreateRectRgn(42, 270, 190, 443);
+    auto shape = dpi::rectRegion(42, 270, 190, 443);
     if (state.open) {
       auto messages = state.messages();
       auto row = messages.empty() ? Json::object() : messages.at(state.index);
-      auto dc = GetDC(window);
+      auto dc = dpi::getDC(window);
       titleHeight = std::max(
           19, skin::wrappedLabelHeight(dc, wide(row.value("title", std::string())), 180, 14, true));
       bodyHeight =
@@ -53,7 +54,7 @@ struct HelperOverlay::Impl {
       ReleaseDC(window, dc);
       boxHeight = std::min(276, 38 + std::max(132, titleHeight + 4 + bodyHeight + 24) +
                                     (messages.size() > 1 ? 34 : 0));
-      auto box = CreateRoundRectRgn(10, 276 - boxHeight, 222, 276, 30, 30);
+      auto box = dpi::roundRegion(10, 276 - boxHeight, 222, 276, 30, 30);
       CombineRgn(shape, shape, box, RGN_OR);
       DeleteObject(box);
     }
@@ -80,10 +81,10 @@ struct HelperOverlay::Impl {
   }
   void paint(HDC dc) {
     RECT bounds{};
-    GetClientRect(parent, &bounds);
-    auto backdrop = CreateCompatibleDC(dc);
+    dpi::clientRect(parent, &bounds);
+    auto backdrop = dpi::compatibleDC(dc);
     auto bitmap =
-        CreateCompatibleBitmap(dc, std::max(1L, bounds.right), std::max(1L, bounds.bottom));
+        dpi::compatibleBitmap(dc, std::max(1L, bounds.right), std::max(1L, bounds.bottom));
     auto previousBitmap = SelectObject(backdrop, bitmap);
     renderWindowTree(parent, backdrop, window);
     BitBlt(dc, 0, 0, 232, 443, backdrop, x, y, SRCCOPY);
@@ -161,7 +162,7 @@ struct HelperOverlay::Impl {
         return 1;
       if (msg == WM_PAINT || msg == WM_PRINTCLIENT) {
         PAINTSTRUCT ps{};
-        auto dc = msg == WM_PAINT ? BeginPaint(h, &ps) : reinterpret_cast<HDC>(w);
+        auto dc = msg == WM_PAINT ? dpi::beginPaint(h, &ps) : reinterpret_cast<HDC>(w);
         self->paint(dc);
         if (msg == WM_PAINT)
           EndPaint(h, &ps);
@@ -212,13 +213,13 @@ HelperOverlay::HelperOverlay(HWND owner, HWND backdrop, fs::path data, bool view
 HelperOverlay::~HelperOverlay() = default;
 void HelperOverlay::position(int width, int height, bool visible) {
   RECT owner{};
-  GetClientRect(impl->parent, &owner);
+  dpi::clientRect(impl->parent, &owner);
   width = owner.right;
   height = owner.bottom;
   impl->desiredVisible = visible;
   impl->x = std::max(0, width - 230);
   impl->y = std::max(0, height - 495);
-  SetWindowPos(impl->window, HWND_TOP, impl->x, impl->y, 232, 443,
+  dpi::setWindowPos(impl->window, HWND_TOP, impl->x, impl->y, 232, 443,
                SWP_NOACTIVATE |
                    ((visible && (GetWindowLongPtrW(impl->backdropWindow, GWL_STYLE) & WS_VISIBLE))
                         ? SWP_SHOWWINDOW
@@ -251,21 +252,21 @@ Json HelperOverlay::snapshot() const {
 }
 void HelperOverlay::smoke(const fs::path &directory) {
   impl->change(1);
-  SendMessageW(impl->window, WM_KEYDOWN, VK_RETURN, 0);
+  dpi::sendMessage(impl->window, WM_KEYDOWN, VK_RETURN, 0);
   if (!impl->state.open || impl->state.unread)
     throw std::runtime_error("Helper keyboard toggle did not open and mark messages read");
   auto before = impl->state.index;
-  SendMessageW(impl->window, WM_KEYDOWN, VK_RIGHT, 0);
-  SendMessageW(impl->window, WM_KEYDOWN, VK_LEFT, 0);
+  dpi::sendMessage(impl->window, WM_KEYDOWN, VK_RIGHT, 0);
+  dpi::sendMessage(impl->window, WM_KEYDOWN, VK_LEFT, 0);
   if (impl->state.index != before)
     throw std::runtime_error("Helper circular navigation failed");
   if (preferences(impl->data).value("updateNoteSeen", std::string()) !=
       currentAnnouncement().at("id"))
     throw std::runtime_error("Helper announcement read state was not persisted");
-  SendMessageW(impl->window, WM_LBUTTONUP, 0, MAKELPARAM(200, 276 - impl->boxHeight + 12));
+  dpi::sendMessage(impl->window, WM_LBUTTONUP, 0, MAKELPARAM(200, 276 - impl->boxHeight + 12));
   if (impl->state.open)
     throw std::runtime_error("Helper mouse close failed");
-  SendMessageW(impl->window, WM_LBUTTONUP, 0, MAKELPARAM(100, 330));
+  dpi::sendMessage(impl->window, WM_LBUTTONUP, 0, MAKELPARAM(100, 330));
   if (!impl->state.open)
     throw std::runtime_error("Helper mascot mouse toggle failed");
   impl->state.tips.push_back(

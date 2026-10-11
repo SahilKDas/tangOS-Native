@@ -1,3 +1,4 @@
+#include "dpi.h"
 #include "repository.h"
 #include "verification.h"
 #include "splash_overlay.h"
@@ -118,15 +119,15 @@ void append(HWND h, std::string s) { // Logs are UTF-8; malformed tool bytes are
   if (GetWindowTextLengthW(h) > 750000)
     SetWindowTextW(h, L"[Earlier output is in the complete durable log.]\r\n");
   auto end = GetWindowTextLengthW(h);
-  SendMessageW(h, EM_SETSEL, end, end);
-  SendMessageW(h, EM_REPLACESEL, FALSE, (LPARAM)cr.c_str());
+  dpi::sendMessage(h, EM_SETSEL, end, end);
+  dpi::sendMessage(h, EM_REPLACESEL, FALSE, (LPARAM)cr.c_str());
 }
 void output(const std::string &s) {
   std::lock_guard<std::mutex> lock(outputMutex);
   pending += s;
   PostMessageW(window, OUTPUT, 0, 0);
 }
-bool approve(const std::string &s) { return SendMessageW(window, REVIEW, 0, (LPARAM)&s) != 0; }
+bool approve(const std::string &s) { return dpi::sendMessage(window, REVIEW, 0, (LPARAM)&s) != 0; }
 struct ReviewState {
   bool done = false, approved = false;
   HWND text, yes, no;
@@ -142,9 +143,9 @@ LRESULT CALLBACK ReviewProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return DefWindowProcW(h, m, w, l);
   if (m == WM_SIZE) {
     int x = LOWORD(l), y = HIWORD(l);
-    MoveWindow(p->text, 16, 16, x - 32, y - 78, TRUE);
-    MoveWindow(p->yes, x - 300, y - 48, 140, 32, TRUE);
-    MoveWindow(p->no, x - 150, y - 48, 130, 32, TRUE);
+    dpi::moveWindow(p->text, 16, 16, x - 32, y - 78, TRUE);
+    dpi::moveWindow(p->yes, x - 300, y - 48, 140, 32, TRUE);
+    dpi::moveWindow(p->no, x - 150, y - 48, 130, 32, TRUE);
     return 0;
   }
   if (m == WM_COMMAND) {
@@ -164,25 +165,25 @@ bool reviewDialog(const std::string &text, bool readonly = false) {
   if (smoke)
     throw std::runtime_error("Smoke test must never approve a mutation");
   ReviewState st;
-  HWND h = CreateWindowExW(WS_EX_DLGMODALFRAME, L"TangOSLiteReview",
+  HWND h = dpi::createWindow(WS_EX_DLGMODALFRAME, L"TangOSLiteReview",
                            readonly ? L"TangOS Lite - About & notices"
                                     : L"TangOS Lite - Review every change",
                            WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, 940, 720,
                            window, nullptr, GetModuleHandleW(nullptr), &st);
-  st.text = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+  st.text = dpi::createWindow(WS_EX_CLIENTEDGE, L"EDIT", L"",
                             WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | WS_VSCROLL |
                                 WS_HSCROLL | ES_AUTOHSCROLL,
                             16, 16, 890, 580, h, nullptr, nullptr, nullptr);
-  SendMessageW(st.text, EM_SETLIMITTEXT, 64 * 1024 * 1024, 0);
-  SendMessageW(st.text, WM_SETFONT, (WPARAM)monoFont, TRUE);
+  dpi::sendMessage(st.text, EM_SETLIMITTEXT, 64 * 1024 * 1024, 0);
+  dpi::sendMessage(st.text, WM_SETFONT, (WPARAM)monoFont, TRUE);
   set(st.text, text);
   st.yes = CreateWindowW(L"BUTTON", readonly ? L"Close" : L"Approve operation",
                          WS_CHILD | WS_VISIBLE | WS_TABSTOP, 620, 610, 140, 32, h, (HMENU)1,
                          nullptr, nullptr);
   st.no = CreateWindowW(L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 770, 610, 130, 32,
                         h, (HMENU)2, nullptr, nullptr);
-  SendMessageW(st.yes, WM_SETFONT, (WPARAM)uiFont, TRUE);
-  SendMessageW(st.no, WM_SETFONT, (WPARAM)uiFont, TRUE);
+  dpi::sendMessage(st.yes, WM_SETFONT, (WPARAM)uiFont, TRUE);
+  dpi::sendMessage(st.no, WM_SETFONT, (WPARAM)uiFont, TRUE);
   if (readonly)
     ShowWindow(st.no, SW_HIDE);
   EnableWindow(window, FALSE);
@@ -207,7 +208,7 @@ std::string resourceText(int id) {
 }
 void about() {
   reviewDialog(
-      "TangOS Lite 0.30.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
+      "TangOS Lite 0.31.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
       "for checks and Git; Repository for status.\nAlways read AGENTS.md and review "
       "changes before publication.\n\n" +
           resourceText(204) + "\n\nMinGW-w64 libwinpthread\n" + resourceText(202) +
@@ -218,12 +219,12 @@ void about() {
 }
 void fillChecks() {
   checks = discoverChecks(repo, settings);
-  SendMessageW(checkCombo, CB_RESETCONTENT, 0, 0);
+  dpi::sendMessage(checkCombo, CB_RESETCONTENT, 0, 0);
   for (auto &c : checks) {
     auto s = wide(c.name + (c.available ? "" : " [unavailable]"));
-    SendMessageW(checkCombo, CB_ADDSTRING, 0, (LPARAM)s.c_str());
+    dpi::sendMessage(checkCombo, CB_ADDSTRING, 0, (LPARAM)s.c_str());
   }
-  SendMessageW(checkCombo, CB_SETCURSEL, smoke ? 2 : 0, 0);
+  dpi::sendMessage(checkCombo, CB_SETCURSEL, smoke ? 2 : 0, 0);
 }
 void start(const std::function<void()> &job, bool projectSwitch = false) {
   if (busy || (projectSwitchPending && !projectSwitch))
@@ -391,7 +392,7 @@ void refresh() {
 void runCheck() {
   if (repo.empty())
     return;
-  auto i = (size_t)SendMessageW(checkCombo, CB_GETCURSEL, 0, 0);
+  auto i = (size_t)dpi::sendMessage(checkCombo, CB_GETCURSEL, 0, 0);
   start([i] {
     Repository r(runner, repo, settings);
     auto c = r.check(i);
@@ -417,7 +418,7 @@ void runCheck() {
 void runAction() {
   if (repo.empty())
     return;
-  auto idx = (size_t)SendMessageW(actionCombo, CB_GETCURSEL, 0, 0);
+  auto idx = (size_t)dpi::sendMessage(actionCombo, CB_GETCURSEL, 0, 0);
   if (idx >= actions.size())
     return;
   auto name = actions[idx], remote = value(remoteEdit), ref = value(refEdit),
@@ -465,9 +466,9 @@ HWND control(const wchar_t *className, const wchar_t *text, DWORD style, int id 
     style |= BS_OWNERDRAW;
   if (std::wstring(className) == L"COMBOBOX")
     style |= CBS_OWNERDRAWFIXED | CBS_HASSTRINGS;
-  HWND h = CreateWindowExW(0, className, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 100, 30, window,
+  HWND h = dpi::createWindow(0, className, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 100, 30, window,
                            (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr);
-  SendMessageW(h, WM_SETFONT, (WPARAM)uiFont, TRUE);
+  dpi::sendMessage(h, WM_SETFONT, (WPARAM)uiFont, TRUE);
   return h;
 }
 HWND titleLabel, repoLabel, checkLabel, actionLabel, remoteLabel, refLabel, detailLabel,
@@ -482,62 +483,62 @@ void layout(int w, int h) {
         actionButton, agentsButton, statusEdit, logEdit, logsButton, refreshButton, configButton})
     ShowWindow(item, workspaceReady ? SW_SHOW : SW_HIDE);
   ShowWindow(themeCombo, workspaceReady ? SW_HIDE : SW_SHOW);
-  MoveWindow(themeCombo, w - 275, 12, 128, 200, TRUE);
+  dpi::moveWindow(themeCombo, w - 275, 12, 128, 200, TRUE);
   for (auto item : {toolbarReport, toolbarRefresh, toolbarSettings, toolbarKeys})
     ShowWindow(item, workspaceReady ? SW_SHOW : SW_HIDE);
-  MoveWindow(toolbarReport, w - 320, 13, 34, 30, TRUE);
-  MoveWindow(toolbarRefresh, w - 278, 13, 34, 30, TRUE);
-  MoveWindow(toolbarSettings, w - 236, 13, 34, 30, TRUE);
-  MoveWindow(toolbarKeys, w - 194, 13, 34, 30, TRUE);
-  MoveWindow(minimizeButton, w - 137, 11, 38, 30, TRUE);
-  MoveWindow(maximizeButton, w - 97, 11, 38, 30, TRUE);
-  MoveWindow(closeButton, w - 57, 11, 38, 30, TRUE);
+  dpi::moveWindow(toolbarReport, w - 320, 13, 34, 30, TRUE);
+  dpi::moveWindow(toolbarRefresh, w - 278, 13, 34, 30, TRUE);
+  dpi::moveWindow(toolbarSettings, w - 236, 13, 34, 30, TRUE);
+  dpi::moveWindow(toolbarKeys, w - 194, 13, 34, 30, TRUE);
+  dpi::moveWindow(minimizeButton, w - 137, 11, 38, 30, TRUE);
+  dpi::moveWindow(maximizeButton, w - 97, 11, 38, 30, TRUE);
+  dpi::moveWindow(closeButton, w - 57, 11, 38, 30, TRUE);
   ShowWindow(controllerTab, workspaceReady ? SW_SHOW : SW_HIDE);
   ShowWindow(repositoryTab, workspaceReady ? SW_SHOW : SW_HIDE);
   ShowWindow(toolboxButton, workspaceReady ? SW_SHOW : SW_HIDE);
-  MoveWindow(controllerTab, w / 2 - 135, 14, 134, 30, TRUE);
-  MoveWindow(repositoryTab, w / 2, 14, 134, 30, TRUE);
+  dpi::moveWindow(controllerTab, w / 2 - 135, 14, 134, 30, TRUE);
+  dpi::moveWindow(repositoryTab, w / 2, 14, 134, 30, TRUE);
   if (!workspaceReady) {
     ShowWindow(repoEdit, SW_SHOW);
     ShowWindow(projectButton, SW_SHOW);
-    MoveWindow(projectButton, 100, 13,
+    dpi::moveWindow(projectButton, 100, 13,
                std::clamp(int(value(projectButton).size()) * 7 + 32, 144, 260), 32, TRUE);
     int x = (w - 760) / 2, y = (h - 420) / 2;
-    MoveWindow(repoEdit, x + 72, y + 174, 494, 34, TRUE);
-    MoveWindow(selectButton, x + 578, y + 174, 110, 34, TRUE);
-    MoveWindow(browseButton, x + 270, y + 252, 220, 38, TRUE);
-    MoveWindow(activityLabel, x + 36, y + 366, 688, 24, TRUE);
+    dpi::moveWindow(repoEdit, x + 72, y + 174, 494, 34, TRUE);
+    dpi::moveWindow(selectButton, x + 578, y + 174, 110, 34, TRUE);
+    dpi::moveWindow(browseButton, x + 270, y + 252, 220, 38, TRUE);
+    dpi::moveWindow(activityLabel, x + 36, y + 366, 688, 24, TRUE);
     set(selectButton, "Open repo");
     set(browseButton, "Choose repo folder");
   } else {
     int rail = w - 354, cw = w - 382;
     ShowWindow(repoEdit, SW_HIDE);
     ShowWindow(projectButton, SW_SHOW);
-    MoveWindow(projectButton, 100, 13,
+    dpi::moveWindow(projectButton, 100, 13,
                std::clamp(int(value(projectButton).size()) * 7 + 32, 144, 260), 32, TRUE);
-    MoveWindow(browseButton, w - 416, 12, 124, 30, TRUE);
+    dpi::moveWindow(browseButton, w - 416, 12, 124, 30, TRUE);
     ShowWindow(selectButton, SW_HIDE);
     set(browseButton, "Change repo");
     ShowWindow(browseButton, SW_HIDE);
-    MoveWindow(checkCombo, 44, 168, cw - 196, 240, TRUE);
-    MoveWindow(runButton, 44, 210, 100, 34, TRUE);
-    MoveWindow(cancelButton, 154, 210, 86, 34, TRUE);
-    MoveWindow(logsButton, 250, 210, 100, 34, TRUE);
-    MoveWindow(actionCombo, 44, 313, cw - 60, 300, TRUE);
+    dpi::moveWindow(checkCombo, 44, 168, cw - 196, 240, TRUE);
+    dpi::moveWindow(runButton, 44, 210, 100, 34, TRUE);
+    dpi::moveWindow(cancelButton, 154, 210, 86, 34, TRUE);
+    dpi::moveWindow(logsButton, 250, 210, 100, 34, TRUE);
+    dpi::moveWindow(actionCombo, 44, 313, cw - 60, 300, TRUE);
     int half = (cw - 72) / 2;
-    MoveWindow(remoteEdit, 44, 369, half, 30, TRUE);
-    MoveWindow(refEdit, 56 + half, 369, half, 30, TRUE);
-    MoveWindow(detailsEdit, 44, 425, cw - 60, 54, TRUE);
-    MoveWindow(actionButton, cw - 122, 489, 106, 32, TRUE);
-    MoveWindow(logEdit, 44, 572, cw - 60, std::max(42, h - 670), TRUE);
-    MoveWindow(agentsButton, 44, h - 74, 130, 32, TRUE);
-    MoveWindow(configButton, cw - 122, h - 74, 106, 32, TRUE);
+    dpi::moveWindow(remoteEdit, 44, 369, half, 30, TRUE);
+    dpi::moveWindow(refEdit, 56 + half, 369, half, 30, TRUE);
+    dpi::moveWindow(detailsEdit, 44, 425, cw - 60, 54, TRUE);
+    dpi::moveWindow(actionButton, cw - 122, 489, 106, 32, TRUE);
+    dpi::moveWindow(logEdit, 44, 572, cw - 60, std::max(42, h - 670), TRUE);
+    dpi::moveWindow(agentsButton, 44, h - 74, 130, 32, TRUE);
+    dpi::moveWindow(configButton, cw - 122, h - 74, 106, 32, TRUE);
 
-    MoveWindow(refreshButton, rail + 218, 85, 96, 30, TRUE);
-    MoveWindow(statusEdit, rail + 16, 376, 308, std::max(70, h - 540), TRUE);
-    MoveWindow(toolboxButton, 30, h - 74, 138, 32, TRUE);
-    MoveWindow(agentsButton, 178, h - 74, 110, 32, TRUE);
-    MoveWindow(activityLabel, 302, h - 70, std::max(90, cw - 434), 24, TRUE);
+    dpi::moveWindow(refreshButton, rail + 218, 85, 96, 30, TRUE);
+    dpi::moveWindow(statusEdit, rail + 16, 376, 308, std::max(70, h - 540), TRUE);
+    dpi::moveWindow(toolboxButton, 30, h - 74, 138, 32, TRUE);
+    dpi::moveWindow(agentsButton, 178, h - 74, 110, 32, TRUE);
+    dpi::moveWindow(activityLabel, 302, h - 70, std::max(90, cw - 434), 24, TRUE);
     set(toolboxButton, toolboxOpen ? "Close tools" : "Encyclopedia");
     if (!toolboxOpen && !repositoryView) {
       for (HWND item : {checkCombo, runButton, cancelButton, actionCombo, remoteEdit, refEdit,
@@ -548,8 +549,8 @@ void layout(int w, int h) {
       for (HWND item : {checkCombo, runButton, cancelButton, actionCombo, remoteEdit, refEdit,
                         detailsEdit, actionButton, logEdit})
         ShowWindow(item, SW_HIDE);
-      MoveWindow(statusEdit, 30, 126, cw - 32, h - 228, TRUE);
-      MoveWindow(logsButton, rail + 16, 350, 130, 32, TRUE);
+      dpi::moveWindow(statusEdit, 30, 126, cw - 32, h - 228, TRUE);
+      dpi::moveWindow(logsButton, rail + 16, 350, 130, 32, TRUE);
     }
   }
   if (consoleUI && workspaceReady) {
@@ -635,18 +636,27 @@ void paintChrome(HDC dc, int w, int h) {
     skin::label(dc, L"Repository status", rail + 16, 345, 308, 24, 14, true);
   skin::label(dc, L"Port-only  ·  Review before push", rail + 16, h - 139, 300, 23, 12, true, true);
   skin::mascot(dc, w - 137, h - 127, 96);
-  skin::label(dc, L"v0.30.0", w - 74, h - 27, 60, 18, 10, false, true);
+  skin::label(dc, L"v0.31.0", w - 74, h - 27, 60, 18, 10, false, true);
 }
 void snapshot(const fs::path &path) {
+  dpi::Scope scale(dpi::forWindow(window));
   skin::invalidateBackdrop(window);
   RECT rect;
-  GetClientRect(window, &rect);
+  dpi::clientRect(window, &rect);
   int w = rect.right, h = rect.bottom;
-  HDC dc = GetDC(window), memory = CreateCompatibleDC(dc);
-  HBITMAP bitmap = CreateCompatibleBitmap(dc, w, h);
+  if (smoke) {
+    auto available = fs::space(path.parent_path()).available;
+    auto captureBytes = uintmax_t(dpi::pixels(w, dpi::current())) * dpi::pixels(h, dpi::current()) * 4;
+    if (available < 25ull * 1024 * 1024 * 1024 + captureBytes)
+      throw std::runtime_error("GUI verification paused to preserve 25 GiB free storage");
+  }
+  HDC dc = dpi::getDC(window), memory = dpi::compatibleDC(dc);
+  HBITMAP bitmap = dpi::compatibleBitmap(dc, w, h);
   auto old = SelectObject(memory, bitmap);
   paintChrome(memory, w, h);
   renderWindowTree(window, memory);
+  w = dpi::pixels(w, dpi::forDC(dc));
+  h = dpi::pixels(h, dpi::forDC(dc));
   BITMAPINFO info{};
   info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
   info.bmiHeader.biWidth = w;
@@ -674,7 +684,7 @@ fs::path saveDebugSnapshot() {
   fs::create_directories(folder);
   snapshot(folder / "window.bmp");
   Json state = {{"app", "TangOS Lite"},
-                {"version", "0.30.0"},
+                {"version", "0.31.0"},
                 {"capturedAt", activityNow()},
                 {"toolboxOpen", toolboxOpen},
                 {"repositoryView", repositoryView},
@@ -793,8 +803,8 @@ void projectMenu() {
   append(10002, L"Discover remote projects…");
   append(10003, L"Import project ZIP…");
   RECT bounds;
-  GetWindowRect(projectButton, &bounds);
-  auto selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, bounds.left, bounds.bottom + 8, 0,
+  dpi::windowRect(projectButton, &bounds);
+  auto selected = dpi::trackPopup(menu, TPM_RETURNCMD | TPM_NONOTIFY, bounds.left, bounds.bottom + 8, 0,
                                  window, nullptr);
   DestroyMenu(menu);
   if (selected == 10000)
@@ -933,9 +943,9 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     actionCombo = control(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP);
     for (auto &a : actions) {
       auto t = wide(a);
-      SendMessageW(actionCombo, CB_ADDSTRING, 0, (LPARAM)t.c_str());
+      dpi::sendMessage(actionCombo, CB_ADDSTRING, 0, (LPARAM)t.c_str());
     }
-    SendMessageW(actionCombo, CB_SETCURSEL, 0, 0);
+    dpi::sendMessage(actionCombo, CB_SETCURSEL, 0, 0);
     remoteLabel = control(L"STATIC", L"Remote / first ref / owner/repo", 0);
     remoteEdit = control(L"EDIT", L"origin", ES_AUTOHSCROLL | WS_TABSTOP);
     refLabel = control(L"STATIC", L"Branch / second ref / PR base", 0);
@@ -956,16 +966,17 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                       L"Git, Python, GitHub CLI and build tools are external "
                       L"dependencies.\r\nNo ROM data is bundled.\r\n",
                       style);
-    SendMessageW(statusEdit, EM_SETLIMITTEXT, 4 * 1024 * 1024, 0);
-    SendMessageW(logEdit, EM_SETLIMITTEXT, 1024 * 1024, 0);
-    SendMessageW(logEdit, WM_SETFONT, (WPARAM)monoFont, TRUE);
-    SendMessageW(statusEdit, WM_SETFONT, (WPARAM)monoFont, TRUE);
+    dpi::sendMessage(statusEdit, EM_SETLIMITTEXT, 4 * 1024 * 1024, 0);
+    dpi::sendMessage(logEdit, EM_SETLIMITTEXT, 1024 * 1024, 0);
+    dpi::sendMessage(logEdit, WM_SETFONT, (WPARAM)monoFont, TRUE);
+    dpi::sendMessage(statusEdit, WM_SETFONT, (WPARAM)monoFont, TRUE);
     activityLabel = control(L"STATIC", L"Ready - port-only safety is enabled by default.", 0);
+    skin::backgroundLabel(activityLabel);
     set(repoEdit, settings.repository);
     themeCombo = control(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, THEME);
     for (auto theme : {L"aero", L"sunset", L"deepsea", L"bubblegum", L"lemonlime"})
-      SendMessageW(themeCombo, CB_ADDSTRING, 0, (LPARAM)theme);
-    SendMessageW(themeCombo, CB_SETCURSEL, settings.themeIndex, 0);
+      dpi::sendMessage(themeCombo, CB_ADDSTRING, 0, (LPARAM)theme);
+    dpi::sendMessage(themeCombo, CB_SETCURSEL, settings.themeIndex, 0);
     skin::theme(settings.themeIndex);
     minimizeButton = control(L"BUTTON", L"−", WS_TABSTOP, MINIMIZE);
     maximizeButton = control(L"BUTTON", L"□", WS_TABSTOP, MAXIMIZE);
@@ -1000,9 +1011,9 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     break;
   case WM_NCHITTEST: {
     POINT point{(short)LOWORD(l), (short)HIWORD(l)};
-    ScreenToClient(h, &point);
+    dpi::screenToClient(h, &point);
     RECT r;
-    GetClientRect(h, &r);
+    dpi::clientRect(h, &r);
     if (!IsZoomed(h)) {
       bool left = point.x<6, right = point.x> r.right - 6,
            top = point.y<6, bottom = point.y> r.bottom - 6;
@@ -1032,11 +1043,11 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   case WM_PAINT: {
     skin::invalidateBackdrop(h);
     PAINTSTRUCT ps;
-    HDC dc = BeginPaint(h, &ps);
+    HDC dc = dpi::beginPaint(h, &ps);
     RECT r;
-    GetClientRect(h, &r);
-    HDC buffer = CreateCompatibleDC(dc);
-    HBITMAP bitmap = CreateCompatibleBitmap(dc, r.right, r.bottom);
+    dpi::clientRect(h, &r);
+    HDC buffer = dpi::compatibleDC(dc);
+    HBITMAP bitmap = dpi::compatibleBitmap(dc, r.right, r.bottom);
     auto previous = SelectObject(buffer, bitmap);
     paintChrome(buffer, r.right, r.bottom);
     BitBlt(dc, 0, 0, r.right, r.bottom, buffer, 0, 0, SRCCOPY);
@@ -1050,7 +1061,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (!GetPropW(h, L"TangOSBackdropRendering"))
       skin::invalidateBackdrop(h);
     RECT r;
-    GetClientRect(h, &r);
+    dpi::clientRect(h, &r);
     paintChrome((HDC)w, r.right, r.bottom);
     return 0;
   }
@@ -1073,10 +1084,10 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (i->CtlType == ODT_COMBOBOX) {
       FillRect(i->hDC, &i->rcItem, fieldBrush);
       if (i->itemID != (UINT)-1) {
-        int length = (int)SendMessageW(i->hwndItem, CB_GETLBTEXTLEN, i->itemID, 0);
+        int length = (int)dpi::sendMessage(i->hwndItem, CB_GETLBTEXTLEN, i->itemID, 0);
         std::wstring title(std::max(0, length) + 1, 0);
         if (length >= 0)
-          SendMessageW(i->hwndItem, CB_GETLBTEXT, i->itemID, (LPARAM)title.data());
+          dpi::sendMessage(i->hwndItem, CB_GETLBTEXT, i->itemID, (LPARAM)title.data());
         // GDI text respects the control DC viewport for native paint and WM_PRINT.
         auto previousFont = SelectObject(i->hDC, uiFont);
         SetTextColor(i->hDC, skin::text());
@@ -1109,9 +1120,8 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       return (LRESULT)fieldBrush;
     }
     SetTextColor((HDC)w, skin::muted());
-    SetBkColor((HDC)w, skin::field());
-    SetBkMode((HDC)w, OPAQUE);
-    return (LRESULT)fieldBrush;
+    SetBkMode((HDC)w, TRANSPARENT);
+    return (LRESULT)GetStockObject(HOLLOW_BRUSH);
   case WM_CTLCOLOREDIT:
   case WM_CTLCOLORLISTBOX:
     SetTextColor((HDC)w, skin::text());
@@ -1119,6 +1129,9 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return (LRESULT)fieldBrush;
   case WM_SIZE:
     layout(LOWORD(l), HIWORD(l));
+    return 0;
+  case WM_DPICHANGED:
+    skin::invalidateBackdrop(h);
     return 0;
   case WM_SYSCOMMAND:
     if ((w & 0xfff0) == 0x1230 && !busy) {
@@ -1128,7 +1141,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     break;
   case WM_LBUTTONUP: {
     RECT r;
-    GetClientRect(h, &r);
+    dpi::clientRect(h, &r);
     if (workspaceReady && !busy && (short)LOWORD(l) > r.right - 145 &&
         (short)HIWORD(l) > r.bottom - 130) {
       about();
@@ -1150,10 +1163,10 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   case WM_COMMAND:
     if (LOWORD(w) == THEME && HIWORD(w) == CBN_SELCHANGE) {
       if (busy) {
-        SendMessageW(themeCombo, CB_SETCURSEL, settings.themeIndex, 0);
+        dpi::sendMessage(themeCombo, CB_SETCURSEL, settings.themeIndex, 0);
         return 0;
       }
-      settings.themeIndex = (int)SendMessageW(themeCombo, CB_GETCURSEL, 0, 0);
+      settings.themeIndex = (int)dpi::sendMessage(themeCombo, CB_GETCURSEL, 0, 0);
       skin::theme(settings.themeIndex);
       if (!busy)
         saveSettings(config, settings);
@@ -1172,7 +1185,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         toolboxOpen = !toolboxOpen;
         repositoryView = false;
         RECT r;
-        GetClientRect(h, &r);
+        dpi::clientRect(h, &r);
         layout(r.right, r.bottom);
         return 0;
       }
@@ -1182,7 +1195,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (consoleUI && workspaceReady && !smoke)
           consoleUI->show(true, repositoryView, true);
         RECT r;
-        GetClientRect(h, &r);
+        dpi::clientRect(h, &r);
         layout(r.right, r.bottom);
         return 0;
       }
@@ -1213,7 +1226,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           if (consoleUI) {
             toolboxOpen = false;
             RECT bounds;
-            GetClientRect(h, &bounds);
+            dpi::clientRect(h, &bounds);
             layout(bounds.right, bounds.bottom);
             consoleUI->openPanel(id == TOOLBAR_REPORT ? "report"
                                  : id == TOOLBAR_KEYS ? "keys"
@@ -1221,7 +1234,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           }
           break;
         case TOOLBAR_REFRESH:
-          SendMessageW(h, CONSOLE_RELOAD, 0, 0);
+          dpi::sendMessage(h, CONSOLE_RELOAD, 0, 0);
           automaticUpdate();
           break;
         case SELECT_PROJECT:
@@ -1275,7 +1288,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           repositoryView = false;
           {
             RECT r;
-            GetClientRect(h, &r);
+            dpi::clientRect(h, &r);
             layout(r.right, r.bottom);
           }
           start([] {
@@ -1329,7 +1342,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     InvalidateRect(repositoryTab, nullptr, FALSE);
     return 0;
   case CONSOLE_PICK_VIEWER:
-    SendMessageW(h, WM_COMMAND, MAKEWPARAM(REPOSITORY_TAB, BN_CLICKED), 0);
+    dpi::sendMessage(h, WM_COMMAND, MAKEWPARAM(REPOSITORY_TAB, BN_CLICKED), 0);
     return 0;
   case STATE: {
     auto *s = (std::string *)l;
@@ -1340,7 +1353,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       fillChecks();
     else {
       checks.clear();
-      SendMessageW(checkCombo, CB_RESETCONTENT, 0, 0);
+      dpi::sendMessage(checkCombo, CB_RESETCONTENT, 0, 0);
     }
     workspaceReady = true;
     std::string projectTitle = utf8(repo.filename().wstring());
@@ -1362,7 +1375,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             toolboxOpen = true;
             repositoryView = false;
             RECT r;
-            GetClientRect(window, &r);
+            dpi::clientRect(window, &r);
             layout(r.right, r.bottom);
           },
           [](const Settings &next) {
@@ -1372,7 +1385,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           false, std::string(), std::function<void(Json)>(), workspaceRemote);
     }
     RECT rect;
-    GetClientRect(h, &rect);
+    dpi::clientRect(h, &rect);
     layout(rect.right, rect.bottom);
     return 0;
   }
@@ -1435,9 +1448,9 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         write(config.parent_path() / "debug-snapshot-report.txt",
               "PASS: native window bitmap, valid state/layout JSON and local-only output");
         snapshot(config.parent_path() / "controller.bmp");
-        SendMessageW(h, WM_COMMAND, REPOSITORY_TAB, 0);
+        dpi::sendMessage(h, WM_COMMAND, REPOSITORY_TAB, 0);
         snapshot(config.parent_path() / "repository.bmp");
-        SendMessageW(h, WM_COMMAND, CONTROLLER_TAB, 0);
+        dpi::sendMessage(h, WM_COMMAND, CONTROLLER_TAB, 0);
         smokePhase = 2;
         smokeTicks = 0;
         PostMessageW(h, WM_COMMAND, TOOLBOX, 0);
@@ -1446,7 +1459,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (resourceText(202).find("mingw-w64") == std::string::npos ||
             resourceText(203).find("GCC RUNTIME") == std::string::npos)
           smokeExit = 1;
-        HDC fontDC = GetDC(h);
+        HDC fontDC = dpi::getDC(h);
         auto oldFont = SelectObject(fontDC, uiFont);
         wchar_t actualFont[128]{};
         GetTextFaceW(fontDC, 128, actualFont);
@@ -1463,15 +1476,16 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
               std::string(smokeExit ? "FAIL" : "PASS") +
                   " native window: embedded Nunito, TinySkia, repository selection, status, check "
                   "execution, UI log, durable log, responsive timer ticks=" +
-                  std::to_string(smokeTicks) + "\n" + screen + "\n" + full);
+                  std::to_string(smokeTicks) + "\nDPI: " + std::to_string(dpi::forWindow(h)) +
+                  "\n" + screen + "\n" + full);
         snapshot(config.parent_path() / "workspace.bmp");
         for (int theme = 0; theme < 5; ++theme) {
-          SendMessageW(themeCombo, CB_SETCURSEL, theme, 0);
-          SendMessageW(h, WM_COMMAND, MAKEWPARAM(THEME, CBN_SELCHANGE), (LPARAM)themeCombo);
+          dpi::sendMessage(themeCombo, CB_SETCURSEL, theme, 0);
+          dpi::sendMessage(h, WM_COMMAND, MAKEWPARAM(THEME, CBN_SELCHANGE), (LPARAM)themeCombo);
           snapshot(config.parent_path() / fs::u8path("theme-" + std::to_string(theme) + ".bmp"));
         }
-        SendMessageW(themeCombo, CB_SETCURSEL, 0, 0);
-        SendMessageW(h, WM_COMMAND, MAKEWPARAM(THEME, CBN_SELCHANGE), (LPARAM)themeCombo);
+        dpi::sendMessage(themeCombo, CB_SETCURSEL, 0, 0);
+        dpi::sendMessage(h, WM_COMMAND, MAKEWPARAM(THEME, CBN_SELCHANGE), (LPARAM)themeCombo);
         smokePhase = 3;
         PostMessageW(h, WM_CLOSE, 0, 0);
       }
@@ -1489,10 +1503,8 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       UpdateWindow(activityLabel);
       set(activityLabel, "Ready - port-only safety is enabled by default.");
       UpdateWindow(activityLabel);
-      HDC statusDC = GetDC(activityLabel);
-      if ((HBRUSH)SendMessageW(h, WM_CTLCOLORSTATIC, (WPARAM)statusDC, (LPARAM)activityLabel) ==
-              GetStockObject(NULL_BRUSH) ||
-          GetBkMode(statusDC) != OPAQUE)
+      HDC statusDC = dpi::getDC(activityLabel);
+      if (!GetPropW(activityLabel, L"TangOSBackgroundLabel"))
         smokeExit = 1;
       ReleaseDC(activityLabel, statusDC);
       snapshot(config.parent_path() / "landing.bmp");
@@ -1526,6 +1538,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 }
 } // namespace
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
+  dpi::enable();
   SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS);
   SetSearchPathMode(BASE_SEARCH_PATH_ENABLE_SAFE_SEARCHMODE | BASE_SEARCH_PATH_PERMANENT);
   SetEnvironmentVariableW(L"GIT_TERMINAL_PROMPT", L"0");
@@ -1599,12 +1612,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     wc.lpszClassName = L"TangOSLiteReview";
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-    RegisterClassW(&wc);
+    dpi::registerClass(&wc);
     wc.lpfnWndProc = WindowProc;
     wc.lpszClassName = L"TangOSLite";
     wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(101));
-    RegisterClassW(&wc);
-    auto h = CreateWindowExW(
+    dpi::registerClass(&wc);
+    auto h = dpi::createWindow(
         0, wc.lpszClassName, L"TangOS Lite",
         WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_CLIPCHILDREN,
         CW_USEDEFAULT, CW_USEDEFAULT, 1180, 820, nullptr, nullptr, instance, nullptr);
@@ -1624,7 +1637,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
       if (msg.message == WM_KEYDOWN && msg.wParam == 'D' && GetKeyState(VK_CONTROL) < 0 &&
           GetKeyState(VK_SHIFT) < 0) {
-        SendMessageW(h, CONSOLE_DEBUG_SNAPSHOT, 0, 0);
+        dpi::sendMessage(h, CONSOLE_DEBUG_SNAPSHOT, 0, 0);
         continue;
       }
       if (!IsDialogMessageW(h, &msg)) {
@@ -1648,6 +1661,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     DeleteObject(monoFont);
     DeleteObject(fieldBrush);
     skin::shutdown();
+    dpi::shutdown();
     LocalFree(argv);
     CoUninitialize();
     return (int)msg.wParam;

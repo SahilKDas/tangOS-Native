@@ -32,6 +32,7 @@ void policyButton(HWND window, unsigned state);
 void roleChip(HWND window);
 void compactCombo(HWND window, bool needsRole = false);
 void compactEdit(HWND window);
+void backgroundLabel(HWND window);
 COLORREF compactField();
 void rule(HDC dc, int x, int y, int width);
 void buttonFont(HWND window, int size, int weight = 700);

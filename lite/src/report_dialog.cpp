@@ -1,3 +1,4 @@
+#include "dpi.h"
 #include "report_dialog.h"
 #include "skin.h"
 #include "images.h"
@@ -71,10 +72,10 @@ struct ReportDialog::Impl {
                DWORD style = 0) {
     if (std::wstring(kind) == L"BUTTON")
       style |= BS_OWNERDRAW;
-    auto child = CreateWindowExW(
+    auto child = dpi::createWindow(
         0, kind, wide(text).c_str(), WS_CHILD | WS_VISIBLE | WS_TABSTOP | style, x, y, w, h, window,
         reinterpret_cast<HMENU>(INT_PTR(id)), GetModuleHandleW(nullptr), nullptr);
-    SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+    dpi::sendMessage(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
     skin::controlFont(child, 13);
     SetWindowSubclass(child, keyboard, 4, reinterpret_cast<DWORD_PTR>(this));
     controls.push_back(child);
@@ -87,9 +88,9 @@ struct ReportDialog::Impl {
     int firstLine = 0;
     bool restoreFocus = descriptionField && GetFocus() == descriptionField;
     if (descriptionField) {
-      SendMessageW(descriptionField, EM_GETSEL, reinterpret_cast<WPARAM>(&selectionStart),
+      dpi::sendMessage(descriptionField, EM_GETSEL, reinterpret_cast<WPARAM>(&selectionStart),
                    reinterpret_cast<LPARAM>(&selectionEnd));
-      firstLine = int(SendMessageW(descriptionField, EM_GETFIRSTVISIBLELINE, 0, 0));
+      firstLine = int(dpi::sendMessage(descriptionField, EM_GETFIRSTVISIBLELINE, 0, 0));
     }
     if (descriptionField)
       description = contents(descriptionField);
@@ -112,10 +113,10 @@ struct ReportDialog::Impl {
     } else {
       descriptionField = control(L"EDIT", description, Description, x, y + 115, 482, 120,
                                  ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL);
-      SendMessageW(descriptionField, EM_SETLIMITTEXT, 65536, 0);
+      dpi::sendMessage(descriptionField, EM_SETLIMITTEXT, 65536, 0);
       RECT textBounds{11, 9, 459, 109};
-      SendMessageW(descriptionField, EM_SETRECT, 0, reinterpret_cast<LPARAM>(&textBounds));
-      SetWindowRgn(descriptionField, CreateRoundRectRgn(0, 0, 483, 121, 20, 20), TRUE);
+      dpi::sendMessage(descriptionField, EM_SETRECT, 0, reinterpret_cast<LPARAM>(&textBounds));
+      SetWindowRgn(descriptionField, dpi::roundRegion(0, 0, 483, 121, 20, 20), TRUE);
       auto attachButton = control(L"BUTTON", "Attach screenshots", Attach, x, y + 245, 153, 26);
       skin::iconTextButton(attachButton, skin::Icon::image);
       skin::buttonFont(attachButton, 12);
@@ -139,8 +140,8 @@ struct ReportDialog::Impl {
     }
     building = false;
     if (descriptionField) {
-      SendMessageW(descriptionField, EM_SETSEL, selectionStart, selectionEnd);
-      SendMessageW(descriptionField, EM_LINESCROLL, 0, firstLine);
+      dpi::sendMessage(descriptionField, EM_SETSEL, selectionStart, selectionEnd);
+      dpi::sendMessage(descriptionField, EM_LINESCROLL, 0, firstLine);
       if (restoreFocus)
         SetFocus(descriptionField);
     }
@@ -153,21 +154,21 @@ struct ReportDialog::Impl {
       return;
     }
     RECT bounds{};
-    GetClientRect(owner, &bounds);
+    dpi::clientRect(owner, &bounds);
     width = bounds.right;
     height = bounds.bottom;
     POINT origin{};
-    ClientToScreen(owner, &origin);
-    auto source = GetDC(owner);
+    dpi::clientToScreen(owner, &origin);
+    auto source = dpi::getDC(owner);
     if (backdrop) {
       SelectObject(backdrop, previousBitmap);
       DeleteObject(bitmap);
       DeleteDC(backdrop);
     }
-    backdrop = CreateCompatibleDC(source);
-    bitmap = CreateCompatibleBitmap(source, width, height);
+    backdrop = dpi::compatibleDC(source);
+    bitmap = dpi::compatibleBitmap(source, width, height);
     previousBitmap = SelectObject(backdrop, bitmap);
-    SendMessageW(owner, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(backdrop), PRF_CLIENT);
+    dpi::sendMessage(owner, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(backdrop), PRF_CLIENT);
     struct Capture {
       HWND root;
       HDC dc;
@@ -181,10 +182,9 @@ struct ReportDialog::Impl {
             if (!(GetWindowLongW(ancestor, GWL_STYLE) & WS_VISIBLE))
               return TRUE;
           RECT bounds{};
-          GetWindowRect(child, &bounds);
-          MapWindowPoints(nullptr, capture.root, reinterpret_cast<POINT *>(&bounds), 2);
+          dpi::relativeRect(child, capture.root, &bounds);
           auto state = SaveDC(capture.dc);
-          SetViewportOrgEx(capture.dc, bounds.left, bounds.top, nullptr);
+          dpi::viewportOrigin(capture.dc, bounds.left, bounds.top, nullptr);
           IntersectClipRect(capture.dc, 0, 0, bounds.right - bounds.left,
                             bounds.bottom - bounds.top);
           wchar_t name[32]{};
@@ -199,10 +199,10 @@ struct ReportDialog::Impl {
             item.hwndItem = child;
             item.hDC = capture.dc;
             item.rcItem = {0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top};
-            SendMessageW(GetParent(child), WM_DRAWITEM, item.CtlID,
+            dpi::sendMessage(GetParent(child), WM_DRAWITEM, item.CtlID,
                          reinterpret_cast<LPARAM>(&item));
           } else
-            SendMessageW(child, WM_PRINT, reinterpret_cast<WPARAM>(capture.dc),
+            dpi::sendMessage(child, WM_PRINT, reinterpret_cast<WPARAM>(capture.dc),
                          PRF_CLIENT | PRF_NONCLIENT | PRF_ERASEBKGND);
           RestoreDC(capture.dc, state);
           return TRUE;
@@ -214,13 +214,13 @@ struct ReportDialog::Impl {
     type.hInstance = GetModuleHandleW(nullptr);
     type.lpszClassName = L"TangOSLiteBugReport";
     type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    RegisterClassW(&type);
-    window = CreateWindowExW(WS_EX_CONTROLPARENT, type.lpszClassName, L"Report a bug",
+    dpi::registerClass(&type);
+    window = dpi::createWindow(WS_EX_CONTROLPARENT, type.lpszClassName, L"Report a bug",
                              WS_POPUP | WS_CLIPCHILDREN, origin.x, origin.y, width, height, owner,
                              nullptr, type.hInstance, this);
     if (!window)
       throw std::runtime_error("Cannot open the native bug-report overlay");
-    SetWindowRgn(window, CreateRoundRectRgn(0, 0, width + 1, height + 1, 32, 32), FALSE);
+    SetWindowRgn(window, dpi::roundRegion(0, 0, width + 1, height + 1, 32, 32), FALSE);
     disabledOwner = IsWindowEnabled(owner);
     if (disabledOwner)
       EnableWindow(owner, FALSE);
@@ -359,13 +359,17 @@ struct ReportDialog::Impl {
   }
   static LRESULT CALLBACK keyboard(HWND child, UINT message, WPARAM w, LPARAM l, UINT_PTR id,
                                    DWORD_PTR context) {
+    dpi::Scope scale(dpi::forWindow(child));
     auto self = reinterpret_cast<Impl *>(context);
     if ((message == WM_PAINT || message == WM_PRINT) && GetDlgCtrlID(child) == Description) {
       auto result = DefSubclassProc(child, message, w, l);
       if (contents(child).empty()) {
-        auto dc = message == WM_PRINT ? reinterpret_cast<HDC>(w) : GetDC(child);
+        auto dc = message == WM_PRINT ? reinterpret_cast<HDC>(w) : dpi::getDC(child);
+        auto saved = SaveDC(dc);
+        dpi::configureDC(dc, dpi::current());
         skin::label(dc, L"Describe what happened and how to reproduce it…", 11, 9, 449, 38, 13,
                     false, true);
+        RestoreDC(dc, saved);
         if (message == WM_PAINT)
           ReleaseDC(child, dc);
       }
@@ -392,7 +396,7 @@ struct ReportDialog::Impl {
       return 0;
     }
     if (message == WM_KEYDOWN && w == VK_RETURN && GetDlgCtrlID(child) != Description) {
-      SendMessageW(self->window, WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(child), BN_CLICKED),
+      dpi::sendMessage(self->window, WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(child), BN_CLICKED),
                    reinterpret_cast<LPARAM>(child));
       return 0;
     }
@@ -432,7 +436,7 @@ struct ReportDialog::Impl {
       }
       if (message == WM_PAINT) {
         PAINTSTRUCT paint;
-        auto dc = BeginPaint(window, &paint);
+        auto dc = dpi::beginPaint(window, &paint);
         self->paint(dc);
         EndPaint(window, &paint);
         return 0;
@@ -510,17 +514,17 @@ Json ReportDialog::result() const { return impl->completed; }
 void ReportDialog::saveSnapshot(const fs::path &path) const {
   if (!impl->window)
     throw std::runtime_error("Open the report before capturing its layout");
-  auto dc = GetDC(impl->window);
-  auto memory = CreateCompatibleDC(dc);
-  auto bitmap = CreateCompatibleBitmap(dc, impl->width, impl->height);
+  dpi::Scope scale(dpi::forWindow(impl->window));
+  auto dc = dpi::getDC(impl->window);
+  auto memory = dpi::compatibleDC(dc);
+  auto bitmap = dpi::compatibleBitmap(dc, impl->width, impl->height);
   auto old = SelectObject(memory, bitmap);
   impl->paint(memory);
   for (auto child : impl->controls) {
     RECT bounds{};
-    GetWindowRect(child, &bounds);
-    MapWindowPoints(nullptr, impl->window, reinterpret_cast<POINT *>(&bounds), 2);
+    dpi::relativeRect(child, impl->window, &bounds);
     int state = SaveDC(memory);
-    SetViewportOrgEx(memory, bounds.left, bounds.top, nullptr);
+    dpi::viewportOrigin(memory, bounds.left, bounds.top, nullptr);
     IntersectClipRect(memory, 0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top);
     if ((GetWindowLongW(child, GWL_STYLE) & BS_TYPEMASK) == BS_OWNERDRAW &&
         GetDlgCtrlID(child) != Description && GetDlgCtrlID(child) != 0) {
@@ -532,25 +536,27 @@ void ReportDialog::saveSnapshot(const fs::path &path) const {
       item.hwndItem = child;
       item.hDC = memory;
       item.rcItem = {0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top};
-      SendMessageW(impl->window, WM_DRAWITEM, item.CtlID, reinterpret_cast<LPARAM>(&item));
+      dpi::sendMessage(impl->window, WM_DRAWITEM, item.CtlID, reinterpret_cast<LPARAM>(&item));
     } else
-      SendMessageW(child, WM_PRINT, reinterpret_cast<WPARAM>(memory),
+      dpi::sendMessage(child, WM_PRINT, reinterpret_cast<WPARAM>(memory),
                    PRF_CLIENT | PRF_NONCLIENT | PRF_ERASEBKGND);
     RestoreDC(memory, state);
   }
   BITMAPINFO info{};
   info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-  info.bmiHeader.biWidth = impl->width;
-  info.bmiHeader.biHeight = impl->height;
+  int pixelWidth = dpi::pixels(impl->width, dpi::forDC(dc));
+  int pixelHeight = dpi::pixels(impl->height, dpi::forDC(dc));
+  info.bmiHeader.biWidth = pixelWidth;
+  info.bmiHeader.biHeight = pixelHeight;
   info.bmiHeader.biPlanes = 1;
   info.bmiHeader.biBitCount = 32;
-  std::string pixels(size_t(impl->width) * impl->height * 4, '\0');
+  std::string pixels(size_t(pixelWidth) * pixelHeight * 4, '\0');
   SelectObject(memory, old);
-  int rows = GetDIBits(dc, bitmap, 0, impl->height, pixels.data(), &info, DIB_RGB_COLORS);
+  int rows = GetDIBits(dc, bitmap, 0, pixelHeight, pixels.data(), &info, DIB_RGB_COLORS);
   DeleteObject(bitmap);
   DeleteDC(memory);
   ReleaseDC(impl->window, dc);
-  if (rows != impl->height)
+  if (rows != pixelHeight)
     throw std::runtime_error("Cannot capture native report pixels");
   std::string dib(reinterpret_cast<const char *>(&info.bmiHeader), sizeof(info.bmiHeader));
   dib += pixels;

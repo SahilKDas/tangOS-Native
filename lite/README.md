@@ -1,6 +1,6 @@
-# TangOS Lite 0.30.0
+# TangOS Lite 0.31.0
 
-Release packaging requires at least 20 GiB free plus build headroom. It builds
+Release packaging requires at least 25 GiB free plus build headroom. It builds
 twice sequentially, retaining the first hash while deleting that build tree,
 then checks the second executable against it. Successful releases keep the
 portable executable, documentation and compact reports; generated builds,

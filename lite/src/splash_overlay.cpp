@@ -1,3 +1,4 @@
+#include "dpi.h"
 #include "splash_overlay.h"
 #include "skin.h"
 #include "window_capture.h"
@@ -45,15 +46,15 @@ struct SplashOverlay::Impl {
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpszClassName = L"TangOSLiteSplash";
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    RegisterClassW(&wc);
+    dpi::registerClass(&wc);
     RECT bounds{};
-    GetClientRect(owner, &bounds);
-    window = CreateWindowExW(0, wc.lpszClassName, L"Switching application",
+    dpi::clientRect(owner, &bounds);
+    window = dpi::createWindow(0, wc.lpszClassName, L"Switching application",
                              WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, bounds.right, bounds.bottom,
                              owner, nullptr, wc.hInstance, this);
     if (!window)
       throw std::runtime_error("Cannot create app-switch overlay");
-    SetWindowPos(window, HWND_TOP, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
+    dpi::setWindowPos(window, HWND_TOP, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
     SetFocus(window);
     SetTimer(window, 1, 33, nullptr);
   }
@@ -77,21 +78,21 @@ struct SplashOverlay::Impl {
       return;
     }
     RECT bounds{};
-    GetClientRect(owner, &bounds);
-    SetWindowPos(window, HWND_TOP, 0, 0, bounds.right, bounds.bottom, SWP_NOACTIVATE);
-    auto shape = CreateRoundRectRgn(0, 0, bounds.right + 1, bounds.bottom + 1, 32, 32);
+    dpi::clientRect(owner, &bounds);
+    dpi::setWindowPos(window, HWND_TOP, 0, 0, bounds.right, bounds.bottom, SWP_NOACTIVATE);
+    auto shape = dpi::roundRegion(0, 0, bounds.right + 1, bounds.bottom + 1, 32, 32);
     if (!SetWindowRgn(window, shape, FALSE))
       DeleteObject(shape);
     InvalidateRect(window, nullptr, FALSE);
   }
   void paint(HDC dc) {
     RECT r{};
-    GetClientRect(window, &r);
+    dpi::clientRect(window, &r);
     int w = r.right, h = r.bottom;
     if (w <= 0 || h <= 0)
       return;
-    auto base = CreateCompatibleDC(dc), layer = CreateCompatibleDC(dc);
-    auto bitmap = CreateCompatibleBitmap(dc, w, h), foreground = CreateCompatibleBitmap(dc, w, h);
+    auto base = dpi::compatibleDC(dc), layer = dpi::compatibleDC(dc);
+    auto bitmap = dpi::compatibleBitmap(dc, w, h), foreground = dpi::compatibleBitmap(dc, w, h);
     auto oldBase = SelectObject(base, bitmap), oldLayer = SelectObject(layer, foreground);
     renderWindowTree(owner, base, window);
     skin::background(layer, w, h);
@@ -105,8 +106,8 @@ struct SplashOverlay::Impl {
       double opacity = progress < .15 ? progress / .15 * .9 : (1 - progress) / .85 * .9;
       skin::splashBubble(layer, x, y, size, opacity);
     }
-    auto center = CreateCompatibleDC(dc);
-    auto centerBitmap = CreateCompatibleBitmap(dc, w, h);
+    auto center = dpi::compatibleDC(dc);
+    auto centerBitmap = dpi::compatibleBitmap(dc, w, h);
     auto oldCenter = SelectObject(center, centerBitmap);
     BitBlt(center, 0, 0, w, h, layer, 0, 0, SRCCOPY);
     int mascotHeight = int(188 * frame.scale), mascotWidth = (mascotHeight * 620 + 336) / 673;
@@ -157,7 +158,7 @@ struct SplashOverlay::Impl {
         return 1;
       case WM_PAINT: {
         PAINTSTRUCT ps;
-        auto dc = BeginPaint(h, &ps);
+        auto dc = dpi::beginPaint(h, &ps);
         self->paint(dc);
         EndPaint(h, &ps);
         return 0;

@@ -18,6 +18,16 @@ with a guessed compiler command.
 
 ## Boundaries
 
+`dpi` isolates the Win32 coordinate boundary. Layout and hit tests use 96-DPI
+units; child-window positions, native fonts and buffers use each window's DPI.
+Registered window procedures translate size/input/owner-draw messages, handle
+the suggested `WM_DPICHANGED` rectangle and refresh the child tree. GDI paint
+DCs map logical units to physical pixels. TinySkia renders directly into those
+physical buffers, with DPI included in background/backdrop cache identities.
+Capture files store physical pixel dimensions. Deterministic tests inject window
+DPI at this boundary without changing desktop settings; real attached-monitor
+coverage is reported separately from simulated 175%/250% transitions.
+
 - `core`: argv construction, INI configuration, path policy, status parsing,
   check discovery; independent of window handles.
 - `platform`: Unicode CreateProcess, restricted handle inheritance, streaming
