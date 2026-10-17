@@ -1,5 +1,7 @@
 #include "network.h"
 #include "core.h"
+#include <algorithm>
+#include <cctype>
 #include <windows.h>
 #include <winhttp.h>
 #include <stdexcept>
@@ -162,6 +164,7 @@ void CALLBACK streamStatus(HINTERNET, DWORD_PTR context, DWORD status, void *inf
   if (status != WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE &&
       status != WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE &&
       status != WINHTTP_CALLBACK_STATUS_READ_COMPLETE &&
+      status != WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE &&
       status != WINHTTP_CALLBACK_STATUS_REQUEST_ERROR)
     return;
   {
@@ -171,6 +174,8 @@ void CALLBACK streamStatus(HINTERNET, DWORD_PTR context, DWORD status, void *inf
       state->error = reinterpret_cast<WINHTTP_ASYNC_RESULT *>(info)->dwError;
     if (status == WINHTTP_CALLBACK_STATUS_READ_COMPLETE)
       state->bytes = length;
+    if (status == WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE && info && length >= sizeof(DWORD))
+      state->bytes = *reinterpret_cast<DWORD *>(info);
   }
   SetEvent(state->ready);
 }
@@ -260,13 +265,30 @@ unsigned streamHttp(const std::string &url, const std::map<std::string, std::str
   wchar_t contentType[256]{};
   DWORD typeBytes = sizeof(contentType);
   if (!WinHttpQueryHeaders(request.handle, WINHTTP_QUERY_CONTENT_TYPE, WINHTTP_HEADER_NAME_BY_INDEX,
-                           contentType, &typeBytes, WINHTTP_NO_HEADER_INDEX) ||
-      std::wstring(contentType).rfind(L"text/event-stream", 0) != 0)
+                           contentType, &typeBytes, WINHTTP_NO_HEADER_INDEX))
+    throw std::runtime_error("Live endpoint must return Content-Type: text/event-stream");
+  auto mime = utf8(contentType);
+  mime = trim(mime.substr(0, mime.find(';')));
+  std::transform(mime.begin(), mime.end(), mime.begin(),
+                 [](unsigned char c) { return char(std::tolower(c)); });
+  if (mime != "text/event-stream")
     throw std::runtime_error("Live endpoint must return Content-Type: text/event-stream");
   for (;;) {
     context.reset();
-    if (!WinHttpReadData(request.handle, context.buffer.data(), DWORD(context.buffer.size()),
-                         nullptr))
+    // Query first: ReadData tries to fill its buffer, which delays an open SSE stream.
+    if (!WinHttpQueryDataAvailable(request.handle, nullptr))
+      throw std::runtime_error("Cannot query live stream data");
+    context.wait(stop);
+    DWORD available;
+    {
+      std::lock_guard<std::mutex> lock(context.mutex);
+      available = context.bytes;
+    }
+    if (!available)
+      break;
+    context.reset();
+    if (!WinHttpReadData(request.handle, context.buffer.data(),
+                         std::min(available, DWORD(context.buffer.size())), nullptr))
       throw std::runtime_error("Cannot read live stream");
     context.wait(stop);
     DWORD bytes;

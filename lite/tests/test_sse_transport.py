@@ -25,7 +25,7 @@ def main():
                 self.end_headers()
                 return
             self.send_response(200)
-            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Content-Type', 'text/event-streaming' if self.path == '/wrong-type' else 'Text/Event-Stream; charset=utf-8')
             self.end_headers()
             try:
                 if self.path == '/silent':
@@ -33,7 +33,7 @@ def main():
                     return
                 index = sum(row[0] == '/events' for row in requests)
                 frame = (': heartbeat\r\n\r\ndata: broken\n\nevent: counts\r\ndata: ' +
-                         json.dumps({'totals': {'日本語': index}, 'daily': {}}, ensure_ascii=False) + '\r\n\r\n').encode()
+                         json.dumps({'totals': {'日本語': index, 'fixture-only': index}, 'daily': {}, 'echo': 'fixture-only'}, ensure_ascii=False) + '\r\n\r\n').encode()
                 for byte in frame:
                     self.wfile.write(bytes([byte]))
                     self.wfile.flush()
@@ -56,15 +56,15 @@ def main():
                 result_path = root / 'result.json'
                 result = subprocess.run([str(helper), '--watch', str(repo), str(data), str(result_path), str(duration)], capture_output=True, timeout=duration/1000+10)
                 assert result.returncode == 0, (result.stdout, result.stderr)
-                return json.loads(result_path.read_text())
+                return json.loads(result_path.read_text(encoding='utf-8'))
             result = watch('events', 4200)
             events = [e for e in result['events'] if e['event'] == 'counts']
-            assert len(events) == 2 and events[0]['data']['totals']['日本語'] == 1 and events[1]['data']['totals']['日本語'] == 2, result
+            assert len(events) == 2 and events[0]['data']['totals'].get('日本語') == 1 and events[1]['data']['totals'].get('日本語') == 2, result
             assert result['cancelMs'] < 1000, result
             assert all(key == 'Bearer fixture-only' and accept == 'text/event-stream' for path, key, accept in requests), requests
             caches = list((data / 'atlas-state').glob('*.json'))
-            assert any(json.loads(path.read_text()).get('extras', {}).get('atlas.counts', {}).get('totals', {}).get('日本語') == 2 for path in caches)
-            assert all('fixture-only' not in path.read_text() for path in caches), 'credential leaked to cache'
+            assert any(json.loads(path.read_text(encoding='utf-8')).get('extras', {}).get('atlas.counts', {}).get('totals', {}).get('日本語') == 2 for path in caches)
+            assert all('fixture-only' not in path.read_text(encoding='utf-8') for path in caches), 'credential leaked to cache'
             before = len(requests)
             disabled = watch('events', 150, False)
             assert not disabled['events'] and len(requests) == before
@@ -74,6 +74,9 @@ def main():
             redirect = watch('redirect', 400)
             assert any(e['data'].get('status') == 302 for e in redirect['events']), redirect
             assert not any(path == '/unexpected' for path, *_ in requests), requests
+            wrong_type = watch('wrong-type', 400)
+            assert all(e['event'] != 'counts' for e in wrong_type['events']), wrong_type
+            assert any('Content-Type' in e['data'].get('message', '') for e in wrong_type['events']), wrong_type
     finally:
         server.shutdown(); server.server_close()
     print('PASS actual WinHTTP SSE: UTF8/CRLF fragmentation, reconnect, cache persistence, opt-in, cancellation, redirect isolation')

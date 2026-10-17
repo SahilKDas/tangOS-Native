@@ -28,7 +28,7 @@ int main() {
     skin::initialize();
     // Deterministic renderer matrix; these are synthetic DC scales, not changes
     // to the user's display configuration.
-    for (UINT value : {96u, 120u, 144u, 168u, 192u, 240u, 288u}) {
+    for (UINT value : {96u, 106u, 120u, 132u, 144u, 168u, 192u, 216u, 240u, 288u, 384u}) {
       dpi::Scope scope(value);
       for (int coordinate : {-2000, -33, -1, 0, 1, 33, 2000})
         expect(std::abs(dpi::logical(dpi::pixels(coordinate, value), value) - coordinate) <= 1,
@@ -161,7 +161,7 @@ int main() {
     DestroyWindow(owner);
     skin::shutdown();
     dpi::shutdown();
-    std::cout << "PASS DPI: 100/125/150/175/200/250/300 percent raster matrix, native size/input, "
+    std::cout << "PASS DPI: 96/106/120/132/144/168/192/216/240/288/384 DPI raster matrix, native size/input, "
                  "attached monitors\n";
     return 0;
   } catch (const std::exception &error) {

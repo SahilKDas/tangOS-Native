@@ -181,6 +181,10 @@ int main(int argc, char **argv) {
     check(backend.invoke("github.credits", {{"force", true}})["warnings"].size() == 3,
           "partial API failures are reported");
     offline = false;
+    auto damagedScope = backend.invoke("atlas.state").at("scope").get<std::string>();
+    write(data / "atlas-state" / (damagedScope + ".json"), "{broken");
+    check(backend.invoke("atlas.load") == local,
+          "corrupt state metadata recovers without damaging repository data");
     check(backend.invoke("atlas.refresh")["authorized"] == false,
           "unapproved generator never executes");
     write(
@@ -198,6 +202,9 @@ int main(int argc, char **argv) {
     check(backend.invoke("atlas.refresh")["refreshed"] == true &&
               backend.invoke("atlas.load")["generated"] == true,
           "approved stale generator executes and invalidates local cache");
+    check(backend.invoke("atlas.refreshStatus")["stale"] == false &&
+              backend.invoke("atlas.refresh")["skipped"] == true,
+          "fresh generation does not repeat when filesystem timestamps are negative");
     write(repo / "generator.py", "raise RuntimeError('changed command')\n");
     check(backend.invoke("atlas.refreshStatus")["authorized"] == false,
           "changed generator requires new approval");

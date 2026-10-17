@@ -1,6 +1,7 @@
 #include "backend.h"
 #include "live_data.h"
 #include <chrono>
+#include <limits>
 #include "verification.h"
 #include "controller_view.h"
 #include "help.h"
@@ -59,7 +60,13 @@ std::string fingerprint(const std::string &s) {
 Json redactMetadata(Json value, const std::map<std::string, std::string> &secrets) {
   if (value.is_string())
     return redact(value.get<std::string>(), secrets);
-  if (value.is_object() || value.is_array())
+  if (value.is_object()) {
+    Json clean = Json::object();
+    for (auto it = value.begin(); it != value.end(); ++it)
+      clean[redact(it.key(), secrets)] = redactMetadata(it.value(), secrets);
+    return clean;
+  }
+  if (value.is_array())
     for (auto &item : value)
       item = redactMetadata(item, secrets);
   return value;
@@ -140,7 +147,7 @@ std::string generatorFingerprint(const fs::path &repo, const Descriptor &d,
 int64_t fileStamp(const fs::path &path) {
   std::error_code ec;
   auto stamp = fs::last_write_time(path, ec);
-  return ec ? 0 : stamp.time_since_epoch().count();
+  return ec ? std::numeric_limits<int64_t>::min() : stamp.time_since_epoch().count();
 }
 int64_t newestAtlasInput(const fs::path &repo) {
   int64_t newest = fileStamp(repo / "nearmiss/db.jsonl");
@@ -1482,7 +1489,15 @@ Json Backend::atlasService(const std::string &m, const Json &a, const Descriptor
     }
     ~StateLock() { release(); }
   } stateLock(fs::path(path.wstring() + L".lock"));
-  auto state = fileJson(path);
+  auto readState = [&] {
+    try {
+      auto value = fileJson(path);
+      return value.is_object() ? value : Json::object();
+    } catch (const std::exception &) {
+      return Json::object();
+    }
+  };
+  auto state = readState();
   auto blobPath = [&](const std::string &kind) {
     auto p = path;
     p += "." + kind + ".json";
@@ -1509,13 +1524,13 @@ Json Backend::atlasService(const std::string &m, const Json &a, const Descriptor
       auto result = action();
       lock.lock();
       stateLock.acquire();
-      state = fileJson(path);
+      state = readState();
       return result;
     } catch (...) {
       if (!lock.owns_lock()) {
         lock.lock();
         stateLock.acquire();
-        state = fileJson(path);
+        state = readState();
       }
       throw;
     }
@@ -1764,7 +1779,7 @@ Json Backend::atlasService(const std::string &m, const Json &a, const Descriptor
     auto result = execute("atlas.generate", Json::object());
     lock.lock();
     stateLock.acquire();
-    state = fileJson(path);
+    state = readState();
     approval["attemptAt"] = now;
     approval["lastLog"] = result.value("log", std::string());
     if (result.value("refreshed", false)) {
