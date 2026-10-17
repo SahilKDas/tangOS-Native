@@ -304,4 +304,131 @@ unsigned streamHttp(const std::string &url, const std::map<std::string, std::str
   }
   return status;
 }
+HttpResponse requestHttpCancelable(const std::string &url, const std::string &method,
+                                   const std::string &body,
+                                   const std::map<std::string, std::string> &headers,
+                                   std::atomic<bool> &stop) {
+  if (stop)
+    throw std::runtime_error("HTTP request cancelled");
+  if (method != "GET" && method != "POST" && method != "DELETE" && method != "PUT" &&
+      method != "PATCH")
+    throw std::runtime_error("Unsupported HTTP method");
+  if (body.size() > 1024 * 1024)
+    throw std::runtime_error("Request body exceeds 1 MiB");
+  auto address = wide(url);
+  URL_COMPONENTS parts{};
+  parts.dwStructSize = sizeof(parts);
+  parts.dwHostNameLength = parts.dwUrlPathLength = parts.dwExtraInfoLength =
+      parts.dwUserNameLength = parts.dwPasswordLength = DWORD(-1);
+  if (!WinHttpCrackUrl(address.c_str(), 0, 0, &parts) || parts.dwUserNameLength ||
+      parts.dwPasswordLength ||
+      (parts.nScheme != INTERNET_SCHEME_HTTPS &&
+       !(parts.nScheme == INTERNET_SCHEME_HTTP &&
+         std::wstring(parts.lpszHostName, parts.dwHostNameLength) == L"127.0.0.1")))
+    throw std::runtime_error(
+        "HTTP request requires HTTPS without URL credentials (loopback HTTP is allowed)");
+  Internet session{WinHttpOpen(L"TangOSLite", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                               WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, WINHTTP_FLAG_ASYNC)};
+  if (!session.handle)
+    throw std::runtime_error("Cannot initialize HTTP request");
+  WinHttpSetTimeouts(session.handle, 5000, 5000, 10000, 10000);
+  auto host = std::wstring(parts.lpszHostName, parts.dwHostNameLength);
+  auto path = std::wstring(parts.lpszUrlPath, parts.dwUrlPathLength) +
+              (parts.dwExtraInfoLength ? std::wstring(parts.lpszExtraInfo, parts.dwExtraInfoLength)
+                                       : std::wstring());
+  Internet connect{WinHttpConnect(session.handle, host.c_str(), parts.nPort, 0)};
+  if (!connect.handle)
+    throw std::runtime_error("Cannot connect HTTP request");
+  StreamContext context;
+  if (!context.ready || !context.closed)
+    throw std::runtime_error("Cannot create HTTP request completion events");
+  Internet temporary{
+      WinHttpOpenRequest(connect.handle, wide(method).c_str(), path.c_str(), nullptr,
+                         WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+                         parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0)};
+  if (!temporary.handle)
+    throw std::runtime_error("Cannot create HTTP request");
+  DWORD redirect = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+  WinHttpSetOption(temporary.handle, WINHTTP_OPTION_REDIRECT_POLICY, &redirect, sizeof(redirect));
+  DWORD_PTR pointer = reinterpret_cast<DWORD_PTR>(&context);
+  if (!WinHttpSetOption(temporary.handle, WINHTTP_OPTION_CONTEXT_VALUE, &pointer,
+                        sizeof(pointer)) ||
+      WinHttpSetStatusCallback(temporary.handle, streamStatus,
+                               WINHTTP_CALLBACK_FLAG_ALL_COMPLETIONS |
+                                   WINHTTP_CALLBACK_FLAG_HANDLES,
+                               0) == WINHTTP_INVALID_STATUS_CALLBACK)
+    throw std::runtime_error("Cannot configure HTTP request callbacks");
+  StreamRequest request{temporary.handle, context};
+  temporary.handle = nullptr;
+  context.headers = L"Content-Type: application/json\r\n";
+  for (auto &entry : headers) {
+    if (entry.first.empty() || entry.first.find_first_of("\r\n:") != std::string::npos ||
+        entry.second.find_first_of("\r\n") != std::string::npos)
+      throw std::runtime_error("Invalid HTTP request header");
+    context.headers += wide(entry.first + ": " + entry.second + "\r\n");
+  }
+  context.reset();
+  if (!WinHttpSendRequest(request.handle, context.headers.c_str(), DWORD(-1),
+                          body.empty() ? WINHTTP_NO_REQUEST_DATA : (void *)body.data(),
+                          DWORD(body.size()), DWORD(body.size()), pointer))
+    throw std::runtime_error("Cannot send HTTP request");
+  context.wait(stop, 15000);
+  context.reset();
+  if (!WinHttpReceiveResponse(request.handle, nullptr))
+    throw std::runtime_error("Cannot receive HTTP request");
+  context.wait(stop, 20000);
+  DWORD status = 0, size = sizeof(status);
+  if (!WinHttpQueryHeaders(request.handle, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                           WINHTTP_HEADER_NAME_BY_INDEX, &status, &size, WINHTTP_NO_HEADER_INDEX))
+    throw std::runtime_error("Cannot read HTTP request status");
+  auto header = [&](DWORD query, const wchar_t *name, DWORD limit) {
+    DWORD bytes = 0;
+    WinHttpQueryHeaders(request.handle, query, name, nullptr, &bytes, WINHTTP_NO_HEADER_INDEX);
+    if (!bytes || bytes > limit)
+      return std::string();
+    std::wstring value(bytes / sizeof(wchar_t), 0);
+    if (!WinHttpQueryHeaders(request.handle, query, name, value.data(), &bytes,
+                             WINHTTP_NO_HEADER_INDEX))
+      return std::string();
+    value.resize(wcslen(value.c_str()));
+    return utf8(value);
+  };
+  HttpResponse response{status,
+                        {},
+                        header(WINHTTP_QUERY_CUSTOM, L"Mcp-Session-Id", 4096),
+                        header(WINHTTP_QUERY_LOCATION, WINHTTP_HEADER_NAME_BY_INDEX, 16384)};
+  for (;;) {
+    context.reset();
+    // Query first: ReadData tries to fill its buffer, which delays an open SSE stream.
+    if (!WinHttpQueryDataAvailable(request.handle, nullptr))
+      throw std::runtime_error("Cannot query HTTP request data");
+    context.wait(stop, 20000);
+    DWORD available;
+    {
+      std::lock_guard<std::mutex> lock(context.mutex);
+      available = context.bytes;
+    }
+    if (!available)
+      break;
+    context.reset();
+    if (!WinHttpReadData(request.handle, context.buffer.data(),
+                         std::min(available, DWORD(context.buffer.size())), nullptr))
+      throw std::runtime_error("Cannot read HTTP request");
+    context.wait(stop, 20000);
+    DWORD bytes;
+    {
+      std::lock_guard<std::mutex> lock(context.mutex);
+      bytes = context.bytes;
+    }
+    if (!bytes)
+      break;
+    if (response.body.size() + bytes > 128 * 1024 * 1024)
+      throw std::runtime_error("HTTP download exceeds 128 MiB");
+    response.body.append(context.buffer.data(), bytes);
+    if (stop)
+      throw std::runtime_error("HTTP request cancelled");
+  }
+  return response;
+}
+
 } // namespace lite

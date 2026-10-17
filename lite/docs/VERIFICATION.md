@@ -654,3 +654,26 @@ reports. The workstation free-space floor is now **11 GiB**. Full parity remains
 unreached: the documented composition/motion differences, physical mixed-monitor
 validation and broader external integration coverage remain open. Ordinary HTTP
 snapshot shutdown cancellation is the next functional fix.
+## Viewer snapshot cancellation checkpoint — 2026-10-17
+
+The Viewer now cancels its ordinary snapshot HTTP worker before joining it on
+shutdown, using the async WinHTTP completion/lifetime mechanism already tested
+for SSE. Injected transports remain injectable. Synchronous MCP/tool transport
+semantics are unchanged. Actual finite-response tests cover Unicode and multiple
+read buffers, GET/POST bodies, session/location headers, cancellation during both
+silent headers and silent bodies, redirect isolation, and URL/method guards.
+All tests passed, along with existing SSE transport tests, 46 live-state
+assertions, 25 original live-data comparisons and packaged backend safety tests.
+
+The complete native GUI workflow passed at 120 DPI with 11 responsive ticks.
+A real remote Viewer was opened with a deliberately unfinished loopback HTTP
+body: closing cancelled it in **32 ms**; SSE close took **46 ms**. The first
+GUI attempt had a fixture navigation omission; its failure was retained and the
+corrected full workflow passed. Compact reports are retained in
+lite/out/evidence-http-cancel. The 7,153,664-byte candidate has essential GUI
+validation, but two-clean-build reproducibility has not been rerun for this
+later fix. The verified default package remains the earlier 0.33.0 artifact.
+
+Build trees and raw screenshots were removed after testing. GUI scripts now
+monitor the 11 GiB free-space floor, and release packaging cleans each completed
+capture scenario immediately after retaining its reports.

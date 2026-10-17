@@ -236,3 +236,10 @@ cached feed from being reused. Background stale generation needs a persisted
 reviewed command approval; script or descriptor changes expire it. This approval
 trusts repository code and does not create an OS sandbox. No Git confirmation
 or destructive-operation policy was relaxed for live refresh.
+Viewer snapshot cancellation uses asynchronous request handles and keeps the
+callback context, request headers, body and read buffer alive through the final
+handle-closing notification. It preserves the 1 MiB request and 128 MiB response
+limits, HTTPS/loopback-only URL policy, URL-credential/header-injection checks
+and redirect refusal. It adds no account credentials, external writes or Git
+permissions. User-configured connection approvals and cache redaction still
+apply. Ordinary tool/MCP transport was not switched to this cancellation policy.

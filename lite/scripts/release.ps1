@@ -100,6 +100,8 @@ python "$source/tests/test_live_data_reference.py" --exe "$out/build-a/TangOSLit
 if ($LASTEXITCODE) { throw 'Live event/reference comparisons failed' }
 python "$source/tests/test_sse_transport.py" --helper "$out/build-a/lite_live_data_tests.exe"
 if ($LASTEXITCODE) { throw 'Actual WinHTTP SSE integration failed' }
+python "$source/tests/test_http_cancel.py" --helper "$out/build-a/lite_live_data_tests.exe"
+if ($LASTEXITCODE) { throw 'Actual cancellable HTTP integration failed' }
 python "$source/tests/test_atlas_backend_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Atlas backend reference comparisons failed' }
 python "$source/tests/test_repair_reference.py" --exe "$out/build-a/TangOSLite.exe"
@@ -121,9 +123,15 @@ Copy-Item -LiteralPath $a -Destination "$out/TangOSLite.exe"
 $size = (Get-Item -LiteralPath "$out/TangOSLite.exe").Length
 if ($size -ge 50000000) { throw 'Executable exceeds strict 50 MB limit' }
 Assert-FreeSpace
-& "$source/scripts/gui-smoke.ps1" -Executable "$out/TangOSLite.exe" -FixtureDir "$out/gui-fixture"
-& "$source/scripts/gui-smoke.ps1" -Executable "$out/TangOSLite.exe" -FixtureDir "$out/gui-descriptor-missing" -MissingDescriptor
-& "$source/scripts/gui-smoke.ps1" -Executable "$out/TangOSLite.exe" -FixtureDir "$out/gui-descriptor-invalid" -InvalidDescriptor
+$evidence = Join-Path $out 'verification-evidence'
+New-Item -ItemType Directory -Force $evidence | Out-Null
+foreach ($scenario in @('gui-fixture', 'gui-descriptor-missing', 'gui-descriptor-invalid')) {
+  & "$source/scripts/gui-smoke.ps1" -Executable "$out/TangOSLite.exe" -FixtureDir "$out/$scenario" -MinimumFreeGiB $MinimumFreeGiB -MissingDescriptor:($scenario -eq 'gui-descriptor-missing') -InvalidDescriptor:($scenario -eq 'gui-descriptor-invalid')
+  $destination = Join-Path $evidence $scenario
+  New-Item -ItemType Directory -Force $destination | Out-Null
+  Get-ChildItem -LiteralPath "$out/$scenario" -File -Filter '*report.txt' | Copy-Item -Destination $destination
+  if (-not $KeepBuildArtifacts) { Remove-GeneratedDirectory "$out/$scenario" }
+}
 $imports = & objdump -p "$out/TangOSLite.exe" | Select-String 'DLL Name:' | ForEach-Object { $_.Line.Trim() }
 $compiler = (& g++ --version | Select-Object -First 1)
 $cmake = (& cmake --version | Select-Object -First 1)
@@ -148,12 +156,6 @@ if (-not $KeepBuildArtifacts) {
       Remove-Item -LiteralPath $fixturePath -Recurse -Force
     }
   }
-}
-foreach ($fixture in @('gui-fixture', 'gui-descriptor-missing', 'gui-descriptor-invalid')) {
-  $destination = Join-Path $evidence $fixture
-  New-Item -ItemType Directory -Force $destination | Out-Null
-  Get-ChildItem -LiteralPath "$out/$fixture" -File -Filter '*report.txt' | Copy-Item -Destination $destination
-  if (-not $KeepBuildArtifacts) { Remove-GeneratedDirectory "$out/$fixture" }
 }
 if (-not $KeepBuildArtifacts) { Remove-GeneratedDirectory "$out/build-a" }
 Remove-Item -LiteralPath $checkpointPath -Force

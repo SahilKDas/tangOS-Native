@@ -232,7 +232,7 @@ struct ConsoleUI::Impl {
   std::vector<Hit> hits;
   std::string atlasError;
   std::thread loader, manualWorker, atlasEventWorker, atlasRefreshWorker;
-  std::atomic<bool> stopAtlasEvents{false}, stopAtlasRefresh{false};
+  std::atomic<bool> stopAtlasEvents{false}, stopAtlasRefresh{false}, stopAtlasLoad{false};
   Runner atlasRefreshRunner;
   std::mutex atlasEventMutex;
   std::map<std::string, Json> atlasEvents;
@@ -464,6 +464,7 @@ struct ConsoleUI::Impl {
     build();
   }
   ~Impl() {
+    stopAtlasLoad = true;
     splashOverlay.reset();
     tourOverlay.reset();
     helper.reset();
@@ -1678,10 +1679,19 @@ struct ConsoleUI::Impl {
     auto prefs = settings;
     bool published = liveAtlas, force = forceLiveReload;
     forceLiveReload = false;
+    stopAtlasLoad = false;
     loader = std::thread([this, keys, prefs, published, force, cacheOnly] {
       cacheNotice.clear();
       try {
-        Backend backend(repository, data, prefs, keys, transport);
+        auto loaderTransport = transport;
+        if (auto native = transport.target<decltype(&requestHttp)>();
+            native && *native == &requestHttp)
+          loaderTransport = [this](const std::string &url, const std::string &method,
+                                   const std::string &body,
+                                   const std::map<std::string, std::string> &headers) {
+            return requestHttpCancelable(url, method, body, headers, stopAtlasLoad);
+          };
+        Backend backend(repository, data, prefs, keys, loaderTransport);
         auto profiles = backend.invoke("connections.get");
         auto enabled = [&](const std::string &name) {
           return profiles.contains(name) && profiles[name].value("enabled", false);
@@ -5524,6 +5534,30 @@ void ConsoleUI::smokeLiveEvents(const fs::path &directory,
     auto elapsed = GetTickCount64() - closing;
     if (elapsed > 2000)
       throw std::runtime_error("SSE Viewer close did not cancel promptly");
+    auto slowUrl = endpoint.substr(0, endpoint.rfind('/')) + "/slow-atlas";
+    confirm("connections.set", {{"atlas.events", {{"enabled", false}, {"url", endpoint}}},
+                                {"atlas.live", {{"enabled", true}, {"url", slowUrl}}}});
+    confirm("preferences.set", {{"liveRefresh", false}});
+    auto slow = std::make_unique<ConsoleUI>(
+        impl->parent, impl->font, metadata, data, impl->settings, [] {},
+        std::function<void(const Settings &)>{}, true, std::string{},
+        std::function<void(Json)>{}, true);
+    slow->resize(impl->width, impl->height);
+    slow->show(true, true);
+    auto started = GetTickCount64();
+    while (!fs::exists(control / "slow-requested.txt")) {
+      if (GetTickCount64() - started > 12000)
+        throw std::runtime_error("Slow Atlas GUI request did not start");
+      Sleep(10);
+    }
+    closing = GetTickCount64();
+    slow.reset();
+    auto snapshotClose = GetTickCount64() - closing;
+    if (snapshotClose > 2000)
+      throw std::runtime_error("Viewer close waited for an unfinished HTTP snapshot");
+    write(directory / "snapshot-cancel-report.txt",
+          "PASS native Viewer: unfinished HTTP body cancelled on close; ms=" +
+              std::to_string(snapshotClose) + "\n");
     write(directory / "sse-viewer-report.txt",
           "PASS native SSE Viewer: counts, claims, match "
           "removal, added matches, changed authors, scoped state; close cancellation ms=" +

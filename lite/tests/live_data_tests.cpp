@@ -31,6 +31,29 @@ int main(int argc, char **argv) {
       return 1;
     }
   }
+  if (argc == 6 && std::string(argv[1]) == "--http") {
+    std::atomic<bool> stop{false};
+    Json result;
+    std::thread worker([&] {
+      try {
+        auto response = requestHttpCancelable(argv[2], argv[3], "fixture body",
+                                              {{"X-Fixture", "test-only"}}, stop);
+        result = {{"status", response.status},
+                  {"body", response.body},
+                  {"session", response.session},
+                  {"location", response.location}};
+      } catch (const std::exception &e) {
+        result = {{"error", e.what()}};
+      }
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(std::stoi(argv[5])));
+    auto cancel = GetTickCount64();
+    stop = true;
+    worker.join();
+    result["cancelMs"] = GetTickCount64() - cancel;
+    write(fs::u8path(argv[4]), result.dump());
+    return 0;
+  }
   auto root = fs::temp_directory_path() / ("tangos-live-" + uniqueId());
   int assertions = 0;
   auto check = [&](bool value, const char *why) {

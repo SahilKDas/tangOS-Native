@@ -1,7 +1,11 @@
-param([Parameter(Mandatory)][string]$Executable, [string]$FixtureDir = "$PSScriptRoot/../out/gui-fixture", [switch]$MissingDescriptor, [switch]$InvalidDescriptor)
+param([Parameter(Mandatory)][string]$Executable, [string]$FixtureDir = "$PSScriptRoot/../out/gui-fixture", [switch]$MissingDescriptor, [switch]$InvalidDescriptor, [double]$MinimumFreeGiB = 11)
 $ErrorActionPreference = 'Stop'
 $fixture = [IO.Path]::GetFullPath($FixtureDir)
 if (Test-Path -LiteralPath $fixture) { throw "Use a fresh fixture directory: $fixture" }
+$fixtureDrive = [IO.Path]::GetPathRoot($fixture).Substring(0, 1)
+if ((Get-PSDrive -Name $fixtureDrive).Free -lt (($MinimumFreeGiB + 0.5) * 1GB)) {
+  throw "GUI validation paused: insufficient headroom to keep $MinimumFreeGiB GiB free."
+}
 $repo = Join-Path $fixture 'repository with spaces'
 New-Item -ItemType Directory -Force "$repo/tools", "$repo/port" | Out-Null
 Set-Content -LiteralPath "$repo/.tangos-lite-test-fixture" -Value 'Explicit disposable GUI fixture'
@@ -63,7 +67,17 @@ try {
   }
   $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru -WindowStyle Hidden
   $null = $process.Handle
-  if (-not $process.WaitForExit(240000)) { Stop-Process -Id $process.Id; throw 'GUI workflow timed out' }
+  $deadline = (Get-Date).AddSeconds(240)
+  while (-not $process.WaitForExit(250)) {
+    if ((Get-PSDrive -Name $fixtureDrive).Free -lt (($MinimumFreeGiB + 0.15) * 1GB)) {
+      Stop-Process -Id $process.Id
+      throw "GUI validation stopped to preserve $MinimumFreeGiB GiB free."
+    }
+    if ((Get-Date) -gt $deadline) {
+      Stop-Process -Id $process.Id
+      throw 'GUI workflow timed out'
+    }
+  }
 } finally {
   if (-not $sseServer.HasExited) { $sseServer.Kill(); $sseServer.WaitForExit() }
   $sseServer.Dispose()
@@ -81,6 +95,7 @@ foreach ($image in $images) {
 }
 if (-not ($MissingDescriptor -or $InvalidDescriptor)) {
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'sse-viewer-report.txt') -Raw).StartsWith('PASS')) { throw 'Native SSE Viewer integration failed' }
+if (-not (Get-Content -LiteralPath (Join-Path $fixture 'snapshot-cancel-report.txt') -Raw).StartsWith('PASS')) { throw 'Native Viewer snapshot cancellation failed' }
 $display = Get-Content -LiteralPath (Join-Path $fixture 'display-validation.json') -Raw | ConvertFrom-Json
 if ($display.monitors.Count -lt 1 -or @($display.layouts | Where-Object state -eq 'passed').Count -ne 9) { throw 'Display layout matrix incomplete' }
 if (-not (Test-Path -LiteralPath (Join-Path $fixture 'help-complete-reference.bmp'))) { throw 'Complete native reference was not rendered' }

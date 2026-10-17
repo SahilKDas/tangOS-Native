@@ -116,7 +116,7 @@ are reloaded from the repository database. Atomic cache writes reserve space for
 both file copies plus 32 MiB; the developer workstation's free-space policy is
 not a storage prerequisite imposed on other users.
 
-The current release-build and GUI-verification storage floor is 10 GiB, with
+The current release-build and GUI-verification storage floor is 11 GiB, with
 additional build headroom. Builds are serial and disposable outputs are removed
 after retaining evidence. Original React reference tools use an installed browser
 only for offline comparison and are excluded from the executable.

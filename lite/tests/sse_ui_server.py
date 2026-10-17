@@ -14,6 +14,15 @@ root.mkdir(parents=True, exist_ok=True)
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args): pass
     def do_GET(self):
+        if self.path == '/slow-atlas':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', '100000')
+            self.end_headers()
+            self.wfile.flush()
+            (root / 'slow-requested.txt').write_text('active', encoding='utf-8')
+            time.sleep(20)
+            return
         if self.path != '/live':
             self.send_error(404); return
         fixture = json.loads((root / 'functions.json').read_text(encoding='utf-8'))
