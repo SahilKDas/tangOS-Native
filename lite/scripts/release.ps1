@@ -1,4 +1,4 @@
-param([string]$OutputDir = "$PSScriptRoot/../release", [double]$MinimumFreeGiB = 10, [switch]$KeepBuildArtifacts, [switch]$Resume)
+param([string]$OutputDir = "$PSScriptRoot/../release", [double]$MinimumFreeGiB = 11, [switch]$KeepBuildArtifacts, [switch]$Resume)
 $ErrorActionPreference = 'Stop'
 $source = [IO.Path]::GetFullPath("$PSScriptRoot/..")
 $out = [IO.Path]::GetFullPath($OutputDir)
@@ -95,6 +95,7 @@ if ($LASTEXITCODE) { throw 'Original Atlas color comparisons failed' }
 python "$source/tests/test_batches_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original batch comparisons failed' }
 python "$source/tests/test_source_reference.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original source comparisons failed' }
 python "$source/tests/test_live_data_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Live event/reference comparisons failed' }
 python "$source/tests/test_sse_transport.py" --helper "$out/build-a/lite_live_data_tests.exe"

@@ -638,3 +638,19 @@ Actions checks are SUCCESS; the PR remains OPEN and draft, not ready for landing
 No new remote resources, merge, push, paid provider call or credential extraction
 was performed. Connections remain user-owned. Reproducible clean packaging is the
 next gate; this entry does not claim a new verified release or full parity.
+## 0.33.0 verified portable package — 2026-10-17
+
+Source checkpoint `10e5b76`. Two clean serial release builds produced identical
+Windows x64 executables: **7,135,232 bytes (7.135 decimal MB)**, SHA256
+`AA42EC98E4D0562ED8310D8582A38CC929EDC3D0B1A2ECD36962196F8B341673`.
+The ten native suites, packaged backend/Git/ZIP tests, original-source comparisons,
+and actual WinHTTP SSE integration passed. All three packaged GUI workflows
+(valid, missing and invalid descriptors) passed at 120 DPI, including the normal
+workflow's real live Viewer event fixture. Imports are Windows system DLLs only.
+The verified default executable is `lite/release/TangOSLite.exe`.
+
+Temporary build trees and raw release captures were removed after retaining test
+reports. The workstation free-space floor is now **11 GiB**. Full parity remains
+unreached: the documented composition/motion differences, physical mixed-monitor
+validation and broader external integration coverage remain open. Ordinary HTTP
+snapshot shutdown cancellation is the next functional fix.
