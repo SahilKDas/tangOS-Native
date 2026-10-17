@@ -616,3 +616,25 @@ The default artifact is `lite/release/TangOSLite.exe`. Exact UI composition,
 newest stateless MCP and broader third-party/provider validation remain pending.
 The real SM64DS failures recorded above remain failures. No credentials, ROMs or
 extracted assets are included; no real provider calls or GitHub writes were made.
+
+## 0.33 development validation — 2026-10-17
+
+Source checkpoints 8a0b959 and 4815027 add shared live state, progress deltas,
+contributor mapping and stream/cache hardening. The development native build
+passed all ten suites (152.32 seconds), the 25 direct original Console live-data
+comparisons, and packaged loopback, reviewed Git and ZIP-import tests. Later
+targeted runs passed cache metadata recovery, open-stream delivery, MIME validation
+and echoed-secret redaction, plus the updated picker rendering and native GUI.
+
+The actual native Viewer consumed loopback counts, claims, match removal/addition
+and changed authors; closing cancelled its active stream in 32 ms. The full
+packaged repository/status/check/log/fleet/Viewer/overlay workflow passed at
+120 DPI with 11 responsive timer ticks. The separate picker run recorded 12.
+The source renderer tests include 96/106/120/132/144/168/192/216/240/288/384 DPI;
+these do not establish physical mixed-monitor behavior.
+
+Read-only native GH checks against the existing synthetic validation PR succeeded:
+Actions checks are SUCCESS; the PR remains OPEN and draft, not ready for landing.
+No new remote resources, merge, push, paid provider call or credential extraction
+was performed. Connections remain user-owned. Reproducible clean packaging is the
+next gate; this entry does not claim a new verified release or full parity.

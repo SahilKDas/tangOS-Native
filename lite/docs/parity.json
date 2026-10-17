@@ -19,7 +19,11 @@
     {
       "contract": "allowMutations",
       "state": "partial",
-      "evidence": ["lite/src/console_ui.cpp:CONTROLLER_WRITES", "lite/src/console_ui.cpp:smokeScreens", "Native tool permission defaults OFF and is remembered; complete reference execution semantics are not verified"],
+      "evidence": [
+        "lite/src/console_ui.cpp:CONTROLLER_WRITES",
+        "lite/src/console_ui.cpp:smokeScreens",
+        "Native tool permission defaults OFF and is remembered; complete reference execution semantics are not verified"
+      ],
       "kind": "state"
     },
     {
@@ -92,13 +96,19 @@
     {
       "contract": "useAgents",
       "state": "partial",
-      "evidence": ["lite/tests/test_auto_role_reference.py", "lite/src/console_ui.cpp:smokeScreens"],
+      "evidence": [
+        "lite/tests/test_auto_role_reference.py",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "state"
     },
     {
       "contract": "agentFanout",
       "state": "partial",
-      "evidence": ["lite/tests/test_auto_role_reference.py", "lite/tests/backend_tests.cpp"],
+      "evidence": [
+        "lite/tests/test_auto_role_reference.py",
+        "lite/tests/backend_tests.cpp"
+      ],
       "kind": "state"
     },
     {
@@ -148,7 +158,11 @@
     {
       "contract": "activitySnapshot",
       "state": "partial",
-      "evidence": ["lite/tests/test_activity_reference.py", "lite/src/activity.cpp", "Packaged Controller detail GUI workflow; UTF-16 surrogate-boundary equivalence remains unverified"],
+      "evidence": [
+        "lite/tests/test_activity_reference.py",
+        "lite/src/activity.cpp",
+        "Packaged Controller detail GUI workflow; UTF-16 surrogate-boundary equivalence remains unverified"
+      ],
       "kind": "api"
     },
     {
@@ -161,7 +175,12 @@
     },
     {
       "contract": "preflightFix",
-      "state": "partial", "evidence": ["lite/tests/backend_tests.cpp: confirmed command/input fingerprint, failure and cancellation coverage", "lite/tests/test_repair_reference.py: direct original command construction comparisons", "Native preflight.fix adds caller-confirmed repairs; original chaosdb automatic repair and exact result envelopes remain different"],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/backend_tests.cpp: confirmed command/input fingerprint, failure and cancellation coverage",
+        "lite/tests/test_repair_reference.py: direct original command construction comparisons",
+        "Native preflight.fix adds caller-confirmed repairs; original chaosdb automatic repair and exact result envelopes remain different"
+      ],
       "kind": "api"
     },
     {
@@ -188,19 +207,35 @@
     },
     {
       "contract": "atlasCurrent",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/live_data_tests.cpp: scoped/durable cache, refresh authorization, progress deltas and GitHub mapping",
+        "lite/tests/test_live_data_reference.py: 25 direct original feed, event, identity and progress comparisons",
+        "lite/tests/test_sse_transport.py: actual WinHTTP delivery, reconnect, cancellation and credential isolation",
+        "lite/src/console_ui.cpp:smokeLiveEvents: actual live Viewer counts, claims, changed authors and removed/added matches",
+        "Native envelopes and explicit user-owned connections differ from the original Electron bridge; full contract parity remains unverified"
+      ],
       "kind": "api"
     },
     {
       "contract": "atlasGenerate",
       "state": "partial",
-      "evidence": ["lite/tests/backend_tests.cpp: descriptor generation, failure, confirmation and output protection", "lite/tests/fleet_tests.cpp: isolated post-land refresh, failure retention and MCP output guards", "lite/out/gui-hover-refresh-025/atlas-generator-report.txt: native command review; result envelope and isolated landing differ from reference", "lite/tests/test_statistics_reference.py: 16 original Atlas baseline comparisons"],
+      "evidence": [
+        "lite/tests/backend_tests.cpp: descriptor generation, failure, confirmation and output protection",
+        "lite/tests/fleet_tests.cpp: isolated post-land refresh, failure retention and MCP output guards",
+        "lite/out/gui-hover-refresh-025/atlas-generator-report.txt: native command review; result envelope and isolated landing differ from reference",
+        "lite/tests/test_statistics_reference.py: 16 original Atlas baseline comparisons"
+      ],
       "kind": "api"
     },
     {
       "contract": "recentAdds",
-      "state": "partial", "evidence": ["lite/tests/backend_tests.cpp: upstream selection, nested source stems, deduplication, local work exclusion", "lite/tests/test_atlas_backend_reference.py: original upstream history comparisons", "Network fetch is opt-in rather than implicit; cached local history remains available"],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/backend_tests.cpp: upstream selection, nested source stems, deduplication, local work exclusion",
+        "lite/tests/test_atlas_backend_reference.py: original upstream history comparisons",
+        "Network fetch is opt-in rather than implicit; cached local history remains available"
+      ],
       "kind": "api"
     },
     {
@@ -309,38 +344,74 @@
     },
     {
       "contract": "onAtlasRefreshed",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/live_data_tests.cpp: scoped/durable cache, refresh authorization, progress deltas and GitHub mapping",
+        "lite/tests/test_live_data_reference.py: 25 direct original feed, event, identity and progress comparisons",
+        "lite/tests/test_sse_transport.py: actual WinHTTP delivery, reconnect, cancellation and credential isolation",
+        "lite/src/console_ui.cpp:smokeLiveEvents: actual live Viewer counts, claims, changed authors and removed/added matches",
+        "Native envelopes and explicit user-owned connections differ from the original Electron bridge; full contract parity remains unverified"
+      ],
       "kind": "api"
     },
     {
       "contract": "githubCredits",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/live_data_tests.cpp: scoped/durable cache, refresh authorization, progress deltas and GitHub mapping",
+        "lite/tests/test_live_data_reference.py: 25 direct original feed, event, identity and progress comparisons",
+        "lite/tests/test_sse_transport.py: actual WinHTTP delivery, reconnect, cancellation and credential isolation",
+        "lite/src/console_ui.cpp:smokeLiveEvents: actual live Viewer counts, claims, changed authors and removed/added matches",
+        "Native envelopes and explicit user-owned connections differ from the original Electron bridge; full contract parity remains unverified"
+      ],
       "kind": "api"
     },
     {
       "contract": "atlasCosmetics",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/live_data_tests.cpp: scoped/durable cache, refresh authorization, progress deltas and GitHub mapping",
+        "lite/tests/test_live_data_reference.py: 25 direct original feed, event, identity and progress comparisons",
+        "lite/tests/test_sse_transport.py: actual WinHTTP delivery, reconnect, cancellation and credential isolation",
+        "lite/src/console_ui.cpp:smokeLiveEvents: actual live Viewer counts, claims, changed authors and removed/added matches",
+        "Native envelopes and explicit user-owned connections differ from the original Electron bridge; full contract parity remains unverified"
+      ],
       "kind": "api"
     },
     {
       "contract": "atlasCounts",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/live_data_tests.cpp: scoped/durable cache, refresh authorization, progress deltas and GitHub mapping",
+        "lite/tests/test_live_data_reference.py: 25 direct original feed, event, identity and progress comparisons",
+        "lite/tests/test_sse_transport.py: actual WinHTTP delivery, reconnect, cancellation and credential isolation",
+        "lite/src/console_ui.cpp:smokeLiveEvents: actual live Viewer counts, claims, changed authors and removed/added matches",
+        "Native envelopes and explicit user-owned connections differ from the original Electron bridge; full contract parity remains unverified"
+      ],
       "kind": "api"
     },
     {
       "contract": "atlasProgress",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/live_data_tests.cpp: scoped/durable cache, refresh authorization, progress deltas and GitHub mapping",
+        "lite/tests/test_live_data_reference.py: 25 direct original feed, event, identity and progress comparisons",
+        "lite/tests/test_sse_transport.py: actual WinHTTP delivery, reconnect, cancellation and credential isolation",
+        "lite/src/console_ui.cpp:smokeLiveEvents: actual live Viewer counts, claims, changed authors and removed/added matches",
+        "Native envelopes and explicit user-owned connections differ from the original Electron bridge; full contract parity remains unverified"
+      ],
       "kind": "api"
     },
     {
       "contract": "onAtlasLive",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/live_data_tests.cpp: scoped/durable cache, refresh authorization, progress deltas and GitHub mapping",
+        "lite/tests/test_live_data_reference.py: 25 direct original feed, event, identity and progress comparisons",
+        "lite/tests/test_sse_transport.py: actual WinHTTP delivery, reconnect, cancellation and credential isolation",
+        "lite/src/console_ui.cpp:smokeLiveEvents: actual live Viewer counts, claims, changed authors and removed/added matches",
+        "Native envelopes and explicit user-owned connections differ from the original Electron bridge; full contract parity remains unverified"
+      ],
       "kind": "api"
     },
     {
@@ -527,7 +598,10 @@
     {
       "contract": "clearAllStats",
       "state": "partial",
-      "evidence": ["lite/tests/backend_tests.cpp", "lite/src/console_ui.cpp:smokeScreens"],
+      "evidence": [
+        "lite/tests/backend_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "api"
     },
     {
@@ -613,19 +687,28 @@
     {
       "contract": "setClientRoles",
       "state": "partial",
-      "evidence": ["lite/tests/fleet_tests.cpp", "lite/src/console_ui.cpp:smokeScreens"],
+      "evidence": [
+        "lite/tests/fleet_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "api"
     },
     {
       "contract": "setClientEffort",
       "state": "partial",
-      "evidence": ["lite/tests/test_auto_role_reference.py", "lite/src/console_ui.cpp:smokeScreens"],
+      "evidence": [
+        "lite/tests/test_auto_role_reference.py",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "api"
     },
     {
       "contract": "setClientAttempts",
       "state": "partial",
-      "evidence": ["lite/tests/fleet_tests.cpp", "lite/src/console_ui.cpp:smokeScreens"],
+      "evidence": [
+        "lite/tests/fleet_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "api"
     },
     {
@@ -677,13 +760,19 @@
     {
       "contract": "setUseAgents",
       "state": "partial",
-      "evidence": ["lite/tests/test_auto_role_reference.py", "lite/src/console_ui.cpp:smokeScreens"],
+      "evidence": [
+        "lite/tests/test_auto_role_reference.py",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "api"
     },
     {
       "contract": "setAgentFanout",
       "state": "partial",
-      "evidence": ["lite/tests/test_auto_role_reference.py", "lite/tests/backend_tests.cpp"],
+      "evidence": [
+        "lite/tests/test_auto_role_reference.py",
+        "lite/tests/backend_tests.cpp"
+      ],
       "kind": "api"
     },
     {
@@ -877,13 +966,20 @@
     {
       "contract": "saveBugImage",
       "state": "partial",
-      "evidence": ["lite/src/clipboard.cpp", "lite/tests/backend_tests.cpp"],
+      "evidence": [
+        "lite/src/clipboard.cpp",
+        "lite/tests/backend_tests.cpp"
+      ],
       "kind": "api"
     },
     {
       "contract": "submitBug",
       "state": "partial",
-      "evidence": ["lite/src/report_dialog.cpp", "lite/tests/backend_tests.cpp", "lite/src/console_ui.cpp:smokeScreens"],
+      "evidence": [
+        "lite/src/report_dialog.cpp",
+        "lite/tests/backend_tests.cpp",
+        "lite/src/console_ui.cpp:smokeScreens"
+      ],
       "kind": "api"
     },
     {

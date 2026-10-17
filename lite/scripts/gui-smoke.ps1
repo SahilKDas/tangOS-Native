@@ -51,11 +51,23 @@ foreach ($expected in @($knownDigest, ('0' * 64))) {
 $ini = Join-Path $fixture 'settings.ini'
 # Quoting is required because both the executable and repository paths can contain spaces.
 $arguments = '--smoke-test "{0}" "{1}"' -f $repo, $ini
-$process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru -WindowStyle Hidden
-$null = $process.Handle
-# The expanded matrix captures overlays, three window sizes, every attached monitor
-# and a 25,000-function fixture. Bound the whole run separately from individual checks.
-if (-not $process.WaitForExit(240000)) { Stop-Process -Id $process.Id; throw 'GUI workflow timed out' }
+$sseControl = Join-Path $fixture 'sse-control'
+New-Item -ItemType Directory -Force -Path $sseControl | Out-Null
+$sseScript = [IO.Path]::GetFullPath("$PSScriptRoot/../tests/sse_ui_server.py")
+$sseServer = Start-Process -FilePath (Get-Command python).Source -ArgumentList @(('"'+$sseScript+'"'), '--directory', ('"'+$sseControl+'"')) -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $sseControl 'server-error.log') -RedirectStandardOutput (Join-Path $sseControl 'server-output.log')
+try {
+  $deadline = (Get-Date).AddSeconds(15)
+  while (-not (Test-Path -LiteralPath (Join-Path $sseControl 'endpoint.txt'))) {
+    if ($sseServer.HasExited -or (Get-Date) -gt $deadline) { throw 'Loopback SSE fixture did not start; inspect sse-control/server-error.log' }
+    Start-Sleep -Milliseconds 50
+  }
+  $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru -WindowStyle Hidden
+  $null = $process.Handle
+  if (-not $process.WaitForExit(240000)) { Stop-Process -Id $process.Id; throw 'GUI workflow timed out' }
+} finally {
+  if (-not $sseServer.HasExited) { $sseServer.Kill(); $sseServer.WaitForExit() }
+  $sseServer.Dispose()
+}
 $report = Join-Path $fixture 'gui-smoke-report.txt'
 if (-not (Test-Path -LiteralPath $report)) { throw "GUI workflow failed without a report: exit $($process.ExitCode)" }
 if ($process.ExitCode -ne 0) { throw (Get-Content -LiteralPath $report -Raw) }
@@ -68,6 +80,7 @@ foreach ($image in $images) {
   if (-not (Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -lt 100000) { throw "Missing native window render: $image" }
 }
 if (-not ($MissingDescriptor -or $InvalidDescriptor)) {
+if (-not (Get-Content -LiteralPath (Join-Path $fixture 'sse-viewer-report.txt') -Raw).StartsWith('PASS')) { throw 'Native SSE Viewer integration failed' }
 $display = Get-Content -LiteralPath (Join-Path $fixture 'display-validation.json') -Raw | ConvertFrom-Json
 if ($display.monitors.Count -lt 1 -or @($display.layouts | Where-Object state -eq 'passed').Count -ne 9) { throw 'Display layout matrix incomplete' }
 if (-not (Test-Path -LiteralPath (Join-Path $fixture 'help-complete-reference.bmp'))) { throw 'Complete native reference was not rendered' }

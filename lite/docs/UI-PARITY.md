@@ -391,3 +391,21 @@ the corrected cache shares one backdrop per parent paint. Raster tests pass.
 This source work follows the verified 0.17.0 package; it has not yet replaced
 that package. Glass composition, footer layout and remaining overlays still
 need comparison and implementation.
+
+## 0.33 live-state and picker checkpoint — 2026-10-17
+
+The native project picker now uses the reference rounded-rectangle geometry,
+Nunito title measurement, project glyph badge, chevrons and hover state. Its
+dropdown still uses a native menu; exact popup opening/frame composition and
+motion remain differences. Background/bubble physics, splash highlight/blur and
+some auxiliary composition still differ. Physical mixed-monitor coverage remains
+unverified; the renderer matrix now includes 106, 132, 216 and 384 DPI.
+
+The live Viewer has a real end-to-end loopback SSE fixture, not only a mocked
+callback: counts and claim envelopes update the window, added/removed match
+deltas and changed authors update its records, and closing cancels the open
+stream (32 ms in the development run). Direct comparisons cover 25 original
+feed/event/identity/progress cases. Native cache state is project/configuration/
+principal scoped; stale generation requires reviewed approval and fresh data is
+not regenerated repeatedly. These checks do not certify full frontend/backend
+parity or every user-configured external service.

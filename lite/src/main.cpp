@@ -166,14 +166,14 @@ bool reviewDialog(const std::string &text, bool readonly = false) {
     throw std::runtime_error("Smoke test must never approve a mutation");
   ReviewState st;
   HWND h = dpi::createWindow(WS_EX_DLGMODALFRAME, L"TangOSLiteReview",
-                           readonly ? L"TangOS Lite - About & notices"
-                                    : L"TangOS Lite - Review every change",
-                           WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, 940, 720,
-                           window, nullptr, GetModuleHandleW(nullptr), &st);
+                             readonly ? L"TangOS Lite - About & notices"
+                                      : L"TangOS Lite - Review every change",
+                             WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, 940,
+                             720, window, nullptr, GetModuleHandleW(nullptr), &st);
   st.text = dpi::createWindow(WS_EX_CLIENTEDGE, L"EDIT", L"",
-                            WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | WS_VSCROLL |
-                                WS_HSCROLL | ES_AUTOHSCROLL,
-                            16, 16, 890, 580, h, nullptr, nullptr, nullptr);
+                              WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | WS_VSCROLL |
+                                  WS_HSCROLL | ES_AUTOHSCROLL,
+                              16, 16, 890, 580, h, nullptr, nullptr, nullptr);
   dpi::sendMessage(st.text, EM_SETLIMITTEXT, 64 * 1024 * 1024, 0);
   dpi::sendMessage(st.text, WM_SETFONT, (WPARAM)monoFont, TRUE);
   set(st.text, text);
@@ -321,16 +321,19 @@ void selectProject(const std::string &id) {
   projectSplash.reset();
   projectSwitchPending = true;
   try {
-    projectSplash = std::make_unique<SplashOverlay>(window, entry.value("title", id), [job] {
-      try {
-        if (consoleUI && consoleUI->running())
-          throw std::runtime_error("Stop active operations before switching projects");
-        start(job, true);
-      } catch (const std::exception &error) {
-        output("\nERROR: " + std::string(error.what()) + "\n");
-        PostMessageW(window, DONE, 0, 0);
-      }
-    }, true);
+    projectSplash = std::make_unique<SplashOverlay>(
+        window, entry.value("title", id),
+        [job] {
+          try {
+            if (consoleUI && consoleUI->running())
+              throw std::runtime_error("Stop active operations before switching projects");
+            start(job, true);
+          } catch (const std::exception &error) {
+            output("\nERROR: " + std::string(error.what()) + "\n");
+            PostMessageW(window, DONE, 0, 0);
+          }
+        },
+        true);
   } catch (...) {
     projectSwitchPending = false;
     throw;
@@ -466,8 +469,8 @@ HWND control(const wchar_t *className, const wchar_t *text, DWORD style, int id 
     style |= BS_OWNERDRAW;
   if (std::wstring(className) == L"COMBOBOX")
     style |= CBS_OWNERDRAWFIXED | CBS_HASSTRINGS;
-  HWND h = dpi::createWindow(0, className, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 100, 30, window,
-                           (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr);
+  HWND h = dpi::createWindow(0, className, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 100, 30,
+                             window, (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr);
   dpi::sendMessage(h, WM_SETFONT, (WPARAM)uiFont, TRUE);
   return h;
 }
@@ -501,8 +504,7 @@ void layout(int w, int h) {
   if (!workspaceReady) {
     ShowWindow(repoEdit, SW_SHOW);
     ShowWindow(projectButton, SW_SHOW);
-    dpi::moveWindow(projectButton, 100, 13,
-               std::clamp(int(value(projectButton).size()) * 7 + 32, 144, 260), 32, TRUE);
+    dpi::moveWindow(projectButton, 100, 13, skin::projectPickerWidth(projectButton), 32, TRUE);
     int x = (w - 760) / 2, y = (h - 420) / 2;
     dpi::moveWindow(repoEdit, x + 72, y + 174, 494, 34, TRUE);
     dpi::moveWindow(selectButton, x + 578, y + 174, 110, 34, TRUE);
@@ -514,8 +516,7 @@ void layout(int w, int h) {
     int rail = w - 354, cw = w - 382;
     ShowWindow(repoEdit, SW_HIDE);
     ShowWindow(projectButton, SW_SHOW);
-    dpi::moveWindow(projectButton, 100, 13,
-               std::clamp(int(value(projectButton).size()) * 7 + 32, 144, 260), 32, TRUE);
+    dpi::moveWindow(projectButton, 100, 13, skin::projectPickerWidth(projectButton), 32, TRUE);
     dpi::moveWindow(browseButton, w - 416, 12, 124, 30, TRUE);
     ShowWindow(selectButton, SW_HIDE);
     set(browseButton, "Change repo");
@@ -646,7 +647,8 @@ void snapshot(const fs::path &path) {
   int w = rect.right, h = rect.bottom;
   if (smoke) {
     auto available = fs::space(path.parent_path()).available;
-    auto captureBytes = uintmax_t(dpi::pixels(w, dpi::current())) * dpi::pixels(h, dpi::current()) * 4;
+    auto captureBytes =
+        uintmax_t(dpi::pixels(w, dpi::current())) * dpi::pixels(h, dpi::current()) * 4;
     if (available < 10ull * 1024 * 1024 * 1024 + captureBytes)
       throw std::runtime_error("GUI verification paused to preserve 10 GiB free storage");
   }
@@ -782,8 +784,8 @@ void projectMenu() {
   HMENU menu = CreatePopupMenu();
   std::vector<ProjectMenuRow> rows;
   rows.reserve(projects.size() + 4);
-  auto append = [&](UINT id, std::wstring title, std::wstring glyph = L"",
-                    bool viewerOnly = false, bool active = false) {
+  auto append = [&](UINT id, std::wstring title, std::wstring glyph = L"", bool viewerOnly = false,
+                    bool active = false) {
     rows.push_back({std::move(title), std::move(glyph), viewerOnly, active});
     AppendMenuW(menu, MF_OWNERDRAW, id, reinterpret_cast<LPCWSTR>(&rows.back()));
   };
@@ -804,9 +806,14 @@ void projectMenu() {
   append(10003, L"Import project ZIP…");
   RECT bounds;
   dpi::windowRect(projectButton, &bounds);
-  auto selected = dpi::trackPopup(menu, TPM_RETURNCMD | TPM_NONOTIFY, bounds.left, bounds.bottom + 8, 0,
-                                 window, nullptr);
+  SetPropW(projectButton, L"TangOSProjectPickerOpen", reinterpret_cast<HANDLE>(1));
+  InvalidateRect(projectButton, nullptr, FALSE);
+  UpdateWindow(projectButton);
+  auto selected = dpi::trackPopup(menu, TPM_RETURNCMD | TPM_NONOTIFY, bounds.left,
+                                  bounds.bottom + 8, 0, window, nullptr);
   DestroyMenu(menu);
+  RemovePropW(projectButton, L"TangOSProjectPickerOpen");
+  InvalidateRect(projectButton, nullptr, FALSE);
   if (selected == 10000)
     browse();
   else if (selected == 10001)
@@ -929,6 +936,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     repoLabel = control(L"STATIC", L"Repository", 0);
     repoEdit = control(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP);
     projectButton = control(L"BUTTON", L"Choose a project", WS_TABSTOP, PROJECT_MENU);
+    skin::projectPicker(projectButton, L"");
     browseButton = control(L"BUTTON", L"Browse...", WS_TABSTOP, BROWSE);
     selectButton = control(L"BUTTON", L"Select", WS_TABSTOP, SELECT);
     refreshButton = control(L"BUTTON", L"Refresh", WS_TABSTOP, REFRESH);
@@ -1069,8 +1077,8 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     auto *i = (DRAWITEMSTRUCT *)l;
     if (i->CtlType == ODT_MENU && i->itemData) {
       auto &row = *reinterpret_cast<ProjectMenuRow *>(i->itemData);
-      skin::projectMenuRow(i->hDC, i->rcItem, row.title, row.glyph, row.viewerOnly,
-                           row.active, (i->itemState & ODS_SELECTED) != 0);
+      skin::projectMenuRow(i->hDC, i->rcItem, row.title, row.glyph, row.viewerOnly, row.active,
+                           (i->itemState & ODS_SELECTED) != 0);
       return TRUE;
     }
     if (i->CtlType == ODT_BUTTON) {
@@ -1361,7 +1369,20 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       projectTitle = loadDescriptor(repo).title;
     } catch (...) {
     }
-    set(projectButton, projectTitle + "  ▾");
+    auto glyph = wide(projectTitle);
+    glyph.resize(std::min(size_t(2), glyph.size()));
+    if (!glyph.empty())
+      CharUpperBuffW(glyph.data(), DWORD(glyph.size()));
+    try {
+      for (auto &entry : Backend(repo, dataDir, settings).invoke("projects.list"))
+        if (entry.value("active", false)) {
+          glyph = wide(entry.value("glyph", std::string()));
+          break;
+        }
+    } catch (const std::exception &) {
+    }
+    set(projectButton, projectTitle);
+    skin::projectPicker(projectButton, glyph);
     if (!consoleUI || consoleRepository != repo) {
       consoleUI.reset();
       consoleRepository = repo;
@@ -1437,6 +1458,8 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           consoleUI->smokeScreens(config.parent_path(), snapshot);
           if (fs::exists(repo / "tangos.json"))
             consoleUI->smokeRemote(config.parent_path(), snapshot);
+          if (fs::exists(config.parent_path() / "sse-control/endpoint.txt"))
+            consoleUI->smokeLiveEvents(config.parent_path(), snapshot);
           if (fs::exists(repo / "tangos.json"))
             consoleUI->smokeDisplay(config.parent_path(), snapshot);
         }

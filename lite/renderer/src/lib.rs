@@ -186,6 +186,8 @@ pub unsafe extern "C" fn tangos_icon(data: *mut u8, w: u32, h: u32, icon: u32, i
                 path.line_to(3., 12.); path.line_to(10., 10.); path.close();
                 line(&mut path, 3., 2., 3., 6.); line(&mut path, 1., 4., 5., 4.);
                 line(&mut path, 21., 18., 21., 22.); line(&mut path, 19., 20., 23., 20.); }
+        18 => { path.move_to(6., 9.); path.line_to(12., 15.); path.line_to(18., 9.); }
+        19 => { path.move_to(6., 15.); path.line_to(12., 9.); path.line_to(18., 15.); }
         _ => { path.move_to(6., 3.); path.line_to(14., 3.); path.line_to(19., 8.); path.line_to(19., 21.); path.line_to(6., 21.); path.close();
                path.move_to(14., 3.); path.line_to(14., 8.); path.line_to(19., 8.);
                for y in [12., 16.] { line(&mut path, 9., y, 16., y); } }

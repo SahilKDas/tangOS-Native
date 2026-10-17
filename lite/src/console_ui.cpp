@@ -5435,6 +5435,105 @@ Json ConsoleUI::debugState() const {
   clean(state);
   return state;
 }
+void ConsoleUI::smokeLiveEvents(const fs::path &directory,
+                                const std::function<void(const fs::path &)> &capture) {
+  if (impl->screen == Screen::descriptorGate)
+    return;
+  if (!fs::exists(impl->repository / ".tangos-lite-test-fixture"))
+    throw std::runtime_error("Live GUI smoke requires a disposable fixture");
+  auto control = directory / "sse-control";
+  auto endpointFile = control / "endpoint.txt";
+  if (!fs::exists(endpointFile)) {
+    write(directory / "sse-viewer-report.txt", "SKIP: no explicit loopback SSE fixture\n");
+    return;
+  }
+  auto endpoint = trim(read(endpointFile));
+  if (endpoint.rfind("http://127.0.0.1:", 0) != 0 || endpoint.find('@') != endpoint.npos)
+    throw std::runtime_error("GUI SSE fixture must be explicit loopback");
+  auto database = Json::parse(read(confinedPath(impl->repository, impl->descriptor.database)));
+  auto functions = parseAtlas(database.dump());
+  if (functions.size() < 2)
+    throw std::runtime_error("SSE GUI fixture needs two functions");
+  auto first = functions[0], second = functions[1];
+  uint64_t bytes = 0;
+  for (auto &f : functions)
+    bytes += f.size;
+  write(control / "functions.json", Json{{"first", first.id},
+                                         {"second", second.id},
+                                         {"secondName", second.name},
+                                         {"secondSize", second.size},
+                                         {"stats",
+                                          {{"totalFunctions", functions.size()},
+                                           {"matchedFunctions", 1},
+                                           {"totalBytes", bytes},
+                                           {"matchedBytes", first.size}}}}
+                                        .dump());
+  auto metadata = directory / "sse-project";
+  fs::create_directories(metadata);
+  write(metadata / "tangos.json", impl->descriptor.document.dump());
+  auto data = directory / "sse-state";
+  Backend backend(metadata, data, impl->settings);
+  auto confirm = [&](const std::string &name, Json args) {
+    auto preview = backend.invoke(name, args);
+    args["confirmation"] = preview.at("confirmation");
+    return backend.invoke(name, args);
+  };
+  confirm("connections.set",
+          {{"atlas.events", {{"enabled", true}, {"url", endpoint}}},
+           {"atlas.live", {{"enabled", true}, {"url", "https://fixture.invalid/atlas"}}}});
+  confirm("preferences.set", {{"liveRefresh", true}});
+  show(false);
+  try {
+    auto viewer = std::make_unique<ConsoleUI>(
+        impl->parent, impl->font, metadata, data, impl->settings, [] {},
+        std::function<void(const Settings &)>{}, true, std::string{}, std::function<void(Json)>{},
+        true,
+        [database](auto &, auto &, auto &, auto &) { return HttpResponse{200, database.dump()}; });
+    viewer->resize(impl->width, impl->height);
+    viewer->show(true, true);
+    auto wait = [&](auto condition) {
+      auto start = GetTickCount64();
+      while (GetTickCount64() - start < 12000) {
+        viewer->impl->tick();
+        if (viewer->impl->atlasReady && condition())
+          return;
+        Sleep(10);
+      }
+      throw std::runtime_error("Native SSE Viewer update timed out: " + viewer->impl->atlasError);
+    };
+    auto row = [&](const std::string &id) -> Json {
+      for (auto &f : viewer->impl->atlas)
+        if (f.id == id)
+          return f.row;
+      return Json::object();
+    };
+    wait([&] {
+      auto counts = viewer->impl->atlasExtras.value("atlas.counts", Json::object());
+      return counts.value("totals", Json::object()).value("Live Fixture", 0) == 7 &&
+             row(first.id).value("matched", false) &&
+             row(second.id).value("claim", Json()).is_object();
+    });
+    write(control / "phase.txt", "2");
+    wait([&] {
+      return !row(first.id).value("matched", true) && row(second.id).value("matched", false) &&
+             row(second.id).value("author", std::string()) == "Live Contributor";
+    });
+    capture(directory / "sse-live-viewer.bmp");
+    auto closing = GetTickCount64();
+    viewer.reset();
+    auto elapsed = GetTickCount64() - closing;
+    if (elapsed > 2000)
+      throw std::runtime_error("SSE Viewer close did not cancel promptly");
+    write(directory / "sse-viewer-report.txt",
+          "PASS native SSE Viewer: counts, claims, match "
+          "removal, added matches, changed authors, scoped state; close cancellation ms=" +
+              std::to_string(elapsed) + "\n");
+  } catch (...) {
+    show(true);
+    throw;
+  }
+  show(true);
+}
 void ConsoleUI::smokeRemote(const fs::path &directory,
                             const std::function<void(const fs::path &)> &capture) {
   if (impl->screen == Screen::descriptorGate)

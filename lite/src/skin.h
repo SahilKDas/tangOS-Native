@@ -2,6 +2,8 @@
 #include <string>
 #include <windows.h>
 namespace skin {
+void projectPicker(HWND window, const std::wstring &glyph);
+int projectPickerWidth(HWND window);
 void projectMenuRow(HDC dc, const RECT &bounds, const std::wstring &title,
                     const std::wstring &glyph, bool viewerOnly, bool active, bool hovered);
 enum class Icon {
@@ -22,7 +24,9 @@ enum class Icon {
   stop,
   cart,
   image,
-  sparkles
+  sparkles,
+  chevronDown,
+  chevronUp
 };
 enum class PanelStyle { glass, controller, task };
 void iconButton(HWND window, Icon icon);
