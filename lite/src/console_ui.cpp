@@ -1140,8 +1140,9 @@ struct ConsoleUI::Impl {
         y += 40;
       }
       label("Method", 214, y + 4, 110);
-      profileFields["Method"] =
-          combo({"GET", "POST", "PUT", "PATCH", "DELETE"}, 0, 328, y, cw - 348);
+      profileFields["Method"] = combo({"GET", "POST", "PUT", "PATCH", "DELETE"}, 0, 328, y, 110);
+      label("Mode", 450, y + 4, 44);
+      profileFields["Mode"] = combo({"mapped", "github-api"}, 0, 500, y, cw - 520);
       y += 40;
       for (auto entry : std::vector<std::pair<std::string, std::string>>{
                {"Enabled", "Enable this connection"},
@@ -1160,7 +1161,9 @@ struct ConsoleUI::Impl {
       body = edit(
           "Connections belong to you. Paste your service's endpoint and reference a key stored in "
           "the vault or your environment. Connections start disabled.\n\nUse atlas.live, "
-          "atlas.cosmetics, atlas.counts, atlas.progress, claims or update.check as read profiles. "
+          "atlas.events, atlas.cosmetics, atlas.counts, atlas.progress, claims or update.check as "
+          "read profiles. "
+          "For github.credits, choose github-api mode and your repository API base URL. "
           "Remote leases require claims.acquire, claims.heartbeat and claims.release.\n\nNo keys "
           "belong in these fields. Review the complete configuration before saving.",
           0, width - 332, 62, 310, height - 132, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
@@ -1721,6 +1724,8 @@ struct ConsoleUI::Impl {
             atlasExtras["notes"].push_back(e.what());
           }
         }
+        if (published)
+          atlas = parseAtlas(backend.invoke("atlas.current", Json::object(), 1000).dump());
         auto claims = state.value("claims", Json::object());
         if (!cacheOnly && enabled("claims"))
           try {
@@ -1731,15 +1736,6 @@ struct ConsoleUI::Impl {
         for (auto &f : atlas)
           if (heldTarget(f.row, claims))
             f.row["claim"] = {{"status", "active"}};
-        auto progress = atlasExtras.value("atlas.progress", Json::object());
-        if (progress.value("ready", false) && progress.contains("matched") &&
-            progress["matched"].is_array())
-          for (auto &f : atlas)
-            if (std::find(progress["matched"].begin(), progress["matched"].end(), f.id) !=
-                progress["matched"].end()) {
-              f.row["matched"] = true;
-              f.state = "matched";
-            }
       } catch (const std::exception &e) {
         atlasError = e.what();
       }
@@ -2504,6 +2500,8 @@ struct ConsoleUI::Impl {
     auto it = std::find(methods.begin(), methods.end(), c.value("method", std::string("GET")));
     dpi::sendMessage(profileFields["Method"], CB_SETCURSEL,
                      it == methods.end() ? 0 : it - methods.begin(), 0);
+    dpi::sendMessage(profileFields["Mode"], CB_SETCURSEL,
+                     c.value("mode", std::string("mapped")) == "github-api" ? 1 : 0, 0);
     dpi::sendMessage(profileFields["Enabled"], BM_SETCHECK, c.value("enabled", false), 0);
     dpi::sendMessage(profileFields["Automatic"], BM_SETCHECK, c.value("automatic", false), 0);
     dpi::sendMessage(
@@ -2954,6 +2952,23 @@ struct ConsoleUI::Impl {
           matchedBytes += f.size;
         }
       }
+      uint64_t totalFunctions = atlas.size();
+      if (liveAtlas) {
+        auto live = atlasExtras.value("atlas.progress", Json::object());
+        auto stats = live.value("stats", Json::object());
+        auto count = [&](const char *field, uint64_t fallback) {
+          auto value = stats.is_object() ? stats.value(field, Json()) : Json();
+          return value.is_number() && value >= 0 && value < double(UINT64_MAX)
+                     ? value.get<uint64_t>()
+                     : fallback;
+        };
+        if (live.value("ready", false)) {
+          totalFunctions = count("totalFunctions", totalFunctions);
+          matched = count("matchedFunctions", matched);
+          bytes = count("totalBytes", bytes);
+          matchedBytes = count("matchedBytes", matchedBytes);
+        }
+      }
       if (!fullAtlas) {
         int half = (width - 54) / 2;
         auto progress = [&](int x, const std::string &name, uint64_t done, uint64_t total) {
@@ -2968,12 +2983,12 @@ struct ConsoleUI::Impl {
           auto brush = CreateSolidBrush(RGB(194, 222, 232));
           FillRect(dc, &track, brush);
           DeleteObject(brush);
-          track.right = x + int(half * percent / 100);
+          track.right = x + int(half * std::clamp(percent, 0.0, 100.0) / 100);
           brush = CreateSolidBrush(RGB(118, 204, 20));
           FillRect(dc, &track, brush);
           DeleteObject(brush);
         };
-        progress(18, "Functions", matched, atlas.size());
+        progress(18, "Functions", matched, totalFunctions);
         progress(36 + half, "Code", matchedBytes, bytes);
         skin::label(dc, wide(liveAtlas ? cacheNotice : "local"), 90, 20, 300, 24, 13, false, true);
       }
@@ -3762,6 +3777,7 @@ struct ConsoleUI::Impl {
       auto c = connectionProfiles.value(name, Json::object());
       c["url"] = text(profileFields["URL"]);
       c["method"] = selected(profileFields["Method"]);
+      c["mode"] = selected(profileFields["Mode"]);
       c["keyEnv"] = text(profileFields["Key variable"]);
       c["keyHeader"] = text(profileFields["Key header"]);
       c["keyPrefix"] = text(profileFields["Key prefix"]);
@@ -5482,6 +5498,13 @@ void ConsoleUI::smokeRemote(const fs::path &directory,
       throw std::runtime_error("Published Viewer did not reuse its fresh cache");
     capture(directory / "remote-viewer.bmp");
     offline = true;
+    // A force read still respects the reference's 20-second throttle. A publication
+    // explicitly invalidates that throttle, so this exercises a real offline refresh.
+    Backend remoteCache(path, data, remoteSettings);
+    Json publication{{"event", "published"}, {"data", Json::object()}};
+    auto publicationPreview = remoteCache.invoke("atlas.acceptEvent", publication);
+    publication["confirmation"] = publicationPreview.at("confirmation");
+    remoteCache.invoke("atlas.acceptEvent", publication);
     remote.impl->forceLiveReload = true;
     remote.impl->loadAtlas();
     remote.impl->loader.join();

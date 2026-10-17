@@ -257,6 +257,12 @@ unsigned streamHttp(const std::string &url, const std::map<std::string, std::str
     throw std::runtime_error("Cannot read live stream status");
   if (status != 200)
     return status; // Never follow redirects or forward credentials.
+  wchar_t contentType[256]{};
+  DWORD typeBytes = sizeof(contentType);
+  if (!WinHttpQueryHeaders(request.handle, WINHTTP_QUERY_CONTENT_TYPE, WINHTTP_HEADER_NAME_BY_INDEX,
+                           contentType, &typeBytes, WINHTTP_NO_HEADER_INDEX) ||
+      std::wstring(contentType).rfind(L"text/event-stream", 0) != 0)
+    throw std::runtime_error("Live endpoint must return Content-Type: text/event-stream");
   for (;;) {
     context.reset();
     if (!WinHttpReadData(request.handle, context.buffer.data(), DWORD(context.buffer.size()),

@@ -1,4 +1,4 @@
-param([string]$OutputDir = "$PSScriptRoot/../release", [double]$MinimumFreeGiB = 25, [switch]$KeepBuildArtifacts, [switch]$Resume)
+param([string]$OutputDir = "$PSScriptRoot/../release", [double]$MinimumFreeGiB = 10, [switch]$KeepBuildArtifacts, [switch]$Resume)
 $ErrorActionPreference = 'Stop'
 $source = [IO.Path]::GetFullPath("$PSScriptRoot/..")
 $out = [IO.Path]::GetFullPath($OutputDir)
@@ -44,9 +44,9 @@ foreach ($name in @('build-b', 'build-a')) {
   cmake -S $source -B "$out/$name" -G 'MinGW Makefiles' -DCMAKE_BUILD_TYPE=Release
   if ($LASTEXITCODE) { throw 'Configure failed' }
   if ($name -eq 'build-b') {
-    cmake --build "$out/$name" --target TangOSLite -j 2
+    cmake --build "$out/$name" --target TangOSLite -j 1
   } else {
-    cmake --build "$out/$name" -j 2
+    cmake --build "$out/$name" -j 1
   }
   if ($LASTEXITCODE) { throw 'Build failed' }
   if ($name -eq 'build-b') {
@@ -95,6 +95,10 @@ if ($LASTEXITCODE) { throw 'Original Atlas color comparisons failed' }
 python "$source/tests/test_batches_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Original batch comparisons failed' }
 python "$source/tests/test_source_reference.py" --exe "$out/build-a/TangOSLite.exe"
+python "$source/tests/test_live_data_reference.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Live event/reference comparisons failed' }
+python "$source/tests/test_sse_transport.py" --helper "$out/build-a/lite_live_data_tests.exe"
+if ($LASTEXITCODE) { throw 'Actual WinHTTP SSE integration failed' }
 python "$source/tests/test_atlas_backend_reference.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Atlas backend reference comparisons failed' }
 python "$source/tests/test_repair_reference.py" --exe "$out/build-a/TangOSLite.exe"
@@ -122,7 +126,7 @@ Assert-FreeSpace
 $imports = & objdump -p "$out/TangOSLite.exe" | Select-String 'DLL Name:' | ForEach-Object { $_.Line.Trim() }
 $compiler = (& g++ --version | Select-Object -First 1)
 $cmake = (& cmake --version | Select-Object -First 1)
-$report = "TangOS Lite 0.32.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
+$report = "TangOS Lite 0.33.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
 Set-Content -LiteralPath "$out/SIZE.txt" -Value $report -Encoding utf8
 Copy-Item -LiteralPath "$source/README.md" -Destination "$out/README.md"
 Copy-Item -LiteralPath "$source/../LICENSE" -Destination "$out/LICENSE"

@@ -77,6 +77,9 @@ int main(int argc, char **argv) {
     auto http = [&](const std::string &url, const std::string &, const std::string &,
                     const std::map<std::string, std::string> &headers) {
       ++requests;
+      Backend cacheProbe(repo, data, Settings{}, {{"FIXTURE_KEY", "fixture-only"}});
+      check(cacheProbe.invoke("atlas.state").is_object(),
+            "HTTP does not hold the Atlas cache lock");
       check(headers.at("Authorization") == "Bearer fixture-only", "only supplied user key is used");
       if (offline)
         throw std::runtime_error("fixture offline");
@@ -108,6 +111,11 @@ int main(int argc, char **argv) {
     Json profile{
         {"url", "https://fixture.invalid/live"}, {"enabled", true}, {"keyEnv", "FIXTURE_KEY"}};
     confirm("connections.set", {{"atlas.live", profile}});
+    check(backend.invoke("atlas.load") == local, "populate scoped local cache");
+    auto scope = backend.invoke("atlas.state").at("scope").get<std::string>();
+    write(data / "atlas-state" / (scope + ".json.local.json"), "{broken");
+    check(backend.invoke("atlas.load") == local,
+          "corrupt local cache falls back to the source database");
     auto live = backend.invoke("atlas.live");
     check(live["data"]["functions"][0]["noMatch"] == true && requests == 1, "live database fetch");
     check(backend.invoke("atlas.load")["functions"][0]["matched"] == true &&
@@ -124,6 +132,25 @@ int main(int argc, char **argv) {
               {{"ready", true}, {"stats", Json::object()}, {"matched", Json::array({"arm9:1"})}}}});
     check(backend.invoke("atlas.state")["extras"]["atlas.progress"]["ready"] == true,
           "SSE progress persisted across consumers");
+    confirm("atlas.acceptEvent",
+            {{"event", "progress"},
+             {"data",
+              {{"ready", true},
+               {"stats", {{"matchedFunctions", 0}}},
+               {"added", Json::array({"arm9:2"})},
+               {"removed", Json::array({"arm9:1"})},
+               {"changed", Json::array({{{"id", "arm9:1"}, {"author", "updated"}}})}}}});
+    check(backend.invoke("atlas.current")["functions"][0]["matched"] == false &&
+              backend.invoke("atlas.current")["functions"][0]["author"] == "updated",
+          "live delta removes matches and updates records");
+    check(backend.invoke("atlas.load")["functions"][0]["matched"] == true &&
+              !backend.invoke("atlas.load")["functions"][0].contains("author"),
+          "local data ignores remote progress record changes");
+    confirm("atlas.acceptEvent",
+            {{"event", "claims"},
+             {"data", {{"claims", Json::array({{{"name", "f"}, {"status", "active"}}})}}}});
+    check(heldTarget({{"name", "f"}}, backend.invoke("atlas.state")["claims"]),
+          "SSE claim envelopes normalize to claim rows");
     confirm("atlas.acceptEvent", {{"event", "published"}, {"data", Json::object()}});
     offline = true;
     check(backend.invoke("atlas.live")["stale"] == true, "offline last-good fallback");

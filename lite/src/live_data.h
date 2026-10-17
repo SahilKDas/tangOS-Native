@@ -10,6 +10,9 @@ public:
 };
 Json normalizeAtlasFeed(const std::string &method, const Json &raw);
 Json overlayLiveAtlas(Json local, const Json &live);
+Json mergeLiveProgress(const Json &previous, const Json &event);
+Json applyLiveProgress(Json database, const Json &progress);
+Json liveClaimRows(const Json &value);
 bool reuseLiveAtlas(int64_t savedAt, int64_t now, bool force);
 class GithubCredits {
   Json result = {

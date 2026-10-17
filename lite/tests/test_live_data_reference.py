@@ -28,7 +28,23 @@ if(a.op==='credits') {
   globalThis.fetch=async()=>({ok:true,json:async()=>a.data}) as any;
   bustCosmeticsCache();
   result=a.method==='atlas.cosmetics'?await fetchCosmetics(null,'https://fixture.invalid'):a.method==='atlas.counts'?await fetchCounts(null,'https://fixture.invalid'):await fetchProgress(null,'https://fixture.invalid');
-} else if(a.op==='sse') {
+} else if(a.op==='progress') {
+  const source=fs.readFileSync(ATLAS_SOURCE,'utf8');
+  const part=source.slice(source.indexOf('const next = new Set<string>'),source.indexOf('return { stats, matched: next, records }'));
+  fs.writeFileSync(PROGRESS_MODULE,'export function apply(prev:any,d:any){ const stats=d.stats;'+part+'return {stats,matched:[...next],records:Object.fromEntries(records)};}');
+  const {apply}=await import(PROGRESS_URL);
+  let value=a.initial??{};
+  for(const event of a.events) {
+    if(!event.ready||!event.stats)continue;
+    const prev={matched:value.matched??[],records:new Map(Object.entries(value.records??{}))};
+    value={ready:true,...apply(prev,event)};
+  }
+  const live={matched:new Set(value.matched??[]),records:new Map(Object.entries(value.records??{})),stats:value.stats??{}};
+  const rawDb=a.database;
+  const overlay=source.slice(source.indexOf('const functions = rawDb.functions.map'),source.indexOf('}, [rawDb, live, source])'));
+  fs.writeFileSync(OVERLAY_MODULE,'export function overlay(rawDb:any,live:any){'+overlay+'}');
+  const {overlay:overlayDb}=await import(OVERLAY_URL);
+  result={progress:value,database:overlayDb(rawDb,live)};} else if(a.op==='sse') {
   const source=fs.readFileSync(SSE_SOURCE,'utf8');
   const parse=source.slice(source.indexOf('function parseFrame('));
   fs.writeFileSync(PARSE_MODULE,parse+'\nexport {parseFrame};');
@@ -36,7 +52,7 @@ if(a.op==='credits') {
   result=a.chunks.join('').replace(/\r\n/g,'\n').split('\n\n').map(parseFrame).filter(Boolean);
 }
 process.stdout.write(JSON.stringify(result));
-'''.replace('GH_MODULE', json.dumps((root/'console/src/main/github.ts').as_uri())).replace('FEED_MODULE', json.dumps((root/'console/src/main/cosmetics.ts').as_uri())).replace('SSE_SOURCE', json.dumps(str(root/'console/src/main/cosmetics.ts'))).replace('PARSE_MODULE', json.dumps(str(tmp/'parse.mts'))).replace('PARSE_URL', json.dumps((tmp/'parse.mts').as_uri())), encoding='utf-8')
+'''.replace('GH_MODULE', json.dumps((root/'console/src/main/github.ts').as_uri())).replace('FEED_MODULE', json.dumps((root/'console/src/main/cosmetics.ts').as_uri())).replace('ATLAS_SOURCE', json.dumps(str(root/'console/src/renderer/src/components/AtlasView.tsx'))).replace('PROGRESS_MODULE', json.dumps(str(tmp/'progress.mts'))).replace('PROGRESS_URL', json.dumps((tmp/'progress.mts').as_uri())).replace('OVERLAY_MODULE', json.dumps(str(tmp/'overlay.mts'))).replace('OVERLAY_URL', json.dumps((tmp/'overlay.mts').as_uri())).replace('SSE_SOURCE', json.dumps(str(root/'console/src/main/cosmetics.ts'))).replace('PARSE_MODULE', json.dumps(str(tmp/'parse.mts'))).replace('PARSE_URL', json.dumps((tmp/'parse.mts').as_uri())), encoding='utf-8')
         def compare(a):
             nonlocal count
             request, response, fixture = tmp/'request.json', tmp/'response.json', tmp/'fixture.json'
@@ -55,6 +71,16 @@ process.stdout.write(JSON.stringify(result));
         for email, name in [('42+Alice@users.noreply.github.com','Alice'),('Alice@users.noreply.github.com','Alice'),('Alias@EXAMPLE.invalid','Alice'),('','  Alice  '),('@invalid',' Name '),('user@example.invalid','')]:
             rows = [{'author':{'login':'alice'},'commit':{'author':{'email':email,'name':name}}},{'author':{'login':'other'},'commit':{'author':{'email':email,'name':name}}},{'author':None,'commit':{'author':{'email':'unknown@invalid'}}}]
             compare({'op':'credits','contributors':[{'login':'alice','contributions':2},{'login':'x[BoT]','contributions':3},{'login':'github-actions','contributions':1}],'commits':[rows],'pulls':[{'user':{'login':'alice'}},{'user':{'login':'alice'}},{'user':{'login':'ci[bot]'}},{'user':None}]})
+        database = {'functions':[{'id':'a','matched':True,'author':'local'},{'id':'b','matched':False}],'stats':{'custom':9}}
+        sequences = [
+            [{'ready':True,'stats':{'matchedFunctions':1},'matched':['a']}],
+            [{'ready':True,'stats':{'matchedFunctions':1},'matched':['a']},{'ready':True,'stats':{'matchedFunctions':1},'added':['b'],'removed':['a'],'changed':[{'id':'a','author':'remote'}]}],
+            [{'ready':True,'stats':{},'matched':['a']},{'ready':True,'stats':{},'matched':[]}],
+            [{'ready':True,'stats':{},'matched':['a']},{'ready':False,'stats':{},'removed':['a']}],
+            [{'ready':True,'stats':{},'matched':[],'added':['b','b'],'changed':[{'id':'b','author':'first'}]},{'ready':True,'stats':{},'changed':[{'id':'b','author':'last'}]}]
+        ]
+        for events in sequences:
+            compare({'op':'progress','initial':{},'events':events,'database':database})
         for text in [': heartbeat\n\nevent: progress\ndata: {"ready":false}\n\n','data: bad\n\ndata: {"日本語":2}\n\n','event: counts\r\ndata: {\r\ndata: "daily":{}}\r\n\r\n']:
             compare({'op':'sse','chunks':list(text)})
     print(f'PASS {count} original Console live-feed, SSE and GitHub identity comparisons')

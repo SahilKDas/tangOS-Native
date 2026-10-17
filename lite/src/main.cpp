@@ -208,7 +208,7 @@ std::string resourceText(int id) {
 }
 void about() {
   reviewDialog(
-      "TangOS Lite 0.32.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
+      "TangOS Lite 0.33.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
       "for checks and Git; Repository for status.\nAlways read AGENTS.md and review "
       "changes before publication.\n\n" +
           resourceText(204) + "\n\nMinGW-w64 libwinpthread\n" + resourceText(202) +
@@ -636,7 +636,7 @@ void paintChrome(HDC dc, int w, int h) {
     skin::label(dc, L"Repository status", rail + 16, 345, 308, 24, 14, true);
   skin::label(dc, L"Port-only  ·  Review before push", rail + 16, h - 139, 300, 23, 12, true, true);
   skin::mascot(dc, w - 137, h - 127, 96);
-  skin::label(dc, L"v0.32.0", w - 74, h - 27, 60, 18, 10, false, true);
+  skin::label(dc, L"v0.33.0", w - 74, h - 27, 60, 18, 10, false, true);
 }
 void snapshot(const fs::path &path) {
   dpi::Scope scale(dpi::forWindow(window));
@@ -647,8 +647,8 @@ void snapshot(const fs::path &path) {
   if (smoke) {
     auto available = fs::space(path.parent_path()).available;
     auto captureBytes = uintmax_t(dpi::pixels(w, dpi::current())) * dpi::pixels(h, dpi::current()) * 4;
-    if (available < 25ull * 1024 * 1024 * 1024 + captureBytes)
-      throw std::runtime_error("GUI verification paused to preserve 25 GiB free storage");
+    if (available < 10ull * 1024 * 1024 * 1024 + captureBytes)
+      throw std::runtime_error("GUI verification paused to preserve 10 GiB free storage");
   }
   HDC dc = dpi::getDC(window), memory = dpi::compatibleDC(dc);
   HBITMAP bitmap = dpi::compatibleBitmap(dc, w, h);
@@ -684,7 +684,7 @@ fs::path saveDebugSnapshot() {
   fs::create_directories(folder);
   snapshot(folder / "window.bmp");
   Json state = {{"app", "TangOS Lite"},
-                {"version", "0.32.0"},
+                {"version", "0.33.0"},
                 {"capturedAt", activityNow()},
                 {"toolboxOpen", toolboxOpen},
                 {"repositoryView", repositoryView},

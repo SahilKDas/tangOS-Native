@@ -110,15 +110,81 @@ Json overlayLiveAtlas(Json local, const Json &live) {
   }
   return local;
 }
+Json mergeLiveProgress(const Json &previous, const Json &event) {
+  if (!event.is_object() || event.value("ready", Json(false)) != true || !event.contains("stats") ||
+      !event["stats"].is_object())
+    return previous;
+  auto next = normalizeAtlasFeed("atlas.progress", event);
+  auto ids = event.contains("matched") ? next["matched"]
+             : previous.is_object()    ? previous.value("matched", Json::array())
+                                       : Json::array();
+  if (!ids.is_array())
+    ids = Json::array();
+  auto records = previous.is_object() ? previous.value("records", Json::object()) : Json::object();
+  if (!records.is_object())
+    records = Json::object();
+  if (event.contains("added") && event["added"].is_array())
+    for (auto &id : event["added"])
+      if (id.is_string() && std::find(ids.begin(), ids.end(), id) == ids.end())
+        ids.push_back(id);
+  if (event.contains("removed") && event["removed"].is_array())
+    for (auto &id : event["removed"])
+      if (id.is_string())
+        ids.erase(std::remove(ids.begin(), ids.end(), id), ids.end());
+  if (event.contains("changed") && event["changed"].is_array())
+    for (auto &row : event["changed"])
+      if (row.is_object() && row.contains("id") && row["id"].is_string())
+        records[row["id"].get<std::string>()] = row;
+  next["matched"] = ids;
+  next["records"] = records;
+  return next;
+}
+Json applyLiveProgress(Json database, const Json &progress) {
+  if (!database.is_object() || !database.contains("functions") ||
+      !database["functions"].is_array() || !progress.is_object() ||
+      progress.value("ready", Json(false)) != true)
+    return database;
+  std::set<std::string> matched;
+  for (auto &id : progress.value("matched", Json::array()))
+    if (id.is_string())
+      matched.insert(id);
+  auto records = progress.value("records", Json::object());
+  for (auto &row : database["functions"]) {
+    if (!row.is_object() || !row.contains("id") || !row["id"].is_string())
+      continue;
+    auto id = row["id"].get<std::string>();
+    if (records.is_object() && records.contains(id) && records[id].is_object())
+      row.update(records[id]);
+    row["matched"] = matched.count(id) != 0;
+  }
+  auto stats = progress.value("stats", Json::object());
+  if (stats.is_object()) {
+    if (!database.contains("stats") || !database["stats"].is_object())
+      database["stats"] = Json::object();
+    database["stats"].update(stats);
+  }
+  return database;
+}
+Json liveClaimRows(const Json &value) {
+  auto rows = value.is_array()    ? value
+              : value.is_object() ? value.value("claims", Json::array())
+                                  : Json::array();
+  Json out = Json::array();
+  if (rows.is_array())
+    for (auto &row : rows)
+      if (row.is_object())
+        out.push_back(row);
+  return out;
+}
 bool reuseLiveAtlas(int64_t savedAt, int64_t now, bool force) {
   return savedAt > 0 && now >= savedAt && now - savedAt < (force ? 20000 : 60000);
 }
 namespace {
 bool bot(std::string login) {
+  bool actions = login == "github-actions";
   std::transform(login.begin(), login.end(), login.begin(),
                  [](unsigned char c) { return char(std::tolower(c)); });
-  return login == "github-actions" ||
-         (login.size() >= 5 && login.substr(login.size() - 5) == "[bot]");
+  return actions || (login.size() >= 5 && login.substr(login.size() - 5) == "[bot]");
 }
 } // namespace
 void GithubCredits::contributors(const Json &rows) {

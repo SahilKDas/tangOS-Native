@@ -227,3 +227,12 @@ live GitHub test creates a fresh private repository with synthetic text and a
 minimal read-only Actions job. It uses existing gh authentication, retains its
 draft PR for review, and never merges or deletes remote resources. It is excluded
 from ordinary tests and release builds.
+
+Live Atlas profiles remain opt-in and user-owned. SSE GET requests reject
+redirects and unexpected response types; credential headers are never forwarded
+to another origin. Decoding is bounded and cache metadata is secret-redacted.
+Project/configuration/principal cache scopes prevent another project's or user's
+cached feed from being reused. Background stale generation needs a persisted
+reviewed command approval; script or descriptor changes expire it. This approval
+trusts repository code and does not create an OS sandbox. No Git confirmation
+or destructive-operation policy was relaxed for live refresh.

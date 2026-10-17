@@ -178,8 +178,8 @@ void saveAtlasJson(const fs::path &path, const Json &value) {
   fs::create_directories(path.parent_path());
   ULARGE_INTEGER free{};
   if (!GetDiskFreeSpaceExW(path.parent_path().c_str(), &free, nullptr, nullptr) ||
-      free.QuadPart < 25ull * 1024 * 1024 * 1024 + serialized.size() * 2 + 1024 * 1024)
-    throw std::runtime_error("Atlas cache paused to preserve 25 GiB free storage");
+      free.QuadPart < 32ull * 1024 * 1024 + serialized.size() * 2)
+    throw std::runtime_error("Insufficient disk space for an atomic Atlas cache write");
   saveJson(path, value);
 }
 Command preflightRepairCommand(const fs::path &repository, const Descriptor &descriptor,
@@ -446,7 +446,7 @@ Json parseClaimRows(const std::string &md) {
   return rows;
 }
 bool heldTarget(const Json &row, const Json &claims) {
-  for (auto &c : claims) {
+  for (auto &c : liveClaimRows(claims)) {
     auto state = c.value("status", std::string("active"));
     std::transform(state.begin(), state.end(), state.begin(),
                    [](unsigned char c) { return std::tolower(c); });
@@ -641,6 +641,12 @@ Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
                                                   a.value("bySizeOrder", Json::array()))}};
   if (m == "policy.liveData") {
     auto op = a.at("op").get<std::string>();
+    if (op == "progress") {
+      auto value = a.value("initial", Json::object());
+      for (auto &event : a.at("events"))
+        value = mergeLiveProgress(value, event);
+      return {{"progress", value}, {"database", applyLiveProgress(a.at("database"), value)}};
+    }
     if (op == "feed")
       return normalizeAtlasFeed(a.at("method"), a.value("data", Json()));
     if (op == "overlay")
@@ -1484,7 +1490,10 @@ Json Backend::atlasService(const std::string &m, const Json &a, const Descriptor
   };
   auto blob = [&](const std::string &kind) {
     try {
-      return fileJson(blobPath(kind), nullptr);
+      auto value = fileJson(blobPath(kind), nullptr);
+      return value.is_object() && value.contains("functions") && value["functions"].is_array()
+                 ? value
+                 : Json(nullptr);
     } catch (const std::exception &) {
       return Json(nullptr);
     }
@@ -1492,8 +1501,28 @@ Json Backend::atlasService(const std::string &m, const Json &a, const Descriptor
   auto persist = [&] { saveAtlasJson(path, state); };
   auto now = atlasNow();
   auto profiles = fileJson(directory / "connections.json");
+  // HTTP must not hold the cache lock: incoming events and other projects remain responsive.
+  auto fetch = [&](auto action) {
+    stateLock.release();
+    lock.unlock();
+    try {
+      auto result = action();
+      lock.lock();
+      stateLock.acquire();
+      state = fileJson(path);
+      return result;
+    } catch (...) {
+      if (!lock.owns_lock()) {
+        lock.lock();
+        stateLock.acquire();
+        state = fileJson(path);
+      }
+      throw;
+    }
+  };
   auto request = [&](const std::string &name) {
-    return execute("network.read", {{"connection", a.value("connection", name)}});
+    return fetch(
+        [&] { return execute("network.read", {{"connection", a.value("connection", name)}}); });
   };
   auto local = [&] {
     auto file = confinedPath(repository, d.database);
@@ -1501,9 +1530,11 @@ Json Backend::atlasService(const std::string &m, const Json &a, const Descriptor
     auto size = fs::file_size(file, sizeError);
     auto stamp =
         std::to_string(fileStamp(file)) + ":" + (sizeError ? "missing" : std::to_string(size));
-    if (!a.value("force", false) && state.value("localStamp", std::string()) == stamp &&
-        fs::exists(blobPath("local")))
-      return blob("local");
+    if (!a.value("force", false) && state.value("localStamp", std::string()) == stamp) {
+      auto cached = blob("local");
+      if (!cached.is_null())
+        return cached;
+    }
     Json db;
     try {
       db = fileJson(file, nullptr);
@@ -1517,20 +1548,13 @@ Json Backend::atlasService(const std::string &m, const Json &a, const Descriptor
     persist();
     return db;
   };
-  auto overlay = [&](Json db) {
+  auto overlay = [&](Json db, bool useProgress = true) {
     db = overlayLiveAtlas(std::move(db), blob("live"));
-    auto progress = state.value("extras", Json::object()).value("atlas.progress", Json::object());
-    if (db.is_object() && progress.value("ready", false) && progress.contains("matched") &&
-        progress["matched"].is_array()) {
-      std::set<std::string> ids;
-      for (auto &id : progress["matched"])
-        if (id.is_string())
-          ids.insert(id);
-      for (auto &row : db["functions"])
-        if (row.is_object() && row.contains("id") && row["id"].is_string() && ids.count(row["id"]))
-          row["matched"] = true;
-    }
-    return db;
+    return useProgress
+               ? applyLiveProgress(
+                     std::move(db),
+                     state.value("extras", Json::object()).value("atlas.progress", Json::object()))
+               : db;
   };
   if (m == "atlas.state") {
     return {{"scope", path.stem().u8string()},
@@ -1542,10 +1566,10 @@ Json Backend::atlasService(const std::string &m, const Json &a, const Descriptor
             {"localStamp", state.value("localStamp", std::string())}};
   }
   if (m == "atlas.load")
-    return overlay(local());
+    return overlay(local(), false);
   if (m == "atlas.current") {
     auto live = blob("live");
-    return live.is_null() ? overlay(local()) : overlay(live);
+    return live.is_null() ? overlay(local(), false) : overlay(live);
   }
   if (m == "atlas.acceptEvent") {
     auto event = a.at("event").get<std::string>();
@@ -1556,10 +1580,14 @@ Json Backend::atlasService(const std::string &m, const Json &a, const Descriptor
       state["liveAt"] = 0;
     else if (event == "cosmetics" || event == "counts" || event == "progress") {
       auto method = "atlas." + event;
-      state["extras"][method] = normalizeAtlasFeed(method, value);
+      state["extras"][method] =
+          event == "progress"
+              ? mergeLiveProgress(
+                    state.value("extras", Json::object()).value(method, Json::object()), value)
+              : normalizeAtlasFeed(method, value);
       state["feedAt"][method] = now;
     } else if (event == "claims")
-      state["claims"] = value;
+      state["claims"] = liveClaimRows(value);
     state["lastEvent"] = {{"event", event}, {"at", now}};
     persist();
     return {{"event", event}, {"data", value}};
@@ -1595,7 +1623,7 @@ Json Backend::atlasService(const std::string &m, const Json &a, const Descriptor
         d.document.value("data", Json::object()).value("committedDbUrl", std::string());
     if (a.value("publishedUrl", std::string()) == publishedUrl && !publishedUrl.empty()) {
       try {
-        auto response = transport(publishedUrl, "GET", {}, {});
+        auto response = fetch([&] { return transport(publishedUrl, "GET", {}, {}); });
         auto db = Json::parse(response.body);
         if (response.status != 200 || !db.is_object() || !db.contains("functions") ||
             !db["functions"].is_array())
@@ -1632,7 +1660,10 @@ Json Backend::atlasService(const std::string &m, const Json &a, const Descriptor
     auto raw = result.value("ok", false) ? result.value("data", Json())
                : m == "atlas.cosmetics"  ? extras.value(m, Json())
                                          : Json();
-    result["data"] = normalizeAtlasFeed(m, raw);
+    result["data"] =
+        m == "atlas.progress" && result.value("ok", false)
+            ? mergeLiveProgress(state.value("extras", Json::object()).value(m, Json::object()), raw)
+            : normalizeAtlasFeed(m, raw);
     if (result.value("ok", false)) {
       state["extras"][m] = result["data"];
       state["feedAt"][m] = now;
@@ -1667,7 +1698,7 @@ Json Backend::atlasService(const std::string &m, const Json &a, const Descriptor
     Json warnings = Json::array();
     auto get = [&](const std::string &suffix) {
       try {
-        auto response = transport(base + suffix, "GET", {}, headers);
+        auto response = fetch([&] { return transport(base + suffix, "GET", {}, headers); });
         if (response.status != 200)
           throw std::runtime_error("GitHub HTTP " + std::to_string(response.status));
         return Json::parse(redact(response.body, secrets));
@@ -2065,7 +2096,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       args["connection"] = m;
     auto result = execute("network.read", args);
     if (result.value("ok", false))
-      result["update"] = updateStatus("0.32.0", result.at("data"));
+      result["update"] = updateStatus("0.33.0", result.at("data"));
     return result;
   }
   if (m == "git.clone") {
@@ -2164,7 +2195,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto folder = directory / "exports" / ("bug-report-" + uniqueId());
     fs::create_directories(folder);
     Json debug = {{"app", "TangOS Lite"},
-                  {"version", "0.32.0"},
+                  {"version", "0.33.0"},
                   {"portOnly", settings.portOnly},
                   {"project", settings.activeProject},
                   {"connections", Json::array()},

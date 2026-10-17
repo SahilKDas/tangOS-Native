@@ -95,3 +95,31 @@ configuration. Fetch failure retains usable cached history, as the reference doe
 `atlas.load` follows Console's best-effort null response for absent, malformed or
 invalid databases; a valid functions array retains the complete database envelope.
 Protected path and bounded file-read policies still apply.
+## Live Atlas state and events (0.33 source checkpoint)
+
+Configure `atlas.events` with your project's full SSE URL and explicitly enable
+Live Refresh to connect. No stream or credentials are bundled. HTTP is restricted
+to loopback; otherwise HTTPS is required. The stream expects `text/event-stream`,
+handles fragmented UTF-8/CRLF frames, bounds frames to 2 MiB, reconnects after a
+failure and supports cancellation while waiting for data. Publication invalidates
+the passive 60-second / forced 20-second live throttle. Claims can be an array or
+a `{ "claims": [...] }` envelope. Progress supports full snapshots, added/removed
+IDs and changed records, and is applied only to the Live view.
+
+`atlas.current` reads cached live data or local data without making a connection.
+`atlas.state` reports the cache scope, feed extras and last event. Cached data is
+isolated by repository, descriptor, connection configuration and credential
+identity. `atlas.refreshStatus` reports stale input files. `atlas.authorizeRefresh`
+requires a reviewed confirmation before enabling background generation and accepts
+`enabled: false` to revoke it. Script/descriptor changes invalidate that approval.
+The existing exclusive generation lock and confirmation policy remain in place.
+Repository scripts remain trusted code; their arbitrary effects are not sandboxed.
+
+For `github.credits`, choose `github-api` in the connection editor and supply your
+repository API base (for example `https://api.github.com/repos/YOUR_OWNER/YOUR_REPO`).
+Use your own local key reference if authentication is needed. The service reads
+contributors, up to eight commit pages and PR authors, derives canonical email/
+noreply/name identities and reports partial endpoint failures. Existing `mapped`
+mode accepts an already mapped response. Neither mode configures a provider or
+publishes anything. Native cache, transport and full packaged validation are run
+separately from the direct original-code comparisons; see VERIFICATION.md.

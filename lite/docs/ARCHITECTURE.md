@@ -98,3 +98,25 @@ traffic require separate local opt-ins. Dev-only MCP Inspector and reference
 browser dependencies stay outside the portable executable.
 
 Remote project selection resolves through `projects.open` in the backend. A validated descriptor becomes a confined metadata cache; the main window stores its registry ID separately from the local repository path. ConsoleUI receives a remote-mode flag and does not instantiate execution services. Published reads use the existing connection layer; injected read-only transport makes the native GUI regression independent of external credentials and services.
+
+## Shared live-data services (0.33 source checkpoint)
+
+`live_data` contains transport-independent SSE framing, cosmetic normalization,
+progress snapshot/delta reduction, live-only record overlays and GitHub identity
+mapping. `backend` owns per-repository/descriptor/connection/principal cache state
+and approved stale generation; `network` owns asynchronous WinHTTP streaming,
+redirect refusal, content-type validation and cancellation. Window code consumes
+coalesced events on its UI timer and loads data in workers. HTTP requests release
+cache locks, allowing a concurrent state read or event update during a slow request.
+
+Live progress supports full matched sets, added/removed deltas and changed function
+records. It overrides the Live view only; local generated records remain local.
+Authoritative live statistics feed the Viewer counters. Invalid local cache blobs
+are reloaded from the repository database. Atomic cache writes reserve space for
+both file copies plus 32 MiB; the developer workstation's free-space policy is
+not a storage prerequisite imposed on other users.
+
+The current release-build and GUI-verification storage floor is 10 GiB, with
+additional build headroom. Builds are serial and disposable outputs are removed
+after retaining evidence. Original React reference tools use an installed browser
+only for offline comparison and are excluded from the executable.
