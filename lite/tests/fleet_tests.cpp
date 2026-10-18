@@ -413,6 +413,17 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       expect(fleet.batches().back().at("agentId") == "", "unassigned global batch persists");
       reject([&] { fleet.enqueue(first, Json::array({{{"id", "global-only"}}})); },
              "global reservation prevents duplicate assignment");
+      auto beforeHandoff = fleet.batches();
+      auto lockedHandoff = CreateFileW(statePath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+      expect(lockedHandoff != INVALID_HANDLE_VALUE, "handoff persistence lock fixture");
+      reject([&] { fleet.handoff(global, first); }, "failed handoff persistence is reported");
+      CloseHandle(lockedHandoff);
+      expect(fleet.batches() == beforeHandoff, "failed handoff restores batch ownership in memory");
+      for (auto &agent : fleet.snapshot())
+        if (agent.id == first)
+          expect(agent.queue.empty(),
+                 "failed handoff does not reserve duplicate execution targets");
       fleet.handoff(global, first);
       expect(fleet.batches().back().at("prompt") == "Preserve handoff prompt",
              "handoff preserves instructions/history");
@@ -446,6 +457,21 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       expect(editedDuringGeneration && fleet.draft().at("title") == editedDraft.at("title") &&
                  fleet.draft().at("prompt") == editedDraft.at("prompt"),
              "generation preserves concurrent user edits");
+      bool revertedDuringGeneration = false;
+      auto beforeUndo = fleet.draft();
+      reject(
+          [&] {
+            fleet.generateDraft("Hard matcher", 3, generation, [&](const std::string &) {
+              if (!revertedDuringGeneration) {
+                revertedDuringGeneration = true;
+                fleet.saveDraft({{"title", "Temporary edit"}, {"items", Json::array()}});
+                fleet.saveDraft(beforeUndo);
+              }
+            });
+          },
+          "edit followed by undo still invalidates in-flight generation");
+      expect(revertedDuringGeneration && fleet.draft() == beforeUndo,
+             "undo preserves the selected draft");
       bool reservedDuringGeneration = false;
       auto refreshed = fleet.generateDraft("Hard matcher", 3, generation, [&](const std::string &) {
         if (!reservedDuringGeneration) {
@@ -1002,6 +1028,50 @@ print('UI Stop returns a tool error to the client instead of silently dropping i
     {
       auto file = data / "projects/fixture/fleet.json";
       auto original = read(file);
+      auto saved = Json::parse(original);
+      auto mismatched = saved;
+      mismatched["repository"] = utf8((dir / "unrelated-checkout").wstring());
+      write(file, mismatched.dump());
+      reject([&] { Fleet wrong(repo, data / "projects/fixture", desc, settings); },
+             "repository-bound recovery rejects another checkout");
+      expect(read(file) == mismatched.dump(), "rejected recovery preserves original state file");
+      auto duplicated = saved;
+      duplicated["agents"].push_back(duplicated["agents"][0]);
+      write(file, duplicated.dump());
+      reject([&] { Fleet duplicate(repo, data / "projects/fixture", desc, settings); },
+             "duplicate persisted identity cannot silently overwrite an agent");
+      write(file, "{broken");
+      reject([&] { Fleet broken(repo, data / "projects/fixture", desc, settings); },
+             "corrupt state is retained rather than reset");
+      expect(read(file) == "{broken", "corrupt state remains available for recovery");
+      auto interrupted = saved;
+      interrupted["agents"][0]["phase"] = "running";
+      interrupted["agents"][1]["phase"] = "review";
+      write(file, interrupted.dump());
+      {
+        Fleet recovered(repo, data / "projects/fixture", desc, settings);
+        auto disk = Json::parse(read(file));
+        expect(!recovered.running(), "interrupted execution never automatically resumes");
+        bool parked = false, reviewRetained = false;
+        for (auto &agent : recovered.snapshot()) {
+          if (agent.id == interrupted["agents"][0]["id"])
+            parked = agent.phase == "interrupted";
+          if (agent.id == interrupted["agents"][1]["id"])
+            reviewRetained = agent.phase == "review";
+        }
+        expect(parked && reviewRetained,
+               "interrupted work parks and pending review survives recovery");
+        expect(disk.dump().find("interrupted") != std::string::npos,
+               "recovery state is durably saved");
+      }
+      write(file, original);
+      BatchBook book;
+      book.setDraft({{"title", "Retain me"}, {"items", Json::array()}});
+      auto baseline = book.serialize();
+      reject([&] { book.restore({{"batches", Json::array({{{"id", "invalid"}}})}}); },
+             "invalid restore rejected transactionally");
+      expect(book.serialize() == baseline,
+             "invalid restore cannot partially replace a working draft");
       auto legacy = Json::parse(original);
       legacy.erase("batchBook");
       write(file, legacy.dump(2));

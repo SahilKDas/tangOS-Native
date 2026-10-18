@@ -123,3 +123,15 @@ noreply/name identities and reports partial endpoint failures. Existing `mapped`
 mode accepts an already mapped response. Neither mode configures a provider or
 publishes anything. Native cache, transport and full packaged validation are run
 separately from the direct original-code comparisons; see VERIFICATION.md.
+## Five-journey recovery checkpoint — 0.38 development
+
+Fleet state is bound to its canonical repository and duplicate identities are
+rejected without replacing the persisted file. Interrupted preparation, execution,
+landing and verification park for explicit review/resume. Pending reviews survive.
+Batch restoration validates before publication, and persisted draft revisions
+reject stale generation even after an edit followed by undo. Failed handoff saves
+restore in-memory ownership/queues. UI preferences use atomic replacement.
+
+New regression coverage includes corrupt/mismatched/duplicate state, retained
+reviews, edit/undo generation races, locked-file handoff failure and atomic
+preference retry. Release validation is pending; the default package remains 0.37.

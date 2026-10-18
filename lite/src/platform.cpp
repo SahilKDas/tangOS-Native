@@ -20,6 +20,25 @@ struct Handle {
   }
 };
 } // namespace
+void atomicWrite(const fs::path &path, const std::string &content) {
+  auto temporary = path;
+  temporary += fs::u8path(".tmp-" + uniqueId());
+  write(temporary, content);
+  for (int attempt = 0; attempt < 10; ++attempt) {
+    if (MoveFileExW(temporary.c_str(), path.c_str(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+      return;
+    auto error = GetLastError();
+    if (error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION &&
+        error != ERROR_ACCESS_DENIED)
+      break;
+    Sleep(20);
+  }
+  std::error_code ignored;
+  fs::remove(temporary, ignored);
+  throw std::runtime_error("Cannot atomically save " + utf8(path.wstring()) +
+                           "; previous contents retained. Close other writers and retry.");
+}
 fs::path localData() {
   wchar_t p[32768];
   auto n = GetEnvironmentVariableW(L"LOCALAPPDATA", p, 32768);

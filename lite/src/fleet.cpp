@@ -167,6 +167,19 @@ Fleet::Fleet(fs::path repo, fs::path dir, Descriptor desc, Settings prefs, Sink 
   auto file = directory / "fleet.json";
   try {
     auto persisted = fs::exists(file) ? Json::parse(read(file)) : Json({{"agents", Json::array()}});
+    if (persisted.contains("repository")) {
+      auto saved =
+          fs::weakly_canonical(fs::u8path(persisted.at("repository").get<std::string>())).wstring();
+      auto selected = repository.wstring();
+      if (CompareStringOrdinal(saved.c_str(), int(saved.size()), selected.c_str(),
+                               int(selected.size()), TRUE) != CSTR_EQUAL)
+        throw std::runtime_error("Fleet state belongs to another repository; select its original "
+                                 "checkout. State was not changed.");
+    }
+    if (!persisted.at("agents").is_array())
+      throw std::runtime_error(
+          "Invalid persisted agent list; retain fleet.json and restore a valid copy.");
+    bool recovered = false;
     batchBook.restore(persisted.value("batchBook", Json::object()));
     for (auto &j : persisted.at("agents")) {
       auto job = std::make_shared<Job>();
@@ -185,12 +198,15 @@ Fleet::Fleet(fs::path repo, fs::path dir, Descriptor desc, Settings prefs, Sink 
       if (!job->state.worktree.empty())
         confinedPath(directory, utf8(job->state.worktree.wstring()));
       if (job->state.phase == "running" || job->state.phase == "scheduling" ||
-          job->state.phase == "verifying" || job->state.phase == "refreshing") {
+          job->state.phase == "verifying" || job->state.phase == "refreshing" ||
+          job->state.phase == "landing" || job->state.phase == "preparing") {
+        recovered = true;
         job->state.phase = "interrupted";
         job->state.detail =
             "Previous run interrupted; inspect preserved worktree/log before resuming";
       }
-      jobs[job->state.id] = job;
+      if (!jobs.emplace(job->state.id, job).second)
+        throw std::runtime_error("Duplicate persisted agent id; state was not changed.");
     }
     if (!persisted.contains("batchBook")) {
       bool migrated = false;
@@ -201,9 +217,10 @@ Fleet::Fleet(fs::path repo, fs::path dir, Descriptor desc, Settings prefs, Sink 
                         "Recovered queue", "");
           migrated = true;
         }
-      if (migrated)
-        saveLocked();
+      recovered = recovered || migrated;
     }
+    if (recovered)
+      saveLocked();
   } catch (...) {
     CloseHandle(controllerOwnership);
     controllerOwnership = INVALID_HANDLE_VALUE;
@@ -417,6 +434,9 @@ void Fleet::handoff(const std::string &batchId, const std::string &destination) 
       for (auto &row : job.second->state.queue)
         if (moving.count(batchTarget(row)))
           throw std::runtime_error("Handoff would duplicate a reserved target");
+  auto previousBook = batchBook;
+  auto previousFrom = from ? from->state : AgentState{};
+  auto previousTo = to ? to->state : AgentState{};
   if (from) {
     Json remaining = Json::array();
     for (auto &row : from->state.queue)
@@ -432,7 +452,16 @@ void Fleet::handoff(const std::string &batchId, const std::string &destination) 
     to->state.total = to->state.completed + int(to->state.queue.size());
   }
   batchBook.assign(batchId, destination, to ? to->state.spec.name : "Unassigned");
-  saveLocked();
+  try {
+    saveLocked();
+  } catch (...) {
+    batchBook = std::move(previousBook);
+    if (from)
+      from->state = std::move(previousFrom);
+    if (to)
+      to->state = std::move(previousTo);
+    throw;
+  }
 }
 Json Fleet::generateDraft(const std::string &role, int count, Runner &runner, Sink progress) {
   if (count < 1 || count > 500)
@@ -447,10 +476,10 @@ Json Fleet::generateDraft(const std::string &role, int count, Runner &runner, Si
   if (!tool)
     throw std::runtime_error("No scheduler declared; use Viewer cart or import draft JSON");
   std::set<std::string> taken;
-  Json originalDraft;
+  uint64_t originalRevision = 0;
   {
     std::lock_guard<std::mutex> lock(mutex);
-    originalDraft = batchBook.draft();
+    originalRevision = batchBook.revision();
     for (auto &b : batchBook.snapshot())
       if (b.at("status") != "done")
         for (auto &row : b.at("items"))
@@ -508,7 +537,7 @@ Json Fleet::generateDraft(const std::string &role, int count, Runner &runner, Si
   // Generation is asynchronous. Never replace edits or reserve targets that
   // another agent acquired while the scheduler was running.
   std::lock_guard<std::mutex> lock(mutex);
-  if (batchBook.draft() != originalDraft)
+  if (batchBook.revision() != originalRevision)
     throw std::runtime_error("Draft changed during generation. Your edits were preserved; "
                              "generated targets remain in " +
                              utf8(out.wstring()));

@@ -19,6 +19,7 @@ public:
   // semantic response or inspect the durable log when parsing streamed command results.
   Result run(const Command &c, const Sink &sink = {}, const fs::path &log = {});
 };
+void atomicWrite(const fs::path &path, const std::string &content);
 fs::path localData();
 std::string uniqueId();
 std::string sha256File(const fs::path &path);

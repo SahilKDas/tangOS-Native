@@ -155,6 +155,18 @@ int main() {
     expect(loaded.repository == s.repository && loaded.checks == s.checks && loaded.portOnly &&
                loaded.themeIndex == 2 && loaded.activeProject == s.activeProject,
            "settings round trip");
+    auto atomicFile = temp / "atomic-ui.json";
+    atomicWrite(atomicFile, "original preferences");
+    auto lockedPreference = CreateFileW(atomicFile.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    expect(lockedPreference != INVALID_HANDLE_VALUE, "atomic preference lock fixture");
+    rejects([&] { atomicWrite(atomicFile, "new preferences"); },
+            "locked preference replacement fails safely");
+    CloseHandle(lockedPreference);
+    expect(read(atomicFile) == "original preferences",
+           "failed atomic save preserves complete previous preferences");
+    atomicWrite(atomicFile, "new preferences");
+    expect(read(atomicFile) == "new preferences", "atomic preference retry succeeds");
     write(temp / "bad.ini", "[settings]\nport_only=typo\n");
     rejects([&] { loadSettings(temp / "bad.ini"); }, "invalid safety configuration fails closed");
     auto status = parseStatus(std::string("R  new name\0old name\0UU conflict\0?? fresh\0", 41));

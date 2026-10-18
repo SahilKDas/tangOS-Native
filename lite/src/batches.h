@@ -3,6 +3,7 @@
 namespace lite {
 std::string batchTarget(const Json &row);
 class BatchBook {
+  uint64_t draftRevision = 0;
   Json entries = Json::array();
   Json pending = {{"title", "Batch draft"}, {"prompt", ""}, {"items", Json::array()}};
 
@@ -11,6 +12,7 @@ public:
   Json serialize() const;
   Json snapshot() const { return entries; }
   Json draft() const { return pending; }
+  uint64_t revision() const { return draftRevision; }
   void setDraft(const Json &draft);
   void add(const std::string &id, const std::string &agent, const std::string &name,
            const Json &rows, int64_t created, const std::string &title, const std::string &prompt);

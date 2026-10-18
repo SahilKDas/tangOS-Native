@@ -56,8 +56,11 @@
     },
     {
       "contract": "reviews",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/fleet_tests.cpp",
+        "Native recovery, generation revision and pending-review coverage; complete Console state/event equivalence remains unverified"
+      ],
       "kind": "state"
     },
     {
@@ -71,8 +74,11 @@
     },
     {
       "contract": "agents",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/fleet_tests.cpp",
+        "Native recovery, generation revision and pending-review coverage; complete Console state/event equivalence remains unverified"
+      ],
       "kind": "state"
     },
     {
@@ -713,8 +719,11 @@
     },
     {
       "contract": "generateBatch",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/fleet_tests.cpp",
+        "Native recovery, generation revision and pending-review coverage; complete Console state/event equivalence remains unverified"
+      ],
       "kind": "api"
     },
     {
@@ -810,8 +819,11 @@
     },
     {
       "contract": "cancelGen",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/fleet_tests.cpp",
+        "Native recovery, generation revision and pending-review coverage; complete Console state/event equivalence remains unverified"
+      ],
       "kind": "api"
     },
     {

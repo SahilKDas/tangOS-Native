@@ -34,6 +34,7 @@ void BatchBook::setDraft(const Json &draft) {
   auto blocked = blockedBlob(draft.dump());
   if (!blocked.empty())
     throw std::runtime_error("Draft rejected: " + blocked);
+  ++draftRevision;
   pending = draft;
   if (!pending.contains("title"))
     pending["title"] = "Batch draft";
@@ -43,10 +44,10 @@ void BatchBook::setDraft(const Json &draft) {
 void BatchBook::restore(const Json &state) {
   if (!state.is_object())
     throw std::runtime_error("Batch state must be an object");
-  entries = state.value("batches", Json::array());
-  if (!entries.is_array())
+  auto restored = state.value("batches", Json::array());
+  if (!restored.is_array())
     throw std::runtime_error("Batch history must be an array");
-  for (auto &b : entries) {
+  for (auto &b : restored) {
     if (!b.is_object() || !b.contains("id") || !b["id"].is_string() || !b.contains("agentId") ||
         !b["agentId"].is_string() || !b.contains("items") || !b["items"].is_array())
       throw std::runtime_error("Invalid persisted batch");
@@ -64,10 +65,17 @@ void BatchBook::restore(const Json &state) {
       b["note"] = "Interrupted; preserved targets require review before resume";
     }
   }
+  BatchBook candidate;
   if (state.contains("draft"))
-    setDraft(state["draft"]);
+    candidate.setDraft(state["draft"]);
+  auto revision = state.value("draftRevision", uint64_t(0));
+  entries = std::move(restored);
+  pending = candidate.pending;
+  draftRevision = revision;
 }
-Json BatchBook::serialize() const { return {{"batches", entries}, {"draft", pending}}; }
+Json BatchBook::serialize() const {
+  return {{"batches", entries}, {"draft", pending}, {"draftRevision", draftRevision}};
+}
 void BatchBook::add(const std::string &id, const std::string &agent, const std::string &name,
                     const Json &rows, int64_t created, const std::string &title,
                     const std::string &prompt) {
