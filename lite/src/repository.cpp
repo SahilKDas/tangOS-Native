@@ -101,10 +101,13 @@ std::string Repository::pushPreview(const std::string &remote, const std::string
                              "branch, without options.");
   auto destinationUrl = trim(git({"remote", "get-url", "--push", remote}));
   if (((destinationUrl.rfind("https://", 0) == 0 || destinationUrl.rfind("http://", 0) == 0) &&
-       destinationUrl.substr(destinationUrl.find("://") + 3,
-                             destinationUrl.find('/', destinationUrl.find("://") + 3) -
-                                 (destinationUrl.find("://") + 3)).find('@') != std::string::npos) ||
-      destinationUrl.find('?') != std::string::npos || destinationUrl.find('#') != std::string::npos)
+       destinationUrl
+               .substr(destinationUrl.find("://") + 3,
+                       destinationUrl.find('/', destinationUrl.find("://") + 3) -
+                           (destinationUrl.find("://") + 3))
+               .find('@') != std::string::npos) ||
+      destinationUrl.find('?') != std::string::npos ||
+      destinationUrl.find('#') != std::string::npos)
     throw std::runtime_error("Push URL must be credential-free; use your Git credential helper.");
   auto target = "refs/remotes/" + remote + "/" + branch;
   auto destination = runner.run({{"git", "rev-parse", "--verify", target}, root});
@@ -112,16 +115,15 @@ std::string Repository::pushPreview(const std::string &remote, const std::string
   // A new destination still needs fetched history. Review every commit absent
   // from that remote, including intermediate commits later deleted or reverted.
   // Git's ordinary non-force push remains the authority on remote races.
-  if (newBranch && trim(git({"for-each-ref", "--format=%(objectname)",
-                            "refs/remotes/" + remote + "/"})).empty())
+  if (newBranch &&
+      trim(git({"for-each-ref", "--format=%(objectname)", "refs/remotes/" + remote + "/"})).empty())
     throw std::runtime_error("Fetch remote history before publishing a new branch.");
   auto history = newBranch ? git({"rev-list", "--reverse", "HEAD", "--not", "--remotes=" + remote})
                            : git({"rev-list", "--reverse", target + "..HEAD"});
   auto ids = split(history, '\n');
   if (trim(history).empty() && !newBranch)
     throw std::runtime_error("No outgoing commits. Fetch first if remote state changed.");
-  std::string out = "DESTINATION: " + remote + " / " + branch +
-                    "\nREMOTE URL: " + destinationUrl +
+  std::string out = "DESTINATION: " + remote + " / " + branch + "\nREMOTE URL: " + destinationUrl +
                     "\nHEAD: " + trim(git({"rev-parse", "HEAD"})) + "\n";
   if (newBranch)
     out += "NEW REMOTE BRANCH: all unpublished history reviewed against fetched remote refs.\n";
@@ -195,6 +197,47 @@ std::string Repository::agentHandoff() {
     out += "No AGENTS.md found. Establish coordination rules before starting "
            "multiple agents.\n";
   return out;
+}
+namespace {
+std::string prArgument(const Command &command, const std::string &name) {
+  auto it = std::find(command.argv.begin(), command.argv.end(), name);
+  if (it == command.argv.end() || ++it == command.argv.end())
+    throw std::runtime_error("Missing pull-request " + name);
+  return *it;
+}
+} // namespace
+Command openPullRequestLookup(const Command &create) {
+  if (create.argv.size() < 3 || create.argv[0] != "gh" || create.argv[1] != "pr" ||
+      create.argv[2] != "create")
+    throw std::runtime_error("Rolling PR lookup requires a validated create command");
+  return {{"gh", "api", "--method", "GET", "repos/" + prArgument(create, "--repo") + "/pulls", "-f",
+           "state=open", "-f", "head=" + prArgument(create, "--head"), "--jq",
+           ".[0].html_url // empty"},
+          create.cwd};
+}
+std::string openPullRequestUrl(const Command &create, const std::string &output) {
+  auto prefix = "https://github.com/" + prArgument(create, "--repo") + "/pull/";
+  auto lower = [](std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return char(std::tolower(c)); });
+    return s;
+  };
+  std::string found;
+  for (auto line : split(output, '\n')) {
+    line = trim(line);
+    if (line.empty() || line.rfind("$ ", 0) == 0 || line.rfind("Working directory: ", 0) == 0 ||
+        line == "[PASSED] exit=0")
+      continue;
+    if (lower(line).rfind(lower(prefix), 0) != 0 || line.size() <= prefix.size() ||
+        !std::all_of(line.begin() + prefix.size(), line.end(),
+                     [](unsigned char c) { return std::isdigit(c); }))
+      throw std::runtime_error(
+          "Unrecognized pull-request lookup response; inspect the retained lookup log");
+    if (!found.empty())
+      throw std::runtime_error("Ambiguous pull-request lookup response");
+    found = line;
+  }
+  return found;
 }
 Command Repository::action(const std::string &name, const std::string &remote,
                            const std::string &ref, const std::string &text) {

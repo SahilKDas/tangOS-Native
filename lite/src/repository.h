@@ -1,6 +1,8 @@
 #pragma once
 #include "platform.h"
 namespace lite {
+Command openPullRequestLookup(const Command &create);
+std::string openPullRequestUrl(const Command &create, const std::string &output);
 class Repository {
   Runner &runner;
 

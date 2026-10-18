@@ -1,4 +1,6 @@
 #include "dpi.h"
+#include "popover_motion.h"
+#include "vault_popover.h"
 #include "console_ui.h"
 #include "help.h"
 #include "helper_overlay.h"
@@ -308,6 +310,7 @@ struct ConsoleUI::Impl {
     std::unique_ptr<ConsoleUI> ui;
   };
   std::vector<std::unique_ptr<Popup>> popups;
+  std::unique_ptr<VaultPopover> vaultPopover;
   HWND settingsPopover = nullptr, settingsContent = nullptr;
   bool settingsBuilding = false;
   int settingsScroll = 0;
@@ -469,6 +472,7 @@ struct ConsoleUI::Impl {
     tourOverlay.reset();
     helper.reset();
     report.reset();
+    vaultPopover.reset();
     if (settingsPopover)
       DestroyWindow(settingsPopover);
     for (auto &popup : popups) {
@@ -2201,6 +2205,7 @@ struct ConsoleUI::Impl {
       throw std::runtime_error("Could not open Settings overlay");
     buildSettingsPopover();
     SetTimer(settingsPopover, 1, 200, nullptr);
+    animatePopover(settingsPopover);
     ShowWindow(settingsPopover, SW_SHOWNORMAL);
   }
   void storeBatchDraft() {
@@ -5382,16 +5387,25 @@ void ConsoleUI::openPanel(const std::string &panel) {
     impl->report->show();
   } else if (panel == "settings")
     impl->openSettingsPopover();
-  else if (panel == "keys")
-    impl->navigate(Screen::settings);
+  else if (panel == "keys") {
+    if (!impl->vaultPopover || !impl->vaultPopover->window()) {
+      auto runtime = impl->descriptor.document.is_object()
+                         ? impl->descriptor.document.value("runtime", Json::object())
+                         : Json::object();
+      auto guidance = runtime.is_object() ? runtime.value("envKeyHelp", Json::object())
+                                         : Json::object();
+      impl->vaultPopover = std::make_unique<VaultPopover>(
+          impl->parent, impl->vault, impl->descriptor.keys, guidance);
+    }
+    impl->vaultPopover->show();
+  }
   else if (panel == "help")
     impl->navigate(Screen::support);
   else if (panel == "batches")
     impl->navigate(Screen::batches);
   else
     throw std::runtime_error("Unknown native panel: " + panel);
-  if (panel == "keys" && impl->keyChoice)
-    SetFocus(impl->keyChoice);
+
 }
 Json ConsoleUI::debugState() const {
   Json state = {{"screen", int(impl->screen)},

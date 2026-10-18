@@ -435,3 +435,26 @@ These checks establish the implemented project-menu and selected motion behavior
 They do not establish pixel-exact browser/native blur or font rasterization,
 physical mixed-monitor transitions, or complete animation parity for every
 other auxiliary popup and splash highlight/wordmark composition.
+## 0.34 popup and rolling-PR checkpoint — 2026-10-17
+
+Settings now uses the reference bubble-pop scale/translation/opacity easing
+(open 240/140 ms, close 190/150 ms). A native layered proxy paints only this
+application's controls; the live control tree remains responsive. Interrupted
+opening reverses, reduced motion skips composition, and destruction/DPI/resize
+release the proxy and capture. Rounded native clipping persists after animation.
+
+The toolbar API-key action now opens a compact content-sized vault without
+replacing Controller. Declared-key buttons, masked entry, trimmed nonempty save,
+cancel/Escape, encrypted removal, descriptor guidance, tab/Enter handling and
+long-list scrolling have native controls. Windows DPAPI remains the storage
+boundary; account/provider setup remains user-owned.
+
+Creating a draft PR now first queries the original REST owner:branch filter
+through the user's gh CLI and reuses an existing open PR. A failed or ambiguous
+lookup stops creation. Full lookup/create logs remain local. Disposable tests
+use a compiled gh stand-in; they do not read account credentials or contact GitHub.
+
+This is a parity checkpoint, not a full-parity declaration. Pointer-arrow/glass
+composition, the MCP connection panel, splash highlight/wordmark details, physical
+mixed-monitor behavior and exhaustive user-configured external-service coverage
+still require implementation or comparison. The contract audit remains honest.

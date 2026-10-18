@@ -191,3 +191,10 @@ startup and installs it when the application exits. The helper keeps a
 results remain in the local `updates/last-result.json`. Close other application
 copies if Windows prevents replacement. A failed checksum or changed executable
 requires a fresh download; it never installs an unchecked candidate.
+
+The toolbar key icon opens the API-key vault over the current screen. Click a
+declared key, paste its value in the masked field, and choose Save (or Enter).
+Cancel/Escape clears the entry; Remove deletes that locally encrypted key.
+Descriptor guidance may offer an HTTPS account-setup link. The application does
+not supply accounts, subscriptions or shared API keys. Advanced settings remain
+available separately.

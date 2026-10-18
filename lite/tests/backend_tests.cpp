@@ -376,6 +376,64 @@ int main() {
       args["confirmation"] = preview.at("confirmation");
       return backend.invoke(method, args);
     };
+    {
+      wchar_t executable[32768]{};
+      GetModuleFileNameW(nullptr, executable, 32768);
+      auto fixtureBin = fs::path(executable).parent_path() / "pr-fixture";
+      expect(fs::exists(fixtureBin / "gh.exe"), "offline GitHub CLI fixture present");
+      auto oldPath = GetEnvironmentVariableW(L"PATH", nullptr, 0);
+      std::wstring original(oldPath, L'\0');
+      GetEnvironmentVariableW(L"PATH", original.data(), oldPath);
+      if (!original.empty() && original.back() == L'\0')
+        original.pop_back();
+      auto trace = dir / "pr-trace.txt";
+      auto restore = [&] {
+        SetEnvironmentVariableW(L"PATH", original.c_str());
+        SetEnvironmentVariableW(L"TANGOS_PR_FIXTURE", nullptr);
+        SetEnvironmentVariableW(L"TANGOS_PR_TRACE", nullptr);
+        git.run({{"git", "remote", "remove", "origin"}, repo});
+      };
+      try {
+        SetEnvironmentVariableW(L"PATH", (fixtureBin.wstring() + L";" + original).c_str());
+        SetEnvironmentVariableW(L"TANGOS_PR_TRACE", trace.c_str());
+        expect(git.run({{"git", "remote", "add", "origin", "https://github.com/fixture/fork.git"},
+                        repo})
+                       .code == 0,
+               "fixture fork remote");
+        Json args{{"action", "Create draft PR"},
+                  {"remote", "fixture/project"},
+                  {"ref", "main"},
+                  {"text", "Fixture draft"}};
+        SetEnvironmentVariableW(L"TANGOS_PR_FIXTURE", L"existing");
+        expect(backend.invoke("git.action", args).value("requiresConfirmation", false) &&
+                   !fs::exists(trace),
+               "PR preview has no external effects");
+        auto existing = confirmed("git.action", args);
+        expect(existing["exit"] == 0 && existing["reused"] == true &&
+                   existing["url"] == "https://github.com/fixture/project/pull/7" &&
+                   read(trace) == "list\n",
+               "existing rolling PR reused without create");
+        write(trace, "");
+        SetEnvironmentVariableW(L"TANGOS_PR_FIXTURE", L"absent");
+        auto created = confirmed("git.action", args);
+        expect(created["exit"] == 0 && created["reused"] == false &&
+                   read(trace) == "list\ncreate\n" &&
+                   fs::exists(fs::u8path(created.at("lookupLog").get<std::string>())),
+               "absent rolling PR created only after successful lookup, logs retained");
+        write(trace, "");
+        SetEnvironmentVariableW(L"TANGOS_PR_FIXTURE", L"failure");
+        expect(confirmed("git.action", args)["exit"] == 4 && read(trace) == "list\n",
+               "failed lookup never creates a duplicate PR");
+        write(trace, "");
+        SetEnvironmentVariableW(L"TANGOS_PR_FIXTURE", L"invalid");
+        reject([&] { confirmed("git.action", args); }, "wrong-repository lookup refused");
+        expect(read(trace) == "list\n", "invalid lookup never creates PR");
+      } catch (...) {
+        restore();
+        throw;
+      }
+      restore();
+    }
     write(repo / "tools/romdata_check.py",
           "print('VERIFIED 914\\nPARTIAL 357\\nDIFFERS 3\\nUNNAMED 59')\n");
     auto dataCheck = confirmed("checks.run", {{"name", "ROM data comparison"}});

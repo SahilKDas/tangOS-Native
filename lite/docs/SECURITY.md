@@ -250,3 +250,14 @@ dismiss the popup rather than combining scales. Capture compaction is confined
 to a freshly created synthetic GUI fixture, skips links and incomplete writes,
 writes PNGs atomically, and preserves the raw image required for pixel assertions.
 No production dependency, user credential, asset or ROM data was introduced.
+The native vault popup accepts only explicit user-entered values, masks its input,
+clears the edit after save/cancel, encrypts with the existing Windows DPAPI vault
+and does not add credentials to source, logs or command arguments. Descriptor
+guidance links open only after a user click and require HTTPS. Provider setup is
+still user-configured. Optional animation failure restores usable live controls.
+
+Rolling PR lookup uses gh api GET with separate argv fields for state and the
+fork-qualified head. It does not change authentication or publish before the
+existing reviewed-action confirmation. Lookup failure, a foreign-repository URL
+or ambiguous output stops creation; both lookup and create have complete logs.
+The offline gh fixture is a test target, excluded from the portable executable.

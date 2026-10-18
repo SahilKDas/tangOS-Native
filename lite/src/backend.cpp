@@ -2111,7 +2111,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       args["connection"] = m;
     auto result = execute("network.read", args);
     if (result.value("ok", false))
-      result["update"] = updateStatus("0.33.0", result.at("data"));
+      result["update"] = updateStatus("0.34.0", result.at("data"));
     return result;
   }
   if (m == "git.clone") {
@@ -2210,7 +2210,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto folder = directory / "exports" / ("bug-report-" + uniqueId());
     fs::create_directories(folder);
     Json debug = {{"app", "TangOS Lite"},
-                  {"version", "0.33.0"},
+                  {"version", "0.34.0"},
                   {"portOnly", settings.portOnly},
                   {"project", settings.activeProject},
                   {"connections", Json::array()},
@@ -2820,8 +2820,31 @@ Json Backend::execute(const std::string &m, const Json &a) {
       command = repo.action(action, a.value("remote", std::string()), a.value("ref", std::string()),
                             a.value("text", std::string()));
     auto log = directory / (uniqueId() + "-git.log");
+    std::string lookupLog;
+    if (action == "Create draft PR") {
+      auto path = directory / (uniqueId() + "-pr-lookup.log");
+      lookupLog = utf8(path.wstring());
+      auto lookup = runner.run(openPullRequestLookup(command), {}, path);
+      if (lookup.code != 0)
+        return {{"exit", lookup.code},
+                {"output", lookup.output},
+                {"log", lookupLog},
+                {"reused", false}};
+      auto existing = openPullRequestUrl(command, lookup.output);
+      if (!existing.empty())
+        return {{"exit", 0},
+                {"output", lookup.output + "\nUsing existing pull request: " + existing + "\n"},
+                {"log", lookupLog},
+                {"url", existing},
+                {"reused", true}};
+    }
     auto result = runner.run(command, {}, log);
-    return {{"exit", result.code}, {"output", result.output}, {"log", utf8(log.wstring())}};
+    Json response{{"exit", result.code}, {"output", result.output}, {"log", utf8(log.wstring())}};
+    if (!lookupLog.empty()) {
+      response["lookupLog"] = lookupLog;
+      response["reused"] = false;
+    }
+    return response;
   }
   if (m == "preflight") {
     Json checks = Json::array();

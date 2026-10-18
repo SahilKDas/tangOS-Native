@@ -1,5 +1,8 @@
 #include "skin.h"
 #include "project_popup.h"
+#include "popover_motion.h"
+#include "vault_popover.h"
+#include "window_capture.h"
 #include "dpi.h"
 #include <thread>
 #include <fstream>
@@ -10,6 +13,35 @@
 void expect(bool condition, const char *message) {
   if (!condition)
     throw std::runtime_error(message);
+}
+void capturePopover(HWND window, const lite::fs::path &path) {
+  RECT bounds{};
+  GetClientRect(window, &bounds);
+  auto screen = GetDC(window), dc = CreateCompatibleDC(screen);
+  BITMAPINFO info{};
+  info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  info.bmiHeader.biWidth = bounds.right;
+  info.bmiHeader.biHeight = -bounds.bottom;
+  info.bmiHeader.biPlanes = 1;
+  info.bmiHeader.biBitCount = 32;
+  void *pixels = nullptr;
+  auto bitmap = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+  auto old = SelectObject(dc, bitmap);
+  dpi::configureDC(dc, dpi::forWindow(window));
+  lite::renderWindowTree(window, dc);
+  GdiFlush();
+  BITMAPFILEHEADER header{};
+  header.bfType = 0x4d42;
+  header.bfOffBits = sizeof(header) + sizeof(info.bmiHeader);
+  header.bfSize = header.bfOffBits + bounds.right * bounds.bottom * 4;
+  std::ofstream file(path, std::ios::binary);
+  file.write(reinterpret_cast<char *>(&header), sizeof(header));
+  file.write(reinterpret_cast<char *>(&info.bmiHeader), sizeof(info.bmiHeader));
+  file.write(static_cast<char *>(pixels), bounds.right * bounds.bottom * 4);
+  SelectObject(dc, old);
+  DeleteObject(bitmap);
+  DeleteDC(dc);
+  ReleaseDC(window, screen);
 }
 int main(int argc, char **argv) {
   std::string capturePath = argc == 3 && std::string(argv[1]) == "--capture" ? argv[2] : "";
@@ -165,6 +197,122 @@ int main(int argc, char **argv) {
     skin::animate(true);
     projects.resize(3);
     popupTest(VK_ESCAPE, 0);
+    auto pump = [](unsigned duration) {
+      auto start = GetTickCount64();
+      while (GetTickCount64() - start < duration) {
+        MSG message{};
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+          TranslateMessage(&message);
+          DispatchMessageW(&message);
+        }
+        Sleep(2);
+      }
+    };
+    auto newPopover = [&] {
+      auto popup = CreateWindowExW(0, L"STATIC", L"Popover motion fixture", WS_POPUP, 50, 50, 260,
+                                   180, parent, nullptr, nullptr, nullptr);
+      expect(popup != nullptr, "popover fixture creation failed");
+      CreateWindowExW(0, L"BUTTON", L"Live child", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 20, 30,
+                      100, 30, popup, nullptr, nullptr, nullptr);
+      lite::animatePopover(popup);
+      ShowWindow(popup, SW_SHOW);
+      return popup;
+    };
+    expect(lite::popoverFrame(0, false).scale == .8, "popover initial scale differs");
+    expect(lite::popoverFrame(240, false).scale == 1, "popover opening duration differs");
+    expect(lite::popoverFrame(190, true).finished, "popover closing duration differs");
+    auto pop = newPopover();
+    pump(300);
+    expect(IsWindow(pop) && GetPropW(pop, L"TangOSPopoverMotion"), "popover lost its live window");
+    SendMessageW(pop, WM_CLOSE, 0, 0);
+    pump(250);
+    expect(!IsWindow(pop), "popover close did not release native window");
+    pop = newPopover();
+    pump(40);
+    SendMessageW(pop, WM_CLOSE, 0, 0);
+    pump(240);
+    expect(!IsWindow(pop), "interrupted popover open did not reverse and close");
+    pop = newPopover();
+    pump(20);
+    DestroyWindow(pop);
+    pump(30);
+    expect(!FindWindowW(L"TangOSPopoverAnimation", nullptr),
+           "popover compositor leaked after direct destruction");
+    skin::animate(false);
+    pop = newPopover();
+    expect(!GetPropW(pop, L"TangOSPopoverMotion"), "reduced motion still installed compositor");
+    DestroyWindow(pop);
+    skin::animate(true);
+    skin::animate(false);
+    auto vaultDir =
+        lite::fs::temp_directory_path() / lite::fs::u8path("tangos-vault-ui-" + lite::uniqueId());
+    lite::Vault storage(vaultDir);
+    {
+      lite::VaultPopover vault(parent, storage, {"TEST_API_KEY"}, lite::Json::object());
+      vault.show();
+      auto popup = vault.window();
+      if (!capturePath.empty()) {
+        auto path = lite::fs::u8path(capturePath);
+        capturePopover(popup, path.parent_path() / (path.stem().wstring() + L"-vault.bmp"));
+      }
+      expect(popup && IsWindowVisible(parent), "vault replaced its Controller owner");
+      RECT initialBounds{};
+      GetWindowRect(popup, &initialBounds);
+      expect(initialBounds.bottom - initialBounds.top < 300, "empty vault did not size to content");
+      lite::write(vaultDir / "BROKEN_KEY.dpapi", "not encrypted");
+      SendMessageW(popup, WM_COMMAND, MAKEWPARAM(1000, BN_CLICKED), 0);
+      expect(vault.window() && GetDlgItem(popup, 5004) && !GetDlgItem(popup, 5000),
+             "corrupt secure storage did not produce a recoverable screen");
+      lite::fs::remove(vaultDir / "BROKEN_KEY.dpapi");
+      SendMessageW(popup, WM_COMMAND, MAKEWPARAM(5004, BN_CLICKED), 0);
+      expect(GetDlgItem(popup, 1000), "vault retry did not recover after repairing storage");
+      SendMessageW(popup, WM_COMMAND, MAKEWPARAM(1000, BN_CLICKED), 0);
+      auto input = GetDlgItem(popup, 5000);
+      expect(input && (GetWindowLongPtrW(input, GWL_STYLE) & ES_PASSWORD),
+             "vault input is not masked");
+      SendMessageW(popup, WM_COMMAND, MAKEWPARAM(5001, BN_CLICKED), 0);
+      expect(storage.values().empty() && GetDlgItem(popup, 5000), "blank vault save accepted");
+      SetWindowTextW(GetDlgItem(popup, 5000), L"  fixture-vault-ui-secret  ");
+      SendMessageW(popup, WM_COMMAND, MAKEWPARAM(5001, BN_CLICKED), 0);
+      expect(storage.values().at("TEST_API_KEY") == "fixture-vault-ui-secret",
+             "popup failed encrypted save/trim");
+      expect(!GetDlgItem(popup, 5000), "vault retained its secret input after save");
+      expect(lite::read(vaultDir / "TEST_API_KEY.dpapi").find("fixture-vault-ui-secret") ==
+                 std::string::npos,
+             "vault popup persisted plaintext");
+      SendMessageW(popup, WM_COMMAND, MAKEWPARAM(1000, BN_CLICKED), 0);
+      expect(storage.values().empty(), "popup remove did not delete stored key");
+      SendMessageW(popup, WM_COMMAND, MAKEWPARAM(1000, BN_CLICKED), 0);
+      SetWindowTextW(GetDlgItem(popup, 5000), L"cancelled-secret");
+      SendMessageW(GetDlgItem(popup, 5000), WM_KEYDOWN, VK_ESCAPE, 0);
+      expect(vault.window() && !GetDlgItem(popup, 5000) && storage.values().empty(),
+             "Escape did not cancel key entry without closing vault");
+      SendMessageW(popup, WM_CLOSE, 0, 0);
+      expect(!vault.window(), "vault native cleanup failed");
+      vault.show();
+      expect(vault.window() && !GetDlgItem(vault.window(), 5000),
+             "reopened vault retained secret entry");
+    }
+    {
+      std::vector<std::string> names;
+      for (int i = 0; i < 64; ++i)
+        names.push_back("FIXTURE_KEY_" + std::to_string(i));
+      lite::VaultPopover vault(parent, storage, names, lite::Json::object());
+      vault.show();
+      auto popup = vault.window();
+      SendMessageW(popup, WM_COMMAND, MAKEWPARAM(1063, BN_CLICKED), 0);
+      auto input = GetDlgItem(popup, 5000);
+      RECT field{}, client{};
+      dpi::relativeRect(input, popup, &field);
+      dpi::clientRect(popup, &client);
+      expect(input && field.top >= 0 && field.bottom <= client.bottom,
+             "long vault list hides secret entry");
+      SendMessageW(popup, WM_COMMAND, MAKEWPARAM(5002, BN_CLICKED), 0);
+      expect(!GetDlgItem(popup, 5000) && storage.values().empty(),
+             "long-list cancel stored a credential");
+    }
+    lite::fs::remove_all(vaultDir);
+    skin::animate(true);
     DestroyWindow(parent);
     skin::shutdown();
     std::cout << "Native control grow/shrink and font reflow passed\n";

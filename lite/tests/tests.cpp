@@ -18,9 +18,9 @@ void expect(bool ok, const char *what) {
 template <class F> void rejects(F f, const char *what) {
   bool caught = false;
   try {
-    expect(splashFrame(0).opacity == 0 && !splashFrame(449).swap &&
-               splashFrame(450).swap && !splashFrame(1749).finished &&
-               splashFrame(1750).finished && splashFrame(1750).opacity == 0,
+    expect(splashFrame(0).opacity == 0 && !splashFrame(449).swap && splashFrame(450).swap &&
+               !splashFrame(1749).finished && splashFrame(1750).finished &&
+               splashFrame(1750).opacity == 0,
            "splash covers delayed swap and always expires at 1750 ms");
     expect(splashFrame(350).opacity > .9 && splashFrame(1050).opacity == 1 &&
                splashFrame(1225).scale == 1 && splashFrame(0).translateY == 26,
@@ -290,7 +290,8 @@ int main() {
     run({"git", "remote", "set-url", "--push", "origin", "https://fixture.invalid/other.git"});
     expect(repo.pushPreview("origin", "codex/published") != newPreview,
            "changing push destination invalidates the reviewed text");
-    run({"git", "remote", "set-url", "--push", "origin", "https://user:synthetic-secret@fixture.invalid/repo.git"});
+    run({"git", "remote", "set-url", "--push", "origin",
+         "https://user:synthetic-secret@fixture.invalid/repo.git"});
     rejects([&] { repo.pushPreview("origin", "codex/published"); },
             "credential-bearing push destination rejected before displaying it");
     run({"git", "remote", "set-url", "--push", "origin", utf8(bare.wstring())});
@@ -355,6 +356,24 @@ int main() {
     auto draft = repo.action("Create draft PR", "tangosdev/sm64ds-decomp", "main", "Port fix");
     expect(std::find(draft.argv.begin(), draft.argv.end(), "myfork:main") != draft.argv.end(),
            "cross-fork PR head construction");
+    auto lookup = openPullRequestLookup(draft);
+    expect(lookup.argv ==
+               Args({"gh", "api", "--method", "GET", "repos/tangosdev/sm64ds-decomp/pulls", "-f",
+                     "state=open", "-f", "head=myfork:main", "--jq", ".[0].html_url // empty"}),
+           "rolling PR lookup uses REST fork-qualified head filter");
+    expect(openPullRequestUrl(
+               draft,
+               "$ gh pr list\nWorking directory: "
+               "fixture\nhttps://github.com/tangosdev/sm64ds-decomp/pull/7\n[PASSED] exit=0\n") ==
+               "https://github.com/tangosdev/sm64ds-decomp/pull/7",
+           "rolling PR identity");
+    expect(openPullRequestUrl(draft, "$ gh pr list\nWorking directory: fixture\n[PASSED] exit=0\n")
+               .empty(),
+           "no existing PR response");
+    rejects([&] { openPullRequestUrl(draft, "https://github.com/other/project/pull/7\n"); },
+            "wrong repository PR response refused");
+    rejects([&] { openPullRequestUrl(draft, "unrecognized response\n"); },
+            "ambiguous lookup fails closed");
     expect(repo.action("PR readiness", "", "", "").argv[0] == "gh", "GitHub readiness adapter");
     auto readiness = repo.action("PR readiness", "tangosdev/tangOS", "16", "");
     expect(readiness.argv[3] == "16" && readiness.argv[4] == "--repo" &&
