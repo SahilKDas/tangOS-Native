@@ -788,3 +788,19 @@ passes 130 assertions, including malformed-config credential-fragment protection
 
 This source checkpoint has not yet completed two clean 0.36 release builds.
 The verified default executable remains 0.34 until those gates succeed.
+
+## Verified portable 0.36 checkpoint — 2026-10-17
+
+Source f8e9489 passed two clean, byte-identical Windows x64 release builds.
+The verified default portable executable is 7,298,560 bytes (7.299 decimal MB),
+SHA256 CFFED499164D4E91B9C2688B6C92CE44BD986060A69C6693882E2307A0E41D11.
+All ten native suites passed in 142.19 seconds. All packaged CLI, disposable Git,
+ZIP safety, original Console differential, actual SSE and HTTP cancellation gates
+passed. Packaged GUI workflows passed with valid, missing and malformed project
+descriptors at 120 DPI, with 12/11/11 responsive timer ticks respectively.
+Reports remain in lite/release-v0.36.0/verification-evidence and lite/release.
+Generated build trees and disposable GUI fixtures were removed after validation.
+
+Visual review still found a read-only MCP field background and stale-field refresh
+issue for a subsequent fix. This checkpoint does not establish full visual parity,
+physical mixed-monitor coverage or exhaustive hosted-provider/ROM validation.
