@@ -770,3 +770,21 @@ as unverified, while complete build output remains on disk. Targeted native
 verification tests and 249 backend assertions pass, including streamed data
 differences, skipped link checks, cancellation-before-create and reset/retry.
 The failed candidate is discarded before clean reproducible packaging.
+
+## 0.36 development checkpoint — clean release pending
+
+The clean 0.35 native suites and reference comparisons passed, but its first
+packaged GUI run caught a real Settings writer/background-reader race. That
+candidate was not promoted. Its compact failure report is retained in
+lite/out/evidence-035-streaming.
+
+The integrated 0.36 development GUI workflow passes at 120 DPI with 11 responsive
+ticks, including a forced 120 ms backend reader, deferred preference persistence,
+MCP overlay/public-token exclusion, source inspection, queues, logs, live SSE and
+snapshot cancellation. Native component tests pass for MCP telemetry, relative
+contact time, copy-feedback expiry, lifecycle, 64-key lists, 144-DPI keyboard
+cancellation and visible hover/leave pixels. The updated Fleet/client/vault suite
+passes 130 assertions, including malformed-config credential-fragment protection.
+
+This source checkpoint has not yet completed two clean 0.36 release builds.
+The verified default executable remains 0.34 until those gates succeed.

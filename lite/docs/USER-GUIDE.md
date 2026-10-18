@@ -198,3 +198,9 @@ Cancel/Escape clears the entry; Remove deletes that locally encrypted key.
 Descriptor guidance may offer an HTTPS account-setup link. The application does
 not supply accounts, subscriptions or shared API keys. Advanced settings remain
 available separately.
+
+Click the Controller MCP pill to see live server/client traffic without leaving
+Controller. Start/stop the server there, copy its connection or AI prompt, or
+open full connection details. Add to Claude previews the local client change
+and retains a backup; an idle MCP profile may be created after confirmation.
+Assign its work separately. Provider accounts and credentials remain your own.

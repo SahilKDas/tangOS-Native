@@ -2,6 +2,7 @@
 #include "project_popup.h"
 #include "popover_motion.h"
 #include "vault_popover.h"
+#include "mcp_popover.h"
 #include "window_capture.h"
 #include "dpi.h"
 #include <thread>
@@ -310,6 +311,117 @@ int main(int argc, char **argv) {
       SendMessageW(popup, WM_COMMAND, MAKEWPARAM(5002, BN_CLICKED), 0);
       expect(!GetDlgItem(popup, 5000) && storage.values().empty(),
              "long-list cancel stored a credential");
+    }
+    {
+      lite::VaultPopover vault(parent, storage, {"TEST_API_KEY"}, lite::Json::object());
+      vault.show();
+      auto popup = vault.window();
+      dpi::testing::simulateWindowDpi(popup, 144);
+      SendMessageW(popup, WM_COMMAND, MAKEWPARAM(1000, BN_CLICKED), 0);
+      RECT before{}, after{};
+      GetWindowRect(popup, &before);
+      SendMessageW(GetDlgItem(popup, 5000), WM_KEYDOWN, VK_ESCAPE, 0);
+      GetWindowRect(popup, &after);
+      expect(before.right - before.left == after.right - after.left &&
+                 after.right - after.left == dpi::pixels(340, 144),
+             "vault keyboard cancel rebuilt controls using the caller's DPI");
+      dpi::testing::simulateWindowDpi(popup, 0);
+    }
+    {
+      expect(lite::mcpContactAge(59499, 0) == "59s ago" &&
+                 lite::mcpContactAge(59500, 0) == "1m ago" &&
+                 lite::mcpContactAge(3599500, 0) == "1h ago" &&
+                 lite::mcpContactAge(1, 5000) == "0s ago",
+             "MCP relative contact time differs from the reference");
+      lite::Json state{{"running", false},
+                       {"busy", false},
+                       {"promptPreview", "Follow AGENTS.md. Public fixture only."}};
+      std::vector<lite::McpPopoverAction> actions;
+      lite::McpPopover mcp(
+          parent, [&] { return state; },
+          [&](lite::McpPopoverAction action) {
+            actions.push_back(action);
+            if (action == lite::McpPopoverAction::toggle)
+              state["running"] = !state.value("running", false);
+          });
+      auto label = [](HWND control) {
+        std::wstring value(GetWindowTextLengthW(control) + 1, L'\0');
+        GetWindowTextW(control, value.data(), int(value.size()));
+        value.resize(value.size() - 1);
+        return value;
+      };
+      mcp.show(nullptr);
+      auto popup = mcp.window();
+      expect(popup && actions.empty() && label(GetDlgItem(popup, 8201)) == L"stopped",
+             "MCP popup performs an action merely by opening");
+      SendMessageW(popup, WM_COMMAND, MAKEWPARAM(8101, BN_CLICKED), 0);
+      expect(actions.size() == 1 && label(GetDlgItem(popup, 8201)) == L"running",
+             "MCP popup toggle/state refresh failed");
+      state["connectedClients"] = 2;
+      state["requestsSeen"] = 7;
+      state["url"] = "http://127.0.0.1:12345/mcp";
+      SendMessageW(popup, WM_TIMER, 1, 0);
+      expect(label(GetDlgItem(popup, 8202)) == L"2" &&
+                 label(GetDlgItem(popup, 8203)).find(L"7 req") != std::wstring::npos,
+             "MCP popup failed live client/traffic refresh");
+      if (!capturePath.empty()) {
+        auto path = lite::fs::u8path(capturePath);
+        capturePopover(popup, path.parent_path() / (path.stem().wstring() + L"-mcp.bmp"));
+      }
+      SendMessageW(popup, WM_COMMAND, MAKEWPARAM(8104, BN_CLICKED), 0);
+      expect(actions.back() == lite::McpPopoverAction::copyPrompt &&
+                 label(GetDlgItem(popup, 8104)) == L"Copied",
+             "MCP popup copy feedback failed");
+      pump(1700);
+      expect(label(GetDlgItem(popup, 8104)) == L"Copy prompt", "MCP copy feedback did not expire");
+      SendMessageW(popup, WM_COMMAND, MAKEWPARAM(8105, BN_CLICKED), 0);
+      pump(30);
+      expect(actions.back() == lite::McpPopoverAction::advanced && !mcp.window(),
+             "MCP advanced action leaked its popup");
+    }
+    {
+      dpi::Scope scale(96);
+      auto button =
+          CreateWindowExW(0, L"BUTTON", L"Hover fixture", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 20,
+                          40, 128, 36, parent, nullptr, nullptr, nullptr);
+      skin::controlFont(button, 12);
+      skin::buttonFont(button, 12);
+      auto screen = GetDC(parent), dc = CreateCompatibleDC(screen);
+      BITMAPINFO info{};
+      info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+      info.bmiHeader.biWidth = 128;
+      info.bmiHeader.biHeight = -36;
+      info.bmiHeader.biPlanes = 1;
+      info.bmiHeader.biBitCount = 32;
+      void *raw = nullptr;
+      auto bitmap = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &raw, nullptr, 0);
+      expect(dc && bitmap && raw, "hover pixel fixture allocation failed");
+      auto previous = SelectObject(dc, bitmap);
+      dpi::configureDC(dc, 96);
+      DRAWITEMSTRUCT item{};
+      item.CtlType = ODT_BUTTON;
+      item.hwndItem = button;
+      item.hDC = dc;
+      item.rcItem = {0, 0, 128, 36};
+      skin::button(item);
+      GdiFlush();
+      auto pixels = static_cast<unsigned char *>(raw);
+      std::vector<unsigned char> resting(pixels, pixels + 128 * 36 * 4);
+      SendMessageW(button, WM_MOUSEMOVE, 0, MAKELPARAM(12, 12));
+      skin::button(item);
+      GdiFlush();
+      expect(!std::equal(resting.begin(), resting.end(), pixels),
+             "plain popup button has no visible hover state");
+      SendMessageW(button, WM_MOUSELEAVE, 0, 0);
+      skin::button(item);
+      GdiFlush();
+      expect(std::equal(resting.begin(), resting.end(), pixels),
+             "popup button hover remains after pointer leave");
+      SelectObject(dc, previous);
+      DeleteObject(bitmap);
+      DeleteDC(dc);
+      ReleaseDC(parent, screen);
+      DestroyWindow(button);
     }
     lite::fs::remove_all(vaultDir);
     skin::animate(true);

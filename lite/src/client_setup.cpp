@@ -103,9 +103,15 @@ ClientSetup previewClientSetup(const std::string &client, const fs::path &execut
   auto entry = mcpClientConfiguration(client, executable, connection, agent);
   auto section = client == "VS Code" ? "servers" : "mcpServers";
   plan.baseline = baseline(plan.path);
-  plan.merged = plan.baseline == "missing" ? Json::object()
-                : client == "VS Code"      ? vscodeConfig(read(plan.path))
-                                           : Json::parse(read(plan.path));
+  try {
+    plan.merged = plan.baseline == "missing" ? Json::object()
+                  : client == "VS Code"      ? vscodeConfig(read(plan.path))
+                                             : Json::parse(read(plan.path));
+  } catch (...) {
+    throw std::runtime_error(
+        "Cannot read or parse client configuration: " + utf8(plan.path.wstring()) +
+        ". Repair its JSON or permissions before connecting.");
+  }
   if (!plan.merged.is_object() ||
       (plan.merged.contains(section) && !plan.merged[section].is_object()))
     throw std::runtime_error(

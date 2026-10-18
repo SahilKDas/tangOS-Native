@@ -40,6 +40,8 @@ struct VaultPopover::Impl {
         0, kind, wide(title).c_str(), WS_CHILD | WS_VISIBLE | style, x, y - scroll, width, height,
         window, reinterpret_cast<HMENU>(INT_PTR(id)), GetModuleHandleW(nullptr), nullptr);
     skin::controlFont(child, 12);
+    if (std::wstring(kind) == L"EDIT" && !(style & ES_MULTILINE))
+      skin::compactEdit(child);
     if (std::wstring(kind) == L"BUTTON")
       skin::buttonFont(child, 12);
     SetWindowSubclass(child, keyboard, 1, reinterpret_cast<DWORD_PTR>(this));
@@ -211,6 +213,7 @@ struct VaultPopover::Impl {
   static LRESULT CALLBACK keyboard(HWND child, UINT message, WPARAM w, LPARAM l, UINT_PTR id,
                                    DWORD_PTR context) {
     auto self = reinterpret_cast<Impl *>(context);
+    dpi::Scope scale(dpi::forWindow(self->window));
     if (message == WM_KEYDOWN) {
       if (w == VK_ESCAPE) {
         if (!self->adding.empty())
@@ -338,6 +341,7 @@ struct VaultPopover::Impl {
     return DefWindowProcW(h, message, w, l);
   }
   void show() {
+    dpi::Scope ownerScale(dpi::forWindow(owner));
     if (window) {
       PostMessageW(window, WM_CLOSE, 0, 0);
       return;
@@ -360,6 +364,13 @@ struct VaultPopover::Impl {
     if (!window)
       throw std::runtime_error("Could not open secure key popup");
     try {
+      dpi::Scope popupScale(dpi::forWindow(window));
+      RECT ownerPixels{}, popupPixels{};
+      GetWindowRect(owner, &ownerPixels);
+      GetWindowRect(window, &popupPixels);
+      maximumHeight = std::max(
+          220,
+          std::min(560, dpi::logical(ownerPixels.bottom - popupPixels.top, dpi::current()) - 26));
       build();
       animatePopover(window);
       ShowWindow(window, SW_SHOWNORMAL);

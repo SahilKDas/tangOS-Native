@@ -15,6 +15,8 @@ public:
   void cancel() { cancelled = true; }
   void reset() { cancelled = false; }
   bool isCancelled() const { return cancelled; }
+  // With a sink, output is streamed rather than copied into Result.output. Tee a bounded
+  // semantic response or inspect the durable log when parsing streamed command results.
   Result run(const Command &c, const Sink &sink = {}, const fs::path &log = {});
 };
 fs::path localData();

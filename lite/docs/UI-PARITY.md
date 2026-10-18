@@ -458,3 +458,31 @@ This is a parity checkpoint, not a full-parity declaration. Pointer-arrow/glass
 composition, the MCP connection panel, splash highlight/wordmark details, physical
 mixed-monitor behavior and exhaustive user-configured external-service coverage
 still require implementation or comparison. The contract audit remains honest.
+
+## MCP and popup DPI checkpoint — 2026-10-17
+
+The Controller MCP pill now opens a rounded native overlay over Controller.
+It shows live status, client/traffic counts and source-compatible relative contact
+times, asynchronous start/stop, connection copy, 1600 ms prompt-copy feedback,
+reviewed Claude registration and full connection details. Registration preserves
+other client settings and backups. If needed, the reviewed action also creates an
+idle MCP profile; it does not assign work or start an agent. Public preview state
+excludes the local bearer token; complete configuration is copied only on demand.
+
+Vault, MCP and Settings child layout uses the popup's actual DPI context. Vault
+keyboard cancellation preserves scale, and available height is derived from
+physical owner/popup bounds. Single-line popup inputs use the shared rounded
+field renderer. Every owner-drawn button now installs hover tracking; a pixel
+regression verifies hover changes and restoration after pointer leave.
+
+Settings preference changes retain concrete selected values in an ordered,
+bounded retry queue. A busy backend lock defers work to a later UI tick instead
+of blocking or dropping the click. Exclusive locks remain intact. Stats clear
+still requires two clicks, and a generation check discards pre-clear statistics.
+The GUI fixture holds a backend reader for 120 ms to exercise this path.
+
+The native component tests and full development GUI workflow pass. MCP public
+preview privacy, long key lists, copied-state expiry, hover pixels, popup cleanup
+and keyboard DPI rebuilding have explicit checks. Exact pointer-arrow/glass and
+splash wordmark/highlight composition and physical mixed-monitor validation remain
+separate open comparisons; the current host exposes only one 125% monitor.

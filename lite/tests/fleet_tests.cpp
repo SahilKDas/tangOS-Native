@@ -238,6 +238,16 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       write(configPath, "{\"changedElsewhere\":true}");
       reject([&] { installClientSetup(changedPlan); },
              "MCP config change invalidates reviewed install");
+      write(configPath, "{\"key\":\"private123");
+      try {
+        previewClientSetup("Claude Desktop", fs::u8path(selfExecutable()), data / "mcp.json",
+                           "Fixture", configPath);
+        expect(false, "malformed client config accepted");
+      } catch (const std::exception &e) {
+        expect(std::string(e.what()).find("private123") == std::string::npos &&
+                   std::string(e.what()).find(utf8(configPath.wstring())) != std::string::npos,
+               "malformed client error is actionable without exposing credential fragments");
+      }
       write(configPath, "{ malformed");
       reject(
           [&] {

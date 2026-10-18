@@ -275,3 +275,15 @@ to PR creation. Streamed verification reads bounded summary lines from the log
 instead of interpreting an empty stream result as success; unavailable/oversized
 summaries are explicitly unverified. Numeric parsing is linear and does not
 recurse on untrusted tool-output whitespace.
+
+MCP registration still previews the concrete target file and server entry and
+checks its baseline before atomic replacement. A new idle MCP profile is created
+only after that review is confirmed. Public popup snapshots never include the
+bearer token; copying full configuration/prompt is an explicit user action.
+Malformed client JSON errors identify the file without echoing credential text.
+
+Settings retries keep the original backend locks and single-use confirmations.
+Only the concrete user-selected preference/stat-clear request is queued, with a
+three-second deadline; Git actions are not auto-confirmed by this queue.
+Queued writes survive popup closure and are drained during application shutdown.
+Pre-clear statistics snapshots cannot repopulate cleared counters.

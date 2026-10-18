@@ -1133,6 +1133,7 @@ void badge(HDC dc, const std::wstring &text, int x, int y, int width, int height
   SelectObject(dc, previous);
 }
 void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
+  SetWindowSubclass(i.hwndItem, hoverButton, 1, 0);
   buttonBackground(i);
   int x = i.rcItem.left + 1, y = i.rcItem.top + 1, w = i.rcItem.right - i.rcItem.left - 2,
       h = i.rcItem.bottom - i.rcItem.top - 2;

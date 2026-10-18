@@ -1,6 +1,8 @@
 #include "dpi.h"
 #include "popover_motion.h"
 #include "vault_popover.h"
+#include "mcp_popover.h"
+#include <cctype>
 #include "console_ui.h"
 #include "help.h"
 #include "helper_overlay.h"
@@ -23,6 +25,7 @@
 #include <fstream>
 #include <numeric>
 #include <set>
+#include <deque>
 #include <stdexcept>
 namespace lite {
 namespace {
@@ -311,8 +314,19 @@ struct ConsoleUI::Impl {
   };
   std::vector<std::unique_ptr<Popup>> popups;
   std::unique_ptr<VaultPopover> vaultPopover;
+  std::unique_ptr<McpPopover> mcpPopover;
   HWND settingsPopover = nullptr, settingsContent = nullptr;
   bool settingsBuilding = false;
+  struct SettingsChange {
+    std::string method;
+    Json args;
+    std::string confirmation;
+    ULONGLONG deadline;
+  };
+  std::deque<SettingsChange> settingsChanges;
+  std::string settingsWriteError;
+  bool advancingSettingsChanges=false;
+  uint64_t statsGeneration=0,pendingStatsGeneration=0;
   int settingsScroll = 0;
   ULONGLONG clearStatsArmedUntil = 0;
   ULONGLONG clearStatsDoneUntil = 0;
@@ -473,6 +487,7 @@ struct ConsoleUI::Impl {
     helper.reset();
     report.reset();
     vaultPopover.reset();
+    mcpPopover.reset();
     if (settingsPopover)
       DestroyWindow(settingsPopover);
     for (auto &popup : popups) {
@@ -505,6 +520,10 @@ struct ConsoleUI::Impl {
       serviceWorker.join();
     if (statsWorker.joinable())
       statsWorker.join();
+    while(!settingsChanges.empty()) {
+      advanceSettingsChanges(false);
+      if(!settingsChanges.empty())Sleep(10);
+    }
     DestroyWindow(window);
     if (fieldBrush)
       DeleteObject(fieldBrush);
@@ -1946,7 +1965,8 @@ struct ConsoleUI::Impl {
       return 0;
     case WM_TIMER:
       if (h == self->settingsPopover && self->settingsContent) {
-        auto title = self->clearStatsDoneUntil > GetTickCount64()    ? "Stats cleared"
+        auto title = self->settingsClearPending() ? "Clearing…"
+                     : self->clearStatsDoneUntil > GetTickCount64() ? "Stats cleared"
                      : self->clearStatsArmedUntil > GetTickCount64() ? "Click again to confirm"
                                                                      : "Clear all stats";
         auto button = GetDlgItem(self->settingsContent, 7007);
@@ -2020,6 +2040,7 @@ struct ConsoleUI::Impl {
       dpi::sendMessage(child, BM_SETCHECK, checked ? BST_CHECKED : BST_UNCHECKED, 0);
     };
     section("Settings");
+    if(!settingsWriteError.empty())add(L"STATIC",settingsWriteError,0,SS_LEFT,80);
     section("Decomp repo");
     add(L"BUTTON", utf8(repository.wstring()), 7001, BS_OWNERDRAW | WS_TABSTOP);
     add(L"BUTTON", "Sync repo…", 7002, BS_OWNERDRAW | WS_TABSTOP);
@@ -2058,9 +2079,11 @@ struct ConsoleUI::Impl {
     section("Help");
     add(L"BUTTON", "Replay Tango's tour", 7006, BS_OWNERDRAW | WS_TABSTOP);
     section("Stats");
-    add(L"BUTTON",
+    auto clearStatsButton=add(L"BUTTON",
+        settingsClearPending() ? "Clearing…" :
         clearStatsArmedUntil > GetTickCount64() ? "Click again to confirm" : "Clear all stats",
         7007, BS_OWNERDRAW | WS_TABSTOP);
+    EnableWindow(clearStatsButton,!settingsClearPending());
     info(7108, "Clears all-time and session tallies and best-divergence history. Click twice "
                "within four seconds. This cannot be undone.");
     section("Debug reports");
@@ -2088,6 +2111,50 @@ struct ConsoleUI::Impl {
     InvalidateRect(settingsPopover, nullptr, TRUE);
     settingsBuilding = false;
   }
+  bool settingsClearPending() const {
+    return std::any_of(settingsChanges.begin(),settingsChanges.end(),[](const SettingsChange &change){
+      return change.method=="stats.clear";
+    });
+  }
+  void advanceSettingsChanges(bool repaint=true) {
+    if(settingsChanges.empty() || advancingSettingsChanges)return;
+    advancingSettingsChanges=true;
+    struct Guard {bool &flag;~Guard(){flag=false;}} guard{advancingSettingsChanges};
+    auto &change=settingsChanges.front();
+    try {
+      if(GetTickCount64()>=change.deadline)
+        throw std::runtime_error("Backend remained busy. Retry this setting after the active operation.");
+      Backend backend(repository,data,settings);
+      auto args=change.args;
+      if(change.confirmation.empty()) {
+        auto review=backend.invoke(change.method,args);
+        change.confirmation=review.at("confirmation").get<std::string>();
+      }
+      args["confirmation"]=change.confirmation;
+      auto result=backend.invoke(change.method,args);
+      if(change.method=="preferences.set") {
+        policy=std::move(result);
+        if(repaint)skin::animate(policy.value("animateBackground",true));
+      } else if(change.method=="stats.clear") {
+        ++statsGeneration;
+        agentStats=Json::object();sessionAgentStats=Json::object();statsBaseline=Json::object();
+        clearStatsArmedUntil=0;clearStatsDoneUntil=GetTickCount64()+3000;
+      }
+      settingsChanges.pop_front();
+    } catch(const std::exception &e) {
+      if(std::string(e.what())=="Another backend operation is active" &&
+         GetTickCount64()<change.deadline)return;
+      settingsWriteError="Settings not saved: "+std::string(e.what());
+      settingsChanges.pop_front();
+    }
+    if(settingsChanges.empty() && repaint && settingsPopover && !settingsBuilding)
+      buildSettingsPopover();
+  }
+  void queueSettingsChange(const std::string &method,Json args) {
+    if(settingsChanges.empty())settingsWriteError.clear();
+    settingsChanges.push_back({method,std::move(args),{},GetTickCount64()+3000});
+    advanceSettingsChanges();
+  }
   void settingsAction(int id, int notification) {
     if (id >= 7101 && id <= 7109) {
       if (!settingsInfo.erase(id))
@@ -2095,12 +2162,6 @@ struct ConsoleUI::Impl {
       buildSettingsPopover();
       return;
     }
-    Backend backend(repository, data, settings, vault.values());
-    auto confirmed = [&](const std::string &method, Json args) {
-      auto preview = backend.invoke(method, args);
-      args["confirmation"] = preview.at("confirmation");
-      return backend.invoke(method, args);
-    };
     Json change = Json::object();
     const std::map<int, std::string> flags = {{7010, "allowNearMiss"},
                                               {7011, "animateBackground"},
@@ -2146,11 +2207,10 @@ struct ConsoleUI::Impl {
         openTourOverlay();
         break;
       case 7007:
+        if(settingsClearPending())break;
         if (clearStatsArmedUntil > GetTickCount64()) {
-          confirmed("stats.clear", Json::object());
-          statsBaseline = Json::object();
-          clearStatsArmedUntil = 0;
-          clearStatsDoneUntil = GetTickCount64() + 3000;
+          clearStatsArmedUntil=0;
+          queueSettingsChange("stats.clear",Json::object());
         } else
           clearStatsArmedUntil = GetTickCount64() + 4000;
         buildSettingsPopover();
@@ -2176,9 +2236,7 @@ struct ConsoleUI::Impl {
         PostMessageW(settingsPopover, WM_CLOSE, 0, 0);
     }
     if (!change.empty()) {
-      policy = confirmed("preferences.set", change);
-      skin::animate(policy.value("animateBackground", true));
-      buildSettingsPopover();
+      queueSettingsChange("preferences.set",change);
     }
   }
   void openSettingsPopover() {
@@ -2203,6 +2261,11 @@ struct ConsoleUI::Impl {
         wc.hInstance, this);
     if (!settingsPopover)
       throw std::runtime_error("Could not open Settings overlay");
+    dpi::Scope popupScale(dpi::forWindow(settingsPopover));
+    RECT ownerPixels{},popupPixels{};
+    GetWindowRect(parent,&ownerPixels);GetWindowRect(settingsPopover,&popupPixels);
+    auto available=std::max(220,std::min(700,dpi::logical(ownerPixels.bottom-popupPixels.top,dpi::current())-26));
+    dpi::setWindowPos(settingsPopover,nullptr,0,0,340,available,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
     buildSettingsPopover();
     SetTimer(settingsPopover, 1, 200, nullptr);
     animatePopover(settingsPopover);
@@ -2268,6 +2331,81 @@ struct ConsoleUI::Impl {
            "verification. Never commit, push, modify protected src/ in port-only mode, or include "
            "ROMs, Nintendo assets or credentials.\n\n" +
            mcp->configuration();
+  }
+  Json publicMcpState() {
+    auto state=mcp?mcp->state():Json{{"running",false}};
+    state["busy"]=mcpBusy.load();
+    state["error"]=mcpError;
+    state["promptPreview"]=
+      "Connect your MCP client to TangOS Lite. Add an MCP agent in Controller with the same client name. "
+      "The user assigns and starts its batch. Call next_batch, follow its AGENTS.md instructions, "
+      "work only in the assigned isolated worktree, and call finish_batch for independent verification. "
+      "Never commit or push without review, modify src/ in port-only mode, or include ROMs, Nintendo assets or credentials.\n\n"
+      "Copy prompt includes the private local connection configuration when the server is running. "
+      "Accounts and provider credentials remain user-configured.";
+    if(!clientInstallResult.empty())
+      state["outcome"]=clientInstallResult.value("target",std::string("Client"))+": "+
+                       clientInstallResult.value("action",std::string("configured"));
+    if(clientInstallResult.contains("path"))
+      state["outcome"]=state.value("outcome",std::string())+"\n"+clientInstallResult["path"].get<std::string>();
+    return state;
+  }
+  void connectMcpClient(const std::string &client) {
+    if(!mcp || mcpBusy || !fleet)throw std::runtime_error("Start MCP first");
+    refreshAgents();
+    auto selected=activeAgent();
+    std::string name;
+    bool create=false;
+    if(selected && selected->spec.kind=="mcp")name=selected->spec.name;
+    if(name.empty())
+      for(auto &agent:agents)
+        if(agent.spec.kind=="mcp" && agent.spec.name==client){name=agent.spec.name;break;}
+    if(name.empty()) {
+      name=client;create=true;
+      auto used=[&](const std::string &candidate){
+        auto lower=[](std::string value){std::transform(value.begin(),value.end(),value.begin(),[](unsigned char c){return char(std::tolower(c));});return value;};
+        return std::any_of(agents.begin(),agents.end(),[&](const AgentState &a){return lower(a.spec.name)==lower(candidate);});
+      };
+      for(int suffix=1;used(name);++suffix)name=client+" MCP "+std::to_string(suffix);
+    }
+    auto connection=data/"mcp-client.json";
+    write(connection,mcp->configuration());
+    ClientSetup plan;
+    try{plan=previewClientSetup(client,fs::u8path(selfExecutable()),connection,name);}
+    catch(...){
+      auto path=clientConfigPath(client);
+      clientInstallResult={{"target",client},{"action","error"},{"path",utf8(path.wstring())}};
+      throw std::runtime_error("Cannot read client configuration: "+utf8(path.wstring())+". Repair its JSON or permissions, then try again.");
+    }
+    auto notice=plan.outcome.dump(2);
+    if(create)notice+="\n\nAlso create an idle MCP agent named "+name+". No batch is assigned or started.";
+    if(MessageBoxW(window,wide(notice).c_str(),L"Review MCP client setup",MB_OKCANCEL|MB_ICONINFORMATION)!=IDOK)return;
+    if(create){AgentSpec profile;profile.name=name;profile.kind="mcp";profile.role="Unassigned";selectedId=fleet->add(profile);}
+    try{clientInstallResult=installClientSetup(plan);}
+    catch(...){
+      clientInstallResult={{"target",client},{"action","error"},{"path",utf8(plan.path.wstring())}};
+      throw std::runtime_error("Could not install client configuration: "+utf8(plan.path.wstring())+". Inspect permissions and any retained backup, then review again.");
+    }
+    refreshAgents();
+    if(screen==Screen::controller)build();
+    else if(screen==Screen::mcpConnection && body)setText(body,mcpSummary()+"\n\nClient setup: "+clientInstallResult.dump(2));
+  }
+  void openMcpPopover() {
+    if(!mcpPopover)
+      mcpPopover=std::make_unique<McpPopover>(parent,[this]{return publicMcpState();},
+        [this](McpPopoverAction command) {
+          switch(command) {
+          case McpPopoverAction::toggle:toggleMcp();break;
+          case McpPopoverAction::copyConfiguration:
+            if(!mcp || mcpBusy)throw std::runtime_error("Start MCP first");
+            copyText(window,mcp->configuration());break;
+          case McpPopoverAction::copyPrompt:
+            copyText(window,mcp && !mcpBusy?mcpPrompt():publicMcpState().at("promptPreview").get<std::string>());break;
+          case McpPopoverAction::connectClaude:connectMcpClient("Claude Code");break;
+          case McpPopoverAction::advanced:navigate(Screen::mcpConnection);break;
+          }
+        });
+    mcpPopover->show(GetDlgItem(window,OPEN_MCP));
   }
   void toggleMcp() {
     if (!fleet)
@@ -4003,24 +4141,9 @@ struct ConsoleUI::Impl {
       ShellExecuteW(window, L"open", L"notepad.exe", path.c_str(), nullptr, SW_SHOWNORMAL);
       break;
     }
-    case MCP_INSTALL: {
-      if (!mcp || mcpBusy)
-        throw std::runtime_error("Start MCP first");
-      auto a = activeAgent();
-      if (!a || a->spec.kind != "mcp")
-        throw std::runtime_error("Select an MCP agent in Controller first");
-      auto connection = data / "mcp-client.json";
-      write(connection, mcp->configuration());
-      auto plan = previewClientSetup(selected(profileFields["MCP client"]),
-                                     fs::u8path(selfExecutable()), connection, a->spec.name);
-      auto prompt = wide(plan.outcome.dump(2));
-      if (MessageBoxW(window, prompt.c_str(), L"Review MCP client setup",
-                      MB_OKCANCEL | MB_ICONINFORMATION) == IDOK) {
-        clientInstallResult = installClientSetup(plan);
-        setText(body, mcpSummary() + "\n\nClient setup: " + clientInstallResult.dump(2));
-      }
+    case MCP_INSTALL:
+      connectMcpClient(selected(profileFields["MCP client"]));
       break;
-    }
     case HOME:
       navigate(Screen::controller);
       break;
@@ -4316,7 +4439,7 @@ struct ConsoleUI::Impl {
       build();
       break;
     case OPEN_MCP:
-      navigate(Screen::mcpConnection);
+      openMcpPopover();
       break;
     case MCP_TOGGLE:
       toggleMcp();
@@ -4509,6 +4632,7 @@ struct ConsoleUI::Impl {
     }
   }
   void tick() {
+    advanceSettingsChanges();
     updateAtlasWorkers();
     POINT cursor{};
     dpi::cursorPos(&cursor);
@@ -4576,20 +4700,21 @@ struct ConsoleUI::Impl {
 
     if (statsReady.exchange(false)) {
       std::lock_guard<std::mutex> lock(outputMutex);
-      if (!pendingStats.contains("error")) {
+      if (pendingStatsGeneration==statsGeneration && !pendingStats.contains("error")) {
         agentStats = std::move(pendingStats);
         sessionAgentStats = std::move(pendingSessionStats);
       }
       InvalidateRect(window, nullptr, FALSE);
     }
-    if ((screen == Screen::controller || screen == Screen::detail) && !statsBusy && !statsReady &&
+    if ((screen == Screen::controller || screen == Screen::detail) && settingsChanges.empty() && !statsBusy && !statsReady &&
         GetTickCount64() - statsPoll >= 1000) {
       statsPoll = GetTickCount64();
       if (statsWorker.joinable())
         statsWorker.join();
       statsBusy = true;
       auto prefs = settings;
-      statsWorker = std::thread([this, prefs] {
+      auto generation=statsGeneration;
+      statsWorker = std::thread([this, prefs, generation] {
         Json result, session;
         try {
           result = Backend(repository, data, prefs).invoke("stats.get");
@@ -4599,6 +4724,7 @@ struct ConsoleUI::Impl {
         }
         {
           std::lock_guard<std::mutex> lock(outputMutex);
+          pendingStatsGeneration=generation;
           pendingStats = std::move(result);
           pendingSessionStats = std::move(session);
         }
@@ -6222,13 +6348,37 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     impl->settingsAction(7106, BN_CLICKED);
     if (!impl->settingsInfo.count(7106))
       throw std::runtime_error("Settings explanation did not expand");
+    auto flushSettings=[&] {
+      auto deadline=GetTickCount64()+4000;
+      while(!impl->settingsChanges.empty()) {
+        if(GetTickCount64()>deadline)throw std::runtime_error("Settings write queue did not settle");
+        MSG message{};
+        while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}
+        impl->tick();Sleep(5);
+      }
+      if(!impl->settingsWriteError.empty())throw std::runtime_error(impl->settingsWriteError);
+    };
     auto delegated = impl->policy.value("useAgents", false);
     dpi::sendMessage(GetDlgItem(impl->settingsContent, 7012), BM_SETCHECK, !delegated, 0);
-    impl->settingsAction(7012, BN_CLICKED);
+    auto held=CreateFileW((impl->data/"backend.lock").c_str(),GENERIC_READ,FILE_SHARE_READ,
+                         nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(held==INVALID_HANDLE_VALUE)throw std::runtime_error("Could not hold synthetic stats reader");
+    std::thread release([held]{Sleep(120);CloseHandle(held);});
+    auto attempted=GetTickCount64();
+    bool deferred=false;
+    try {
+      impl->settingsAction(7012,BN_CLICKED);
+      deferred=!impl->settingsChanges.empty();
+    }catch(...){release.join();throw;}
+    auto elapsed=GetTickCount64()-attempted;
+    release.join();
+    if(!deferred || elapsed>250)throw std::runtime_error("Settings contention blocked the UI or dropped the write");
+    flushSettings();
     if (impl->policy.value("useAgents", false) == delegated)
       throw std::runtime_error("Settings overlay did not persist delegation");
     dpi::sendMessage(GetDlgItem(impl->settingsContent, 7012), BM_SETCHECK, delegated, 0);
     impl->settingsAction(7012, BN_CLICKED);
+    flushSettings();
     impl->settingsAction(7007, BN_CLICKED);
     if (impl->clearStatsArmedUntil <= GetTickCount64())
       throw std::runtime_error("Stats clear did not require a second click");
@@ -6248,7 +6398,7 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
         debug.dump().find(debugSecret) != std::string::npos)
       throw std::runtime_error("Debug state layout or credential exclusion failed");
     write(directory / "settings-overlay-report.txt",
-          "PASS: Controller preserved, scroll, expandable help, persisted toggle, guarded stats "
+          "PASS: Controller preserved, nonblocking lock-contention retry, scroll, expandable help, persisted toggle, guarded stats "
           "clear and cleanup");
   }
   for (auto screen :
@@ -6474,6 +6624,16 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
   if (!impl->mcp || impl->mcpSummary().find("Status: running") == std::string::npos ||
       impl->mcpPrompt().find("AGENTS.md") == std::string::npos)
     throw std::runtime_error("MCP connection screen/prompt missing");
+  impl->navigate(Screen::controller);
+  impl->action(OPEN_MCP,BN_CLICKED);
+  if(impl->screen!=Screen::controller || !impl->mcpPopover || !impl->mcpPopover->window())
+    throw std::runtime_error("MCP popup replaced Controller");
+  auto authorization=Json::parse(impl->mcp->configuration()).at("mcpServers").at("tangos-lite").at("headers").at("Authorization").get<std::string>();
+  if(impl->publicMcpState().dump().find(authorization.substr(7))!=std::string::npos)
+    throw std::runtime_error("MCP popup public state exposed its bearer token");
+  DestroyWindow(impl->mcpPopover->window());
+  impl->navigate(Screen::mcpConnection);
+  write(directory/"mcp-popup-report.txt","PASS: MCP overlay preserves Controller and excludes bearer tokens from public preview\n");
   capture(directory / "mcp-connection.bmp");
   impl->action(MCP_TOGGLE, BN_CLICKED);
   waitFor([&] { return impl->mcpBusy.load() || impl->mcpReady.load(); });
