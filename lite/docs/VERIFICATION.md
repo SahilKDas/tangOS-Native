@@ -700,3 +700,39 @@ write retention tests pass. The first helper attempt selected a Python without
 Pillow; that optional dependency was removed. The final full GUI run retained
 about 32 MiB of captures instead of accumulating raw bitmaps. Build and temporary
 capture trees are cleaned after retaining compact evidence; floor remains 11 GiB.
+## 0.34.0 verified portable package — 2026-10-17
+
+Source checkpoint: 61ff620. Two clean MinGW/Rust builds were byte-identical.
+The verified portable executable is 7,223,808 bytes (7.224 decimal MB), SHA256
+A27BD85BBA56A5F193BE9144CE04B8B60809BFFECBEA51A27896A04B95B27376.
+The default package is lite/release/TangOSLite.exe; release-v0.34.0 retains its
+compact reports/docs, with the duplicate executable removed after hash validation.
+
+All ten native suites passed (149.59 seconds), including content-sized vault,
+corrupt-DPAPI recovery/retry, masked/trimmed save, cancel/remove/reopen, 64-key
+scrolling, popup reversal/destruction/reduced motion and simulated DPI input.
+The packaged backend/Git/ZIP/confirmation gates and original Console differential
+comparisons passed, including actual loopback SSE/HTTP cancellation. All three
+GUI scenarios (valid, missing and malformed descriptor) launched and exercised
+repository/status/check/log workflows at 120 DPI with 11–12 responsive ticks.
+The 25,000-function/500-contributor fixture loaded in 1,406 ms. One 125% display
+was attached on this run; it cannot establish physical mixed-monitor behavior.
+
+Read-only native GitHub readiness/checks passed against the retained synthetic
+draft PR (two reported checks, clean/mergeable). The installed gh CLI's exact
+REST owner:branch lookup returned that existing open PR without external writes.
+Native reuse/create/refusal branches are covered separately by a disposable
+compiled gh fixture. The desktop legacy Git pane still needs routing through
+that backend service; a separate follow-up patch is under validation.
+
+The actual Ollama llama3.2:3b Fleet attempt timed out waiting 120 seconds for an
+HTTP response. Its complete failure log was retained, and only the owned server
+and disposable fixture were stopped/removed. This run is not a provider pass.
+Real 64DS-DX port-reference, declaration and dead-reference checks reported
+failures; link checking explicitly skipped because there were no matched source
+files in the push range. Complete diagnostics and unchanged-source evidence are
+retained in lite/out/evidence-034-live. No baselines or source were changed.
+
+Full parity remains unverified. Heavy ROM/compiler/port builds and exhaustive
+provider/client/hardware coverage remain distinct from passing synthetic tests.
+Build trees and GUI captures were removed after retaining compact evidence.

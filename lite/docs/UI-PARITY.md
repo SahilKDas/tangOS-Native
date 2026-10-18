@@ -449,7 +449,7 @@ cancel/Escape, encrypted removal, descriptor guidance, tab/Enter handling and
 long-list scrolling have native controls. Windows DPAPI remains the storage
 boundary; account/provider setup remains user-owned.
 
-Creating a draft PR now first queries the original REST owner:branch filter
+The backend draft-PR action now first queries the original REST owner:branch filter
 through the user's gh CLI and reuses an existing open PR. A failed or ambiguous
 lookup stops creation. Full lookup/create logs remain local. Disposable tests
 use a compiled gh stand-in; they do not read account credentials or contact GitHub.
