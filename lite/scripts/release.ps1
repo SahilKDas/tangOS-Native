@@ -62,6 +62,8 @@ ctest --test-dir "$out/build-a" --output-on-failure
 if ($LASTEXITCODE) { throw 'Tests failed' }
 python "$source/tests/test_agent_adapter.py"
 if ($LASTEXITCODE) { throw 'Driver adapter tests failed' }
+python "$source/tests/test_capture_compactor.py"
+if ($LASTEXITCODE) { throw 'Capture compaction safety tests failed' }
 python "$source/tests/test_check_verdict.py"
 if ($LASTEXITCODE) { throw 'Verification outcome tests failed' }
 python "$source/tests/test_remote_confirmation.py" --exe "$out/build-a/TangOSLite.exe"
