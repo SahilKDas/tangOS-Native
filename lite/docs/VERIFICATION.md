@@ -804,3 +804,26 @@ Generated build trees and disposable GUI fixtures were removed after validation.
 Visual review still found a read-only MCP field background and stale-field refresh
 issue for a subsequent fix. This checkpoint does not establish full visual parity,
 physical mixed-monitor coverage or exhaustive hosted-provider/ROM validation.
+## Verified portable 0.37 checkpoint — 2026-10-18
+
+Source 6c8ce73 passed two clean, byte-identical Windows x64 release builds, across
+the overnight host pause. Executable: 7,301,632 bytes (7.302 decimal MB).
+SHA256: 54A3615E05DA6BE014570682E46A5A2A852C5530F6DDD1AB7C8149AFB4C867BD.
+All ten native suites passed in 124.91 seconds; all packaged CLI, disposable Git,
+ZIP safety, original Console differential, actual SSE and HTTP cancellation
+checks passed. Packaged GUI workflows passed with valid, missing and malformed
+descriptors at 120 DPI, with 11/12/12 responsive timer ticks respectively.
+
+Fresh component captures visually confirm the corrected read-only field background
+and changed endpoint/prompt text. Tests also verify unchanged selection and stable
+control identity. Compact captures and toolchain provenance are retained under
+lite/out/evidence-037-packaged and the release verification-evidence folder.
+No external account configuration or credentials changed for these fixes.
+The default portable package is now 0.37. Generated build trees, GUI fixtures,
+duplicate executable and the temporary capture helper were removed after testing.
+
+The contract inventory remains 133: verified 1, partial 60, unverified 72.
+This release does not establish full parity. UI composition/interaction differences,
+physical mixed-monitor transitions, exhaustive client/provider compatibility and
+ROM/compiler-dependent validation remain open. Earlier real-check failures remain
+failures; fixture passes do not replace them. See LIMITATIONS.md and UI-PARITY.md.

@@ -501,3 +501,9 @@ selection and scrolling. Component regressions exercise changing URL/prompt,
 stable control identity, selection retention and the actual read-only color
 message. The default verified portable package remains 0.36 until clean 0.37
 builds and packaged workflows pass. No new external connections are introduced.
+The 0.37 correction subsequently passed two byte-identical clean release builds,
+all ten native suites, all CLI/reference gates and three packaged GUI scenarios
+on 2026-10-18. Fresh component captures confirm the corrected field painting and
+live text. Default package: 7,301,632 bytes. These are bounded verified behaviors;
+the broader parity inventory and remaining composition/interaction differences
+are still open.
