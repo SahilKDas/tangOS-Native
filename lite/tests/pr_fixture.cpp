@@ -2,6 +2,8 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <thread>
+#include <chrono>
 int main(int argc, char **argv) {
   auto mode = std::getenv("TANGOS_PR_FIXTURE");
   auto trace = std::getenv("TANGOS_PR_TRACE");
@@ -18,6 +20,11 @@ int main(int argc, char **argv) {
       return 92;
   }
   if (operation == "list") {
+    if (std::string(mode) == "slow") {
+      std::cout << "lookup ready\n" << std::flush;
+      std::this_thread::sleep_for(std::chrono::seconds(5));
+      return 0;
+    }
     if (std::string(mode) == "failure") {
       std::cerr << "Fixture authentication failed\n";
       return 4;

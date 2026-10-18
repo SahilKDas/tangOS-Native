@@ -2111,7 +2111,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       args["connection"] = m;
     auto result = execute("network.read", args);
     if (result.value("ok", false))
-      result["update"] = updateStatus("0.34.0", result.at("data"));
+      result["update"] = updateStatus("0.35.0", result.at("data"));
     return result;
   }
   if (m == "git.clone") {
@@ -2210,7 +2210,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto folder = directory / "exports" / ("bug-report-" + uniqueId());
     fs::create_directories(folder);
     Json debug = {{"app", "TangOS Lite"},
-                  {"version", "0.34.0"},
+                  {"version", "0.35.0"},
                   {"portOnly", settings.portOnly},
                   {"project", settings.activeProject},
                   {"connections", Json::array()},
@@ -2573,7 +2573,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
         auto &runner = processRunner ? *processRunner : local;
         auto log = directory / "logs" / ("check-" + uniqueId() + ".log");
         auto result = runner.run(check.command, progressSink, log);
-        auto verification = checkOutcome(check.name, result.code, result.output);
+        auto verification = checkOutcomeLog(check.name, result.code, log);
         auto summary = checkOutcomeText(verification);
         {
           std::ofstream stream(log, std::ios::binary | std::ios::app);
@@ -2675,7 +2675,8 @@ Json Backend::execute(const std::string &m, const Json &a) {
             {"log", utf8(log.wstring())},
             {"cancelled", result.code == ERROR_CANCELLED}};
   }
-  Runner runner;
+  Runner local;
+  auto &runner = processRunner ? *processRunner : local;
   Repository repo(runner, repository, settings);
   if (m == "git.status")
     return {{"status", repo.status()}};
@@ -2724,7 +2725,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
           "Synchronization would modify protected paths; inspect git.syncPreview blocked list");
     auto backup = execute("git.backup", Json::object());
     auto log = directory / (uniqueId() + "-sync.log");
-    auto result = runner.run({{"git", "reset", "--hard", target}, repository}, {}, log);
+    auto result = runner.run({{"git", "reset", "--hard", target}, repository}, progressSink, log);
     if (result.code != 0)
       return {{"exit", result.code},
               {"output", result.output},
@@ -2824,13 +2825,25 @@ Json Backend::execute(const std::string &m, const Json &a) {
     if (action == "Create draft PR") {
       auto path = directory / (uniqueId() + "-pr-lookup.log");
       lookupLog = utf8(path.wstring());
-      auto lookup = runner.run(openPullRequestLookup(command), {}, path);
+      std::string captured;
+      auto lookup = runner.run(openPullRequestLookup(command), [&](const std::string &chunk) {
+        if(chunk.size()>1024*1024-captured.size())
+          throw std::runtime_error("PR lookup exceeded 1 MiB; inspect "+lookupLog);
+        captured+=chunk;
+        if(progressSink)progressSink(chunk);
+      }, path);
+      lookup.output=std::move(captured);
       if (lookup.code != 0)
         return {{"exit", lookup.code},
                 {"output", lookup.output},
                 {"log", lookupLog},
                 {"reused", false}};
-      auto existing = openPullRequestUrl(command, lookup.output);
+      std::string existing;
+      try {
+        existing = openPullRequestUrl(command, lookup.output);
+      } catch (const std::exception &e) {
+        throw std::runtime_error(std::string(e.what()) + "\nLookup log: " + lookupLog);
+      }
       if (!existing.empty())
         return {{"exit", 0},
                 {"output", lookup.output + "\nUsing existing pull request: " + existing + "\n"},
@@ -2838,7 +2851,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
                 {"url", existing},
                 {"reused", true}};
     }
-    auto result = runner.run(command, {}, log);
+    auto result = runner.run(command, progressSink, log);
     Json response{{"exit", result.code}, {"output", result.output}, {"log", utf8(log.wstring())}};
     if (!lookupLog.empty()) {
       response["lookupLog"] = lookupLog;

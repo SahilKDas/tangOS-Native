@@ -1,4 +1,4 @@
-# TangOS Lite 0.34.0
+# TangOS Lite 0.35.0
 
 Release packaging requires at least 11 GiB free plus build headroom. It builds
 twice sequentially, retaining the first hash while deleting that build tree,
@@ -188,3 +188,5 @@ Development tests additionally use Node 26 to run retained original Console poli
 Version 0.5 adds native source/history inspection, minimap/marquee/navigation/module windows, animated backgrounds, Connections/Requirements/Services screens, queue editing and retention, unique-function statistics and safer explicit sync backups. Full parity remains underway, as documented in UI-PARITY.md.
 
 0.15.0 adds remembered remote projects and viewer-only published progress. Use the project menu to import a downloaded tangos.json. See docs/USER-GUIDE.md for your own connection setup. Verified portable size: 5,400,576 bytes (5.401 MB); two clean builds are byte-identical. Full Console parity remains incomplete.
+
+Release builds use one compiler job by default. On a machine with sufficient free RAM, pass -BuildJobs 2 to compile two objects concurrently; both independent builds and the storage guard still apply.

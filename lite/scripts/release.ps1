@@ -1,4 +1,4 @@
-param([string]$OutputDir = "$PSScriptRoot/../release", [double]$MinimumFreeGiB = 11, [switch]$KeepBuildArtifacts, [switch]$Resume)
+param([string]$OutputDir = "$PSScriptRoot/../release", [double]$MinimumFreeGiB = 11, [switch]$KeepBuildArtifacts, [switch]$Resume, [ValidateRange(1, 2)][int]$BuildJobs = 1)
 $ErrorActionPreference = 'Stop'
 $source = [IO.Path]::GetFullPath("$PSScriptRoot/..")
 $out = [IO.Path]::GetFullPath($OutputDir)
@@ -44,9 +44,9 @@ foreach ($name in @('build-b', 'build-a')) {
   cmake -S $source -B "$out/$name" -G 'MinGW Makefiles' -DCMAKE_BUILD_TYPE=Release
   if ($LASTEXITCODE) { throw 'Configure failed' }
   if ($name -eq 'build-b') {
-    cmake --build "$out/$name" --target TangOSLite -j 1
+    cmake --build "$out/$name" --target TangOSLite -j $BuildJobs
   } else {
-    cmake --build "$out/$name" -j 1
+    cmake --build "$out/$name" -j $BuildJobs
   }
   if ($LASTEXITCODE) { throw 'Build failed' }
   if ($name -eq 'build-b') {
@@ -139,7 +139,7 @@ foreach ($scenario in @('gui-fixture', 'gui-descriptor-missing', 'gui-descriptor
 $imports = & objdump -p "$out/TangOSLite.exe" | Select-String 'DLL Name:' | ForEach-Object { $_.Line.Trim() }
 $compiler = (& g++ --version | Select-Object -First 1)
 $cmake = (& cmake --version | Select-Object -First 1)
-$report = "TangOS Lite 0.34.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
+$report = "TangOS Lite 0.35.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
 Set-Content -LiteralPath "$out/SIZE.txt" -Value $report -Encoding utf8
 Copy-Item -LiteralPath "$source/README.md" -Destination "$out/README.md"
 Copy-Item -LiteralPath "$source/../LICENSE" -Destination "$out/LICENSE"

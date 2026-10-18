@@ -261,3 +261,17 @@ fork-qualified head. It does not change authentication or publish before the
 existing reviewed-action confirmation. Lookup failure, a foreign-repository URL
 or ambiguous output stops creation; both lookup and create have complete logs.
 The offline gh fixture is a test target, excluded from the portable executable.
+
+The desktop draft-PR action uses the same backend preview/confirmation service
+as other native clients. It no longer constructs a separate unbound execution
+after displaying its review. The single-use confirmation rejects repository
+changes between review and execution. Shared Git runners preserve cancellation
+through lookup/create boundaries and stream complete output without adding any
+authentication, force-push or destructive-operation permissions.
+
+Streamed PR lookup tees only a bounded 1 MiB response for parsing while retaining
+the complete durable log. An oversized or malformed response cannot fall through
+to PR creation. Streamed verification reads bounded summary lines from the log
+instead of interpreting an empty stream result as success; unavailable/oversized
+summaries are explicitly unverified. Numeric parsing is linear and does not
+recurse on untrusted tool-output whitespace.

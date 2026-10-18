@@ -428,6 +428,31 @@ int main() {
         SetEnvironmentVariableW(L"TANGOS_PR_FIXTURE", L"invalid");
         reject([&] { confirmed("git.action", args); }, "wrong-repository lookup refused");
         expect(read(trace) == "list\n", "invalid lookup never creates PR");
+        write(trace, "");
+        SetEnvironmentVariableW(L"TANGOS_PR_FIXTURE", L"slow");
+        Runner shared;
+        std::string progress;
+        Backend cancellable(repo, dir / "cancelled-pr", settings, {}, requestHttp, &shared,
+                            [&](const std::string &text) {
+                              progress += text;
+                              if (progress.find("lookup ready") != std::string::npos)
+                                shared.cancel();
+                            });
+        auto review = cancellable.invoke("git.action", args);
+        auto cancelArgs = args;
+        cancelArgs["confirmation"] = review.at("confirmation");
+        auto cancelled = cancellable.invoke("git.action", cancelArgs);
+        expect(cancelled["exit"] == ERROR_CANCELLED && read(trace) == "list\n" &&
+                   progress.find("[CANCELLED]") != std::string::npos,
+               "shared desktop/backend runner streams lookup and cancels before PR creation");
+        shared.reset();
+        progress.clear();
+        write(trace, "");
+        SetEnvironmentVariableW(L"TANGOS_PR_FIXTURE", L"existing");
+        review = cancellable.invoke("git.action", args);
+        cancelArgs["confirmation"] = review.at("confirmation");
+        expect(cancellable.invoke("git.action", cancelArgs)["reused"] == true,
+               "reset shared runner can perform a new reviewed lookup");
       } catch (...) {
         restore();
         throw;
@@ -443,6 +468,26 @@ int main() {
     expect(read(fs::u8path(dataCheck.at("log").get<std::string>()))
                    .find("[VERIFICATION] completed-with-differences") != std::string::npos,
            "interpreted data verdict is preserved in the durable check log");
+    {
+      Runner shared;
+      std::string progress;
+      Backend streaming(repo, dir / "streamed-verification", settings, {}, requestHttp, &shared,
+                        [&](const std::string &chunk) { progress += chunk; });
+      auto check = [&](const std::string &name) {
+        Json args{{"name", name}};
+        auto review = streaming.invoke("checks.run", args);
+        args["confirmation"] = review.at("confirmation");
+        return streaming.invoke("checks.run", args);
+      };
+      expect(check("ROM data comparison")["verification"]["state"] ==
+                     "completed-with-differences" &&
+                 progress.find("VERIFIED 914") != std::string::npos,
+             "streamed ROM-data result preserves differences instead of reading empty capture");
+      write(repo / "tools/prepush_linkcheck.py", "print('nothing to verify')\n");
+      expect(check("Link checks")["verification"]["state"] == "skipped",
+             "streamed link check does not turn skipped verification green");
+      fs::remove(repo / "tools/prepush_linkcheck.py");
+    }
     fs::remove(repo / "tools/romdata_check.py");
     expect(!enabledTool({{"allowNearMiss", false}}, "nearmiss_stats"),
            "near-miss tool policy denied");

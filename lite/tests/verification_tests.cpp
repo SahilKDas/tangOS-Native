@@ -1,4 +1,5 @@
 #include "verification.h"
+#include "platform.h"
 #include <iostream>
 #include <stdexcept>
 using namespace lite;
@@ -34,6 +35,31 @@ int main() {
     expect(checkOutcome("Declaration agreement", 0,
                         "99999999999999999999999999999 disagreement(s)")["state"] ==
            "unverified: invalid baseline count");
+    auto fixture = fs::temp_directory_path() / fs::u8path("tangos-verdict-" + uniqueId() + ".log");
+    auto compare = [&](const std::string &name, const std::string &text) {
+      write(fixture, text);
+      expect(checkOutcomeLog(name, 0, fixture) == checkOutcome(name, 0, text));
+    };
+    compare("ROM data comparison",
+            std::string(8186, ' ') + "\nVERIFIED 914\nPARTIAL 357\nDIFFERS 3\nUNNAMED 59");
+    compare("Declaration agreement", "before\n12228 disagreement(s)\nafter\n");
+    compare("Link checks", "prefix\nnothing to verify\nsuffix\n");
+    compare("ROM data comparison", "VERIFIED 12\nDIFFERS 0\n");
+    compare("Port references", "all references resolve");
+    write(fixture, std::string(65537, 'x'));
+    expect(checkOutcomeLog("Link checks", 0, fixture)["state"] ==
+           "unverified: oversized verification line");
+    expect(checkOutcome("ROM data comparison", 0,
+                        std::string(100000, ' ') +
+                            "VERIFIED 1\nPARTIAL 0\nDIFFERS 0\nUNNAMED 0")["state"] == "passed");
+    expect(checkOutcome("Declaration agreement", 0,
+                        std::string(100000, '9') + " disagreement(s)")["state"] ==
+           "unverified: invalid baseline count");
+    fs::remove(fixture);
+    expect(checkOutcomeLog("Link checks", 0, fixture)["state"] ==
+           "unverified: verification log unavailable");
+    expect(checkOutcomeLog("Link checks", 1, fixture)["state"] == "failed");
+    expect(checkOutcomeLog("Link checks", 1223, fixture)["state"] == "cancelled");
     std::cout
         << "PASS native verification outcomes: real differences, partial data, baselines, skips\n";
     return 0;

@@ -736,3 +736,37 @@ retained in lite/out/evidence-034-live. No baselines or source were changed.
 Full parity remains unverified. Heavy ROM/compiler/port builds and exhaustive
 provider/client/hardware coverage remain distinct from passing synthetic tests.
 Build trees and GUI captures were removed after retaining compact evidence.
+
+The 0.34 local-provider follow-up passed with a separate CPU-only loopback Ollama
+server, 1024-token context, cloud access/pruning disabled and the already installed
+llama3.2:3b model. It returned a real nonempty response through native Fleet,
+delivered the repository instructions, retained the log, completed the fixture
+and preserved tracked source. Inference took about 13 seconds. All temporary
+process environment values were restored and only the owned server was stopped.
+The earlier GPU-configured timeout remains recorded as a failure, not erased.
+
+## Shared desktop/backend Git follow-up — in validation
+
+The desktop draft-PR action now requests the backend's concrete preview and
+single-use confirmation instead of executing a separate create command. That
+shares rolling-PR reuse and repository-change invalidation. Generic backend Git
+operations now honor the caller's Runner and progress sink, including cancellation
+during lookup before any create command. A disposable slow-gh fixture checks
+streaming cancellation and a reset/reviewed retry. Malformed lookup diagnostics
+now include the exact retained log path. Version 0.35 is not yet a verified
+portable release; the default executable remains the verified 0.34 package.
+
+The first 0.35 test attempt caught a genuine stream/capture mismatch: Runner
+intentionally streams without accumulating its returned output. Lookup therefore
+must explicitly tee a bounded response while streaming. The targeted fix captures
+at most 1 MiB and refuses creation on overflow/ambiguity, preserving the log.
+
+The same audit found streamed check verdicts were reading an empty capture.
+Desktop and backend now classify bounded semantic lines from the complete log.
+A boundary test also exposed a stack overflow in the old regex classifier on
+long whitespace; linear numeric/line parsing replaces those expressions.
+Oversized summary lines, excessive summary data or an unreadable log fail closed
+as unverified, while complete build output remains on disk. Targeted native
+verification tests and 249 backend assertions pass, including streamed data
+differences, skipped link checks, cancellation-before-create and reset/retry.
+The failed candidate is discarded before clean reproducible packaging.
