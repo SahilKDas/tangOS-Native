@@ -364,6 +364,32 @@ int main(int argc, char **argv) {
       expect(label(GetDlgItem(popup, 8202)) == L"2" &&
                  label(GetDlgItem(popup, 8203)).find(L"7 req") != std::wstring::npos,
              "MCP popup failed live client/traffic refresh");
+      auto endpoint = GetDlgItem(popup, 8205), prompt = GetDlgItem(popup, 8204);
+      expect(endpoint && label(endpoint) == L"http://127.0.0.1:12345/mcp",
+             "MCP endpoint stayed stale after a live snapshot update");
+      state["url"] = "http://127.0.0.1:54321/mcp";
+      state["promptPreview"] = "Updated public instructions. Follow AGENTS.md.";
+      SendMessageW(popup, WM_TIMER, 1, 0);
+      expect(GetDlgItem(popup, 8205) == endpoint && GetDlgItem(popup, 8204) == prompt &&
+                 label(endpoint) == L"http://127.0.0.1:54321/mcp" &&
+                 label(prompt) == L"Updated public instructions. Follow AGENTS.md.",
+             "MCP endpoint/prompt update rebuilt controls or retained stale text");
+      SendMessageW(prompt, EM_SETSEL, 2, 8);
+      SendMessageW(popup, WM_TIMER, 1, 0);
+      DWORD selectionStart = 0, selectionEnd = 0;
+      SendMessageW(prompt, EM_GETSEL, WPARAM(&selectionStart), LPARAM(&selectionEnd));
+      expect(selectionStart == 2 && selectionEnd == 8,
+             "Unchanged MCP snapshot reset prompt selection");
+      auto fieldDc = GetDC(endpoint);
+      SetBkColor(fieldDc, RGB(0, 0, 0));
+      auto brush = reinterpret_cast<HBRUSH>(
+          SendMessageW(popup, WM_CTLCOLORSTATIC, WPARAM(fieldDc), LPARAM(endpoint)));
+      LOGBRUSH color{};
+      expect(brush && GetObjectW(brush, sizeof(color), &color) &&
+                 color.lbColor == skin::compactField() &&
+                 GetBkColor(fieldDc) == skin::compactField() && GetBkMode(fieldDc) == OPAQUE,
+             "Read-only MCP field paints a transparent/black client background");
+      ReleaseDC(endpoint, fieldDc);
       if (!capturePath.empty()) {
         auto path = lite::fs::u8path(capturePath);
         capturePopover(popup, path.parent_path() / (path.stem().wstring() + L"-mcp.bmp"));

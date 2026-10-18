@@ -486,3 +486,18 @@ preview privacy, long key lists, copied-state expiry, hover pixels, popup cleanu
 and keyboard DPI rebuilding have explicit checks. Exact pointer-arrow/glass and
 splash wordmark/highlight composition and physical mixed-monitor validation remain
 separate open comparisons; the current host exposes only one 125% monitor.
+
+## 0.37 popup field correction — release validation pending
+
+Visual review of the 0.36 component capture found a read-only URL field with a
+black client background. Windows routes read-only EDIT color requests through
+WM_CTLCOLORSTATIC; the MCP popup now handles those as fields, with an opaque
+background and the matching compact-field brush. Vault input backgrounds use
+the same compact tint as their rounded frame.
+
+Endpoint and public prompt text now refresh in place when the live snapshot
+changes, without requiring a status transition. Unchanged snapshots preserve
+selection and scrolling. Component regressions exercise changing URL/prompt,
+stable control identity, selection retention and the actual read-only color
+message. The default verified portable package remains 0.36 until clean 0.37
+builds and packaged workflows pass. No new external connections are introduced.

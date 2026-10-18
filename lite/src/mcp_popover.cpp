@@ -17,7 +17,7 @@ std::string mcpContactAge(int64_t now, int64_t timestamp) {
 }
 struct McpPopover::Impl {
   HWND owner = nullptr, window = nullptr, status = nullptr, clients = nullptr, traffic = nullptr;
-  HBRUSH field = nullptr;
+  HBRUSH field = nullptr, compactField = nullptr;
   std::function<Json()> snapshot;
   std::function<void(McpPopoverAction)> action;
   Json model = Json::object();
@@ -27,11 +27,13 @@ struct McpPopover::Impl {
   Impl(HWND root, std::function<Json()> read, std::function<void(McpPopoverAction)> perform)
       : owner(root), snapshot(std::move(read)), action(std::move(perform)) {
     field = CreateSolidBrush(skin::field());
+    compactField = CreateSolidBrush(skin::compactField());
   }
   ~Impl() {
     if (window)
       DestroyWindow(window);
     DeleteObject(field);
+    DeleteObject(compactField);
   }
   HWND control(const wchar_t *kind, const std::string &title, int id, int x, int y, int width,
                int height, DWORD style = 0) {
@@ -45,6 +47,18 @@ struct McpPopover::Impl {
       skin::buttonFont(child, 12);
     SetWindowSubclass(child, keyboard, 1, reinterpret_cast<DWORD_PTR>(this));
     return child;
+  }
+  LRESULT editColors(HDC dc, HWND child) {
+    auto compact = GetPropW(child, L"TangOSCompactEdit") != nullptr;
+    SetTextColor(dc, skin::text());
+    SetBkMode(dc, OPAQUE);
+    SetBkColor(dc, compact ? skin::compactField() : skin::field());
+    return reinterpret_cast<LRESULT>(compact ? compactField : field);
+  }
+  static std::string prompt(const Json &state) {
+    return state.value("promptPreview",
+                       std::string("Start the server, then copy the connection prompt. Accounts "
+                                   "and providers stay user-configured."));
   }
   void scrollTo(int desired) {
     RECT bounds{};
@@ -103,7 +117,7 @@ struct McpPopover::Impl {
       }
       control(L"STATIC", "URL", 0, 16, y, 294, 22);
       y += 24;
-      control(L"EDIT", model.value("url", std::string()), 0, 16, y, 294, 28,
+      control(L"EDIT", model.value("url", std::string()), 8205, 16, y, 294, 28,
               ES_READONLY | ES_AUTOHSCROLL | WS_TABSTOP);
       y += 40;
     }
@@ -136,11 +150,8 @@ struct McpPopover::Impl {
     control(L"STATIC", "Paste this to your AI agent so it knows how to connect and start working.",
             0, 16, y, 294, 40);
     y += 46;
-    control(L"EDIT",
-            model.value("promptPreview",
-                        std::string("Start the server, then copy the connection prompt. Accounts "
-                                    "and providers stay user-configured.")),
-            8204, 16, y, 294, 190, ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_TABSTOP);
+    control(L"EDIT", prompt(model), 8204, 16, y, 294, 190,
+            ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_TABSTOP);
     y += 198;
     auto copy = control(L"BUTTON", "Copy prompt", 8104, 16, y, 142, 30, BS_OWNERDRAW | WS_TABSTOP);
     EnableWindow(copy, !busy);
@@ -191,6 +202,21 @@ struct McpPopover::Impl {
       if (focusId && IsWindowEnabled(GetDlgItem(window, focusId)))
         SetFocus(GetDlgItem(window, focusId));
     }
+    // Update changing endpoint/prompt text without rebuilding controls or resetting
+    // selection and scroll position when the public snapshot is unchanged.
+    auto update = [&](int id, const std::string &text) {
+      auto child = GetDlgItem(window, id);
+      if (!child)
+        return;
+      std::wstring current(GetWindowTextLengthW(child) + 1, L'\0');
+      auto length = GetWindowTextW(child, current.data(), int(current.size()));
+      current.resize(length);
+      auto next = wide(text);
+      if (current != next)
+        SetWindowTextW(child, next.c_str());
+    };
+    update(8205, model.value("url", std::string()));
+    update(8204, prompt(model));
     if (clients)
       SetWindowTextW(clients, wide(std::to_string(model.value("connectedClients", 0))).c_str());
     if (traffic) {
@@ -286,7 +312,14 @@ struct McpPopover::Impl {
     case WM_DRAWITEM:
       skin::button(*reinterpret_cast<DRAWITEMSTRUCT *>(l));
       return TRUE;
-    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORSTATIC: {
+      wchar_t name[32]{};
+      GetClassNameW(reinterpret_cast<HWND>(l), name, 32);
+      // Windows sends read-only EDIT colors through WM_CTLCOLORSTATIC.
+      if (std::wstring(name) == L"Edit")
+        return self->editColors(reinterpret_cast<HDC>(w), reinterpret_cast<HWND>(l));
+    }
+      [[fallthrough]];
     case WM_CTLCOLORBTN:
       SetBkMode(reinterpret_cast<HDC>(w), TRANSPARENT);
       SetTextColor(reinterpret_cast<HDC>(w),
@@ -295,9 +328,7 @@ struct McpPopover::Impl {
                        : skin::text());
       return reinterpret_cast<LRESULT>(GetStockObject(NULL_BRUSH));
     case WM_CTLCOLOREDIT:
-      SetTextColor(reinterpret_cast<HDC>(w), skin::text());
-      SetBkColor(reinterpret_cast<HDC>(w), skin::field());
-      return reinterpret_cast<LRESULT>(self->field);
+      return self->editColors(reinterpret_cast<HDC>(w), reinterpret_cast<HWND>(l));
     case WM_MOUSEWHEEL:
       self->scrollTo(self->scroll - GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA * 54);
       return 0;

@@ -17,7 +17,7 @@ struct VaultPopover::Impl {
   int scroll = 0, contentHeight = 0, maximumHeight = 560;
   Impl(HWND parent, Vault &storage, std::vector<std::string> names, Json guidance)
       : owner(parent), vault(storage), declared(std::move(names)), help(std::move(guidance)) {
-    field = CreateSolidBrush(skin::field());
+    field = CreateSolidBrush(skin::compactField());
   }
   ~Impl() {
     if (window)
@@ -280,7 +280,8 @@ struct VaultPopover::Impl {
       return reinterpret_cast<LRESULT>(GetStockObject(NULL_BRUSH));
     case WM_CTLCOLOREDIT:
       SetTextColor(reinterpret_cast<HDC>(w), skin::text());
-      SetBkColor(reinterpret_cast<HDC>(w), skin::field());
+      SetBkMode(reinterpret_cast<HDC>(w), OPAQUE);
+      SetBkColor(reinterpret_cast<HDC>(w), skin::compactField());
       return reinterpret_cast<LRESULT>(self->field);
     case WM_MOUSEWHEEL:
     case WM_VSCROLL: {
