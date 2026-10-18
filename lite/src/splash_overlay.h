@@ -8,6 +8,11 @@ struct SplashFrame {
   bool swap, finished;
 };
 SplashFrame splashFrame(double milliseconds);
+struct SplashBubbleFrame {
+  double rise, opacity;
+  bool visible;
+};
+SplashBubbleFrame splashBubbleFrame(double progress);
 class SplashOverlay {
   struct Impl;
   std::unique_ptr<Impl> impl;

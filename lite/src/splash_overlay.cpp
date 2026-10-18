@@ -50,8 +50,8 @@ struct SplashOverlay::Impl {
     RECT bounds{};
     dpi::clientRect(owner, &bounds);
     window = dpi::createWindow(0, wc.lpszClassName, L"Switching application",
-                             WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, bounds.right, bounds.bottom,
-                             owner, nullptr, wc.hInstance, this);
+                               WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, bounds.right,
+                               bounds.bottom, owner, nullptr, wc.hInstance, this);
     if (!window)
       throw std::runtime_error("Cannot create app-switch overlay");
     dpi::setWindowPos(window, HWND_TOP, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
@@ -100,11 +100,12 @@ struct SplashOverlay::Impl {
     auto frame = splashFrame(time);
     for (const auto &b : bubbles) {
       auto progress = (time - b.delay) / b.duration;
-      if (progress < 0 || progress > 1)
+      auto bubble = splashBubbleFrame(progress);
+      if (!bubble.visible)
         continue;
-      int size = int(b.size), x = int(b.left * w), y = int(h + 70 - progress * 1.12 * h);
-      double opacity = progress < .15 ? progress / .15 * .9 : (1 - progress) / .85 * .9;
-      skin::splashBubble(layer, x, y, size, opacity);
+      int size = int(b.size), x = int(b.left * w),
+          y = int(h + 70 - b.size - bubble.rise * 1.12 * h);
+      skin::splashBubble(layer, x, y, size, bubble.opacity);
     }
     auto center = dpi::compatibleDC(dc);
     auto centerBitmap = dpi::compatibleBitmap(dc, w, h);

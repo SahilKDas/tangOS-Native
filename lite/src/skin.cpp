@@ -22,6 +22,7 @@ extern "C" void tangos_icon(unsigned char *, unsigned, unsigned, unsigned, uint3
 extern "C" void tangos_glass(unsigned char *, unsigned, unsigned, uint32_t, uint32_t, uint32_t,
                              unsigned);
 extern "C" void tangos_set_scale(float);
+extern "C" void tangos_icon_rotated(unsigned char *, unsigned, unsigned, unsigned, uint32_t, float);
 namespace skin {
 namespace {
 UINT rasterDpi = 96;
@@ -191,8 +192,41 @@ void buttonBackground(const DRAWITEMSTRUCT &item) {
     else
       ++it;
 }
+struct CaretMotion {
+  double from = 0, target = 0;
+  ULONGLONG started = 0;
+};
+std::map<HWND, CaretMotion> caretMotions;
+double caretDegrees(HWND window) {
+  auto it = caretMotions.find(window);
+  if (it == caretMotions.end())
+    return GetPropW(window, L"TangOSProjectPickerOpen") ? 180 : 0;
+  auto &m = it->second;
+  double progress =
+      animationEnabled() ? std::clamp(double(GetTickCount64() - m.started) / 160., 0., 1.) : 1;
+  auto curve = [](double t, double a, double b) {
+    return 3 * (1 - t) * (1 - t) * t * a + 3 * (1 - t) * t * t * b + t * t * t;
+  };
+  double low = 0, high = 1;
+  for (int i = 0; i < 30; ++i) {
+    double t = (low + high) / 2;
+    if (curve(t, .25, .25) < progress)
+      low = t;
+    else
+      high = t;
+  }
+  double eased = progress == 1 ? 1 : progress == 0 ? 0 : curve((low + high) / 2, .1, 1.);
+  return m.from + (m.target - m.from) * eased;
+}
 LRESULT CALLBACK hoverButton(HWND window, UINT message, WPARAM w, LPARAM l, UINT_PTR id,
                              DWORD_PTR) {
+  if (message == WM_TIMER && w == 7777) {
+    InvalidateRect(window, nullptr, FALSE);
+    auto it = caretMotions.find(window);
+    if (it == caretMotions.end() || GetTickCount64() - it->second.started >= 160)
+      KillTimer(window, 7777);
+    return 0;
+  }
   if (message == WM_MOUSEMOVE) {
     if (!GetPropW(window, L"TangOSHover")) {
       SetPropW(window, L"TangOSHover", reinterpret_cast<HANDLE>(1));
@@ -204,6 +238,8 @@ LRESULT CALLBACK hoverButton(HWND window, UINT message, WPARAM w, LPARAM l, UINT
     RemovePropW(window, L"TangOSHover");
     InvalidateRect(window, nullptr, FALSE);
   } else if (message == WM_NCDESTROY) {
+    caretMotions.erase(window);
+    KillTimer(window, 7777);
     iconTooltips.erase(window);
     RemovePropW(window, L"TangOSHover");
     RemovePropW(window, L"TangOSIcon");
@@ -435,6 +471,22 @@ void projectPicker(HWND window, const std::wstring &glyph) {
   SetWindowSubclass(window, hoverButton, 1, 0);
   InvalidateRect(window, nullptr, FALSE);
 }
+void projectPickerOpen(HWND window, bool open) {
+  if (!GetPropW(window, L"TangOSProjectPicker"))
+    return;
+  double angle = caretDegrees(window), target = open ? 180 : 0;
+  auto found = caretMotions.find(window);
+  if (found == caretMotions.end() || found->second.target != target) {
+    caretMotions[window] = {angle, target, GetTickCount64()};
+    if (animationEnabled())
+      SetTimer(window, 7777, 10, nullptr);
+  }
+  if (open)
+    SetPropW(window, L"TangOSProjectPickerOpen", reinterpret_cast<HANDLE>(1));
+  else
+    RemovePropW(window, L"TangOSProjectPickerOpen");
+  InvalidateRect(window, nullptr, FALSE);
+}
 int projectPickerWidth(HWND window) {
   if (!window)
     return 144;
@@ -448,10 +500,12 @@ int projectPickerWidth(HWND window) {
   return std::clamp(width, 144, 260);
 }
 void projectMenuRow(HDC dc, const RECT &bounds, const std::wstring &title,
-                    const std::wstring &glyph, bool viewerOnly, bool active, bool hovered) {
+                    const std::wstring &glyph, bool viewerOnly, bool active, bool hovered,
+                    bool composed) {
   int width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
   auto brush = CreateSolidBrush(compactField());
-  FillRect(dc, &bounds, brush);
+  if (!composed)
+    FillRect(dc, &bounds, brush);
   DeleteObject(brush);
   if (active || hovered) {
     auto tint = Color(active ? 51 : 36, colors.primary.GetR(), colors.primary.GetG(),
@@ -476,12 +530,17 @@ void projectMenuRow(HDC dc, const RECT &bounds, const std::wstring &title,
     rowText(glyph, left, 20, 10, false, true);
     left += 28;
   }
-  int suffix = viewerOnly ? 82 : 0;
-  rowText(title, left, bounds.right - left - 36 - suffix, 13, false);
-  if (viewerOnly)
-    rowText(L"viewer only", bounds.right - 36 - suffix, suffix, 11, true);
-  if (active)
-    rowText(L"✓", bounds.right - 30, 20, 13, false, true);
+  int right = bounds.right - 16;
+  if (active) {
+    rowText(L"✓", right - 13, 13, 13, false, true);
+    right -= 21;
+  }
+  if (viewerOnly) {
+    int suffix = textWidth(dc, L"viewer only", 11, 600);
+    rowText(L"viewer only", right - suffix, suffix, 11, true);
+    right -= suffix + 8;
+  }
+  rowText(title, left, std::max(0, right - left), 13, false);
 }
 void initialize() {
   BOOL enabled = TRUE;
@@ -506,6 +565,10 @@ void shutdown() {
     RemoveFontMemResourceEx(fontResource);
 }
 void theme(int i) {
+  if (unsigned(std::clamp(i, 0, 4)) != paletteIndex) {
+    phase = 0;
+    lastMotion = 0;
+  }
   buttonBackdrops.clear();
   paletteIndex = std::clamp(i, 0, 4);
   switch (i) {
@@ -543,7 +606,7 @@ bool animationEnabled() { return motionEnabled && systemMotion; }
 void advance(bool visible) {
   auto now = GetTickCount64();
   if (visible && animationEnabled() && lastMotion)
-    phase += std::min<ULONGLONG>(now - lastMotion, 250) / 1000.f;
+    phase += std::min<ULONGLONG>(now - lastMotion, 50) / 1000.f;
   lastMotion = now;
 }
 static void drawBackground(HDC dc, int w, int h) {
@@ -661,13 +724,14 @@ void scrim(HDC dc, int w, int h) {
       }
     }
 }
-void agentCard(HDC dc, int x, int y, int w, int h, COLORREF tint, bool hovered) {
+void agentCard(HDC dc, int x, int y, int w, int h, COLORREF tint, double hover) {
+  hover = std::clamp(hover, 0., 1.);
   {
     constexpr int padding = 40;
     Surface shadow(dc, x - padding, y - padding, w + padding * 2, h + padding * 2);
     if (shadow.data)
-      rasterShadow(shadow.data, shadow.w, shadow.h, padding, 14, hovered ? 20 : 12, hovered ? 8 : 4,
-                   hovered ? .13f : .08f);
+      rasterShadow(shadow.data, shadow.w, shadow.h, padding, 14, float(12 + 8 * hover),
+                   int(std::lround(4 + 4 * hover)), float(.08 + .05 * hover));
   }
   static const Color gloss[] = {Color(234, 244, 253), Color(250, 208, 172), Color(20, 44, 70),
                                 Color(252, 214, 240), Color(238, 255, 196)};
@@ -1118,10 +1182,9 @@ void button(const DRAWITEMSTRUCT &i, bool primary, bool danger) {
     {
       Surface surface(i.hDC, x + w - 25, y + (h - 14) / 2, 14, 14);
       if (surface.data)
-        rasterIcon(surface.data, 14, 14,
-                   unsigned(GetPropW(i.hwndItem, L"TangOSProjectPickerOpen") ? Icon::chevronUp
-                                                                             : Icon::chevronDown),
-                   colors.muted.value);
+        tangos_icon_rotated(surface.data, rasterPixels(14), rasterPixels(14),
+                            unsigned(Icon::chevronDown), colors.muted.value,
+                            float(caretDegrees(i.hwndItem)));
     }
     if (i.itemState & ODS_FOCUS) {
       RECT focus{x + 3, y + 3, x + w - 3, y + h - 3};

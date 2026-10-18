@@ -677,3 +677,26 @@ later fix. The verified default package remains the earlier 0.33.0 artifact.
 Build trees and raw screenshots were removed after testing. GUI scripts now
 monitor the 11 GiB free-space floor, and release packaging cleans each completed
 capture scenario immediately after retaining its reports.
+## Project popup and motion validation — 2026-10-17
+
+Ten Rust raster tests pass, including 272 original TypeScript motion fixtures and
+intermediate caret-angle rendering. Native popup keyboard/pointer/scroll/dismiss
+tests pass at seven simulated DPI values. The first concurrent popup/splash test
+attempt had competing foreground windows; serial runs pass, and CTest now gives
+the three desktop suites a shared resource lock. CTest -j3 verified that native
+splash, controls and per-monitor DPI execute serially and all pass (12.73 sec).
+The normal packaged GUI repository/status/check/log/Fleet/Viewer/overlay workflow
+passes at 120 DPI with 11 responsive timer ticks. Its actual SSE close was 31 ms;
+the intentionally unfinished snapshot body cancelled in 0 ms on this run.
+
+The candidate is 7,179,776 bytes; its hash, reports and two compact visual captures
+are retained in lite/out/evidence-popup-motion. This checkpoint has not rerun two
+clean release builds; the verified default package remains 0.33.0. Physical
+mixed-monitor validation and exact remaining auxiliary composition remain open.
+
+GUI capture compaction now uses a lossless standard-library PNG encoder and
+retains the original BMP used for pixel assertions. CRC/pixel equality and partial
+write retention tests pass. The first helper attempt selected a Python without
+Pillow; that optional dependency was removed. The final full GUI run retained
+about 32 MiB of captures instead of accumulating raw bitmaps. Build and temporary
+capture trees are cleaned after retaining compact evidence; floor remains 11 GiB.

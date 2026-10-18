@@ -18,14 +18,14 @@ set(RASTER_TARGET "${CMAKE_CURRENT_BINARY_DIR}/raster")
 set(RASTER_LIBRARY "${RASTER_TARGET}/x86_64-pc-windows-gnu/release/libtangos_raster.a")
 add_custom_command(OUTPUT "${RASTER_LIBRARY}"
  COMMAND ${CMAKE_COMMAND} -E env "RUSTFLAGS=--remap-path-prefix=${CMAKE_CURRENT_SOURCE_DIR}=lite --remap-path-prefix=${CMAKE_CURRENT_BINARY_DIR}=build" ${CARGO_EXECUTABLE} build --locked --offline --release --target x86_64-pc-windows-gnu --target-dir "${RASTER_TARGET}" --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/renderer/Cargo.toml"
- DEPENDS renderer/src/lib.rs renderer/Cargo.toml renderer/Cargo.lock
+ DEPENDS renderer/src/lib.rs renderer/src/background.rs renderer/Cargo.toml renderer/Cargo.lock
  VERBATIM)
 add_custom_target(raster_build DEPENDS "${RASTER_LIBRARY}")
 add_library(tangos_raster STATIC IMPORTED)
 set_target_properties(tangos_raster PROPERTIES IMPORTED_LOCATION "${RASTER_LIBRARY}")
 add_dependencies(tangos_raster raster_build)
 target_link_libraries(lite_core PUBLIC tangos_raster userenv ntdll)
-add_executable(TangOSLite WIN32 src/main.cpp src/skin.cpp src/console_ui.cpp src/helper_overlay.cpp src/tour_overlay.cpp src/splash_overlay.cpp src/window_capture.cpp src/report_dialog.cpp src/app.rc)
+add_executable(TangOSLite WIN32 src/main.cpp src/project_popup.cpp src/skin.cpp src/console_ui.cpp src/helper_overlay.cpp src/tour_overlay.cpp src/splash_overlay.cpp src/window_capture.cpp src/report_dialog.cpp src/app.rc)
 target_link_libraries(TangOSLite PRIVATE lite_core comctl32 ole32 shell32 uuid dwmapi msimg32 tangos_raster ws2_32 userenv ntdll)
 if(MINGW)
   target_link_options(TangOSLite PRIVATE -static -municode -Wl,--no-insert-timestamp $<$<CONFIG:Release>:-s>)
@@ -78,7 +78,7 @@ target_link_libraries(lite_splash_tests PRIVATE lite_core comctl32 msimg32)
 target_link_options(lite_splash_tests PRIVATE -static -Wl,--no-insert-timestamp)
 add_test(NAME native_splash_transition COMMAND lite_splash_tests "${CMAKE_CURRENT_BINARY_DIR}/splash-fixture")
 
-add_executable(lite_control_layout_tests tests/control_layout_tests.cpp src/skin.cpp src/app.rc)
+add_executable(lite_control_layout_tests tests/control_layout_tests.cpp src/project_popup.cpp src/skin.cpp src/app.rc)
 target_link_libraries(lite_control_layout_tests PRIVATE lite_core comctl32 msimg32)
 target_link_options(lite_control_layout_tests PRIVATE -static -Wl,--no-insert-timestamp)
 add_test(NAME native_control_layout COMMAND lite_control_layout_tests)
@@ -96,3 +96,5 @@ add_executable(lite_live_data_tests tests/live_data_tests.cpp)
 target_link_libraries(lite_live_data_tests PRIVATE lite_core)
 target_link_options(lite_live_data_tests PRIVATE -static -Wl,--no-insert-timestamp)
 add_test(NAME atlas_live_state COMMAND lite_live_data_tests)
+# These fixtures create focused native windows; do not run them concurrently.
+set_tests_properties(native_splash_transition native_control_layout per_monitor_dpi PROPERTIES RESOURCE_LOCK native_desktop)

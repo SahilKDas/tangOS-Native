@@ -4,8 +4,10 @@
 namespace skin {
 void projectPicker(HWND window, const std::wstring &glyph);
 int projectPickerWidth(HWND window);
+void projectPickerOpen(HWND window, bool open);
 void projectMenuRow(HDC dc, const RECT &bounds, const std::wstring &title,
-                    const std::wstring &glyph, bool viewerOnly, bool active, bool hovered);
+                    const std::wstring &glyph, bool viewerOnly, bool active, bool hovered,
+                    bool composed = false);
 enum class Icon {
   report,
   refresh,
@@ -58,7 +60,7 @@ void background(HDC dc, int width, int height, int offsetY = 0, int totalHeight 
 void panel(HDC dc, int x, int y, int width, int height, bool solid = false,
            PanelStyle style = PanelStyle::glass);
 void scrim(HDC dc, int width, int height);
-void agentCard(HDC dc, int x, int y, int width, int height, COLORREF color, bool hovered = false);
+void agentCard(HDC dc, int x, int y, int width, int height, COLORREF color, double hover = 0);
 void presenceDot(HDC dc, int x, int y, const std::string &state, int size = 12);
 void progressBar(HDC dc, int x, int y, int width, double percent, COLORREF tint);
 int taskNoteHeight(HDC dc, const std::wstring &value, int width);

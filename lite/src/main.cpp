@@ -3,6 +3,7 @@
 #include "verification.h"
 #include "splash_overlay.h"
 #include "skin.h"
+#include "project_popup.h"
 #include "console_ui.h"
 #include "window_capture.h"
 #include "backend.h"
@@ -781,13 +782,13 @@ void projectMenu() {
   if (consoleUI && consoleUI->running())
     throw std::runtime_error("Stop agents before switching repositories");
   auto projects = Backend(repo, dataDir, settings).invoke("projects.list");
-  HMENU menu = CreatePopupMenu();
-  std::vector<ProjectMenuRow> rows;
+
+  std::vector<ProjectPopupRow> rows;
   rows.reserve(projects.size() + 4);
   auto append = [&](UINT id, std::wstring title, std::wstring glyph = L"", bool viewerOnly = false,
                     bool active = false) {
-    rows.push_back({std::move(title), std::move(glyph), viewerOnly, active});
-    AppendMenuW(menu, MF_OWNERDRAW, id, reinterpret_cast<LPCWSTR>(&rows.back()));
+    rows.push_back({id, std::move(title), std::move(glyph), viewerOnly, active});
+
   };
   std::vector<std::string> ids;
   for (auto &entry : projects) {
@@ -798,21 +799,20 @@ void projectMenu() {
     append(1 + ids.size(), wide(title), wide(glyph), !cloned, entry.value("active", false));
     ids.push_back(id);
   }
-  if (!ids.empty())
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+
   append(10000, L"Open another local repository…");
   append(10001, L"Add remote project (tangos.json)…");
   append(10002, L"Discover remote projects…");
   append(10003, L"Import project ZIP…");
   RECT bounds;
   dpi::windowRect(projectButton, &bounds);
-  SetPropW(projectButton, L"TangOSProjectPickerOpen", reinterpret_cast<HANDLE>(1));
+  skin::projectPickerOpen(projectButton, true);
   InvalidateRect(projectButton, nullptr, FALSE);
   UpdateWindow(projectButton);
-  auto selected = dpi::trackPopup(menu, TPM_RETURNCMD | TPM_NONOTIFY, bounds.left,
-                                  bounds.bottom + 8, 0, window, nullptr);
-  DestroyMenu(menu);
-  RemovePropW(projectButton, L"TangOSProjectPickerOpen");
+  unsigned selected = 0;
+  try { selected = projectPopup(window, projectButton, rows); }
+  catch (...) { skin::projectPickerOpen(projectButton, false); throw; }
+  skin::projectPickerOpen(projectButton, false);
   InvalidateRect(projectButton, nullptr, FALSE);
   if (selected == 10000)
     browse();
@@ -1515,9 +1515,9 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     return 0;
   case WM_TIMER:
-    skin::advance(IsWindowVisible(h) && !IsIconic(h) && GetForegroundWindow() == h);
+    skin::advance(IsWindowVisible(h) && !IsIconic(h) && GetAncestor(GetForegroundWindow(), GA_ROOTOWNER) == h);
     if (skin::animationEnabled() && IsWindowVisible(h) && !IsIconic(h) &&
-        GetForegroundWindow() == h)
+        GetAncestor(GetForegroundWindow(), GA_ROOTOWNER) == h)
       InvalidateRect(h, nullptr, FALSE);
     if (smoke && smokePhase == 2)
       ++smokeTicks;

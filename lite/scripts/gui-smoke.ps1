@@ -1,9 +1,9 @@
-param([Parameter(Mandatory)][string]$Executable, [string]$FixtureDir = "$PSScriptRoot/../out/gui-fixture", [switch]$MissingDescriptor, [switch]$InvalidDescriptor, [double]$MinimumFreeGiB = 11)
+param([Parameter(Mandatory)][string]$Executable, [string]$FixtureDir = "$PSScriptRoot/../out/gui-fixture", [switch]$MissingDescriptor, [switch]$InvalidDescriptor, [double]$MinimumFreeGiB = 11, [switch]$CompactCaptures = $true)
 $ErrorActionPreference = 'Stop'
 $fixture = [IO.Path]::GetFullPath($FixtureDir)
 if (Test-Path -LiteralPath $fixture) { throw "Use a fresh fixture directory: $fixture" }
 $fixtureDrive = [IO.Path]::GetPathRoot($fixture).Substring(0, 1)
-if ((Get-PSDrive -Name $fixtureDrive).Free -lt (($MinimumFreeGiB + 0.5) * 1GB)) {
+if ((Get-PSDrive -Name $fixtureDrive).Free -lt (($MinimumFreeGiB + $(if ($CompactCaptures) { 0.2 } else { 0.5 })) * 1GB)) {
   throw "GUI validation paused: insufficient headroom to keep $MinimumFreeGiB GiB free."
 }
 $repo = Join-Path $fixture 'repository with spaces'
@@ -59,6 +59,11 @@ $sseControl = Join-Path $fixture 'sse-control'
 New-Item -ItemType Directory -Force -Path $sseControl | Out-Null
 $sseScript = [IO.Path]::GetFullPath("$PSScriptRoot/../tests/sse_ui_server.py")
 $sseServer = Start-Process -FilePath (Get-Command python).Source -ArgumentList @(('"'+$sseScript+'"'), '--directory', ('"'+$sseControl+'"')) -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $sseControl 'server-error.log') -RedirectStandardOutput (Join-Path $sseControl 'server-output.log')
+$compactor = $null
+if ($CompactCaptures) {
+  $compactorScript = [IO.Path]::GetFullPath("$PSScriptRoot/../tests/compact_gui_captures.py")
+  $compactor = Start-Process -FilePath (Get-Command python).Source -ArgumentList @(('"'+$compactorScript+'"'), '--directory', ('"'+$fixture+'"')) -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $fixture 'capture-compactor-error.log') -RedirectStandardOutput (Join-Path $fixture 'capture-compactor-output.log')
+}
 try {
   $deadline = (Get-Date).AddSeconds(15)
   while (-not (Test-Path -LiteralPath (Join-Path $sseControl 'endpoint.txt'))) {
@@ -69,6 +74,10 @@ try {
   $null = $process.Handle
   $deadline = (Get-Date).AddSeconds(240)
   while (-not $process.WaitForExit(250)) {
+    if ($compactor -and $compactor.HasExited) {
+      Stop-Process -Id $process.Id
+      throw 'Capture compactor stopped unexpectedly; inspect capture-compactor-error.log'
+    }
     if ((Get-PSDrive -Name $fixtureDrive).Free -lt (($MinimumFreeGiB + 0.15) * 1GB)) {
       Stop-Process -Id $process.Id
       throw "GUI validation stopped to preserve $MinimumFreeGiB GiB free."
@@ -79,6 +88,11 @@ try {
     }
   }
 } finally {
+  if ($compactor) {
+    Set-Content -LiteralPath (Join-Path $fixture 'capture-compactor.stop') -Value 'complete'
+    if (-not $compactor.WaitForExit(15000)) { $compactor.Kill(); $compactor.WaitForExit() }
+    $compactor.Dispose()
+  }
   if (-not $sseServer.HasExited) { $sseServer.Kill(); $sseServer.WaitForExit() }
   $sseServer.Dispose()
 }
@@ -87,20 +101,31 @@ if (-not (Test-Path -LiteralPath $report)) { throw "GUI workflow failed without 
 if ($process.ExitCode -ne 0) { throw (Get-Content -LiteralPath $report -Raw) }
 $result = Get-Content -LiteralPath $report -Raw
 if (-not $result.StartsWith('PASS')) { throw $result }
+function Test-NativeCapture([string]$name) {
+  $bitmap = Join-Path $fixture ($name + '.bmp')
+  if ((Test-Path -LiteralPath $bitmap) -and (Get-Item -LiteralPath $bitmap).Length -ge 100000) { return $true }
+  $png = Join-Path $fixture ($name + '.png')
+  if (-not (Test-Path -LiteralPath $png)) { return $false }
+  $bytes = [IO.File]::ReadAllBytes($png)
+  if ($bytes.Length -lt 24 -or [BitConverter]::ToString($bytes, 0, 8) -ne '89-50-4E-47-0D-0A-1A-0A') { return $false }
+  $width = [Net.IPAddress]::NetworkToHostOrder([BitConverter]::ToInt32($bytes, 16))
+  $height = [Net.IPAddress]::NetworkToHostOrder([BitConverter]::ToInt32($bytes, 20))
+  return ($width -gt 0 -and $height -gt 0 -and ([long]$width * $height) -ge 25000)
+}
 $images = @('landing', 'controller', 'repository', 'workspace', 'theme-0', 'theme-1', 'theme-2', 'theme-3', 'theme-4', 'console-0', 'console-1', 'console-2', 'console-3', 'console-4', 'console-5', 'console-6', 'console-8', 'console-9', 'console-10', 'console-11', 'console-12', 'tour-expression', 'tips')
 if ($MissingDescriptor -or $InvalidDescriptor) { $images = @('landing','controller','repository','workspace','theme-0','theme-1','theme-2','theme-3','theme-4','descriptor-missing','descriptor-generated','descriptor-review') }
 foreach ($image in $images) {
   $path = Join-Path $fixture "$image.bmp"
-  if (-not (Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -lt 100000) { throw "Missing native window render: $image" }
+  if (-not (Test-NativeCapture $image)) { throw "Missing native window render: $image" }
 }
 if (-not ($MissingDescriptor -or $InvalidDescriptor)) {
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'sse-viewer-report.txt') -Raw).StartsWith('PASS')) { throw 'Native SSE Viewer integration failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'snapshot-cancel-report.txt') -Raw).StartsWith('PASS')) { throw 'Native Viewer snapshot cancellation failed' }
 $display = Get-Content -LiteralPath (Join-Path $fixture 'display-validation.json') -Raw | ConvertFrom-Json
 if ($display.monitors.Count -lt 1 -or @($display.layouts | Where-Object state -eq 'passed').Count -ne 9) { throw 'Display layout matrix incomplete' }
-if (-not (Test-Path -LiteralPath (Join-Path $fixture 'help-complete-reference.bmp'))) { throw 'Complete native reference was not rendered' }
+if (-not (Test-NativeCapture 'help-complete-reference')) { throw 'Complete native reference was not rendered' }
 foreach ($overlay in @('helper-floating-tips', 'tour-overlay-centered', 'tour-overlay-spotlight')) {
-  if (-not (Test-Path -LiteralPath (Join-Path $fixture "$overlay.bmp"))) { throw "Native overlay missing: $overlay" }
+  if (-not (Test-NativeCapture $overlay)) { throw "Native overlay missing: $overlay" }
 }
 $helper = Get-Content -LiteralPath (Join-Path $fixture 'helper-overlay.json') -Raw | ConvertFrom-Json
 $pixels = [IO.File]::ReadAllBytes((Join-Path $fixture 'helper-floating-tips.bmp'))
@@ -117,7 +142,7 @@ $pixel = [BitConverter]::ToInt32($pixels, 10) + (($pixelHeight - 1 - $sampleY) *
 if ($pixels[$pixel] -ge 100 -or $pixels[$pixel + 1] -lt 190 -or $pixels[$pixel + 1] - $pixels[$pixel + 2] -lt 70) { throw 'Floating helper was painted behind the Console pane' }
 foreach ($image in @('controller-reference-idle', 'controller-cart')) {
   $path = Join-Path $fixture "$image.bmp"
-  if (-not (Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -lt 100000) { throw "Missing Controller reference render: $image" }
+  if (-not (Test-NativeCapture $image)) { throw "Missing Controller reference render: $image" }
 }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'controller-cart-report.txt') -Raw).StartsWith('PASS')) { throw 'Simple-mode cart workflow failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'controller-advanced-report.txt') -Raw).StartsWith('PASS')) { throw 'Advanced Controller workflow failed' }

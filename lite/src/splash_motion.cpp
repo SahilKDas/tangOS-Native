@@ -21,6 +21,14 @@ double bezier(double progress, double x1, double y1, double x2, double y2) {
   return curve((low + high) / 2, y1, y2);
 }
 } // namespace
+SplashBubbleFrame splashBubbleFrame(double progress) {
+  if (!std::isfinite(progress) || progress < 0 || progress > 1)
+    return {0, 0, false};
+  double rise = bezier(progress, .42, 0, 1, 1);
+  double opacity = progress < .15 ? .9 * bezier(progress / .15, .42, 0, 1, 1)
+                                  : .9 * (1 - bezier((progress - .15) / .85, .42, 0, 1, 1));
+  return {rise, opacity, true};
+}
 SplashFrame splashFrame(double milliseconds) {
   if (!std::isfinite(milliseconds))
     milliseconds = 1750;

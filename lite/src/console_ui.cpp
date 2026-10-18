@@ -256,7 +256,7 @@ struct ConsoleUI::Impl {
     ULONGLONG at = 0;
   };
   std::map<std::string, ProgressMotion> progressMotion;
-  std::map<std::string, ProgressMotion> cardHoverMotion;
+  std::map<std::string, ProgressMotion> cardHoverMotion, cardShadowMotion;
   std::map<std::string, int> cardHoverOffset;
   size_t pickedFunction = SIZE_MAX;
   HWND batchList = nullptr, batchTitle = nullptr, batchPrompt = nullptr;
@@ -680,6 +680,12 @@ struct ConsoleUI::Impl {
           eligible && bounds.top >= 62 && bounds.bottom <= height - 100 && PtInRect(&bounds, point)
               ? -2
               : 0;
+      auto &shadow = cardShadowMotion[agents[i].id];
+      double shadowTarget = target == 0 ? 0 : 1;
+      double shadowShown = controllerProgress(shadow.from, shadow.target, double(now-shadow.at)*2);
+      if(shadow.target != shadowTarget) shadow = {shadowShown, shadowTarget, now};
+      if(skin::animationEnabled() && now-shadow.at < 150 && shadow.from != shadow.target)
+        changed = true;
       if (motion.target != target)
         motion = {shown, target, now};
       auto offset = int(std::round(skin::animationEnabled() ? shown : target));
@@ -2796,7 +2802,12 @@ struct ConsoleUI::Impl {
         for (auto c : wide(a.spec.name))
           colorHash = colorHash * 31 + uint16_t(c);
         auto tint = palette[colorHash % 12];
-        skin::agentCard(dc, x, y, w, h, tint, cardHoverMotion[a.id].target != 0);
+        auto &shadow = cardShadowMotion[a.id];
+        double hover = skin::animationEnabled()
+                           ? controllerProgress(shadow.from, shadow.target,
+                                                double(GetTickCount64()-shadow.at)*2)
+                           : shadow.target;
+        skin::agentCard(dc, x, y, w, h, tint, hover);
         auto dot = agentPresence(a.spec.kind, lastAgentSignal[a.id], a.active,
                                  std::time(nullptr) * int64_t(1000));
         skin::presenceDot(dc, x + 13, y + 20, dot, 9);

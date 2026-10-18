@@ -1,3 +1,4 @@
+mod background;
 use tiny_skia::*;
 thread_local! { static PIXEL_SCALE: std::cell::Cell<f32> = const { std::cell::Cell::new(1.) }; }
 #[no_mangle]
@@ -118,6 +119,13 @@ fn color(c: u32) -> Color {
 
 #[no_mangle]
 pub unsafe extern "C" fn tangos_icon(data: *mut u8, w: u32, h: u32, icon: u32, ink: u32) {
+    icon_rotated(data,w,h,icon,ink,0.);
+}
+#[no_mangle]
+pub unsafe extern "C" fn tangos_icon_rotated(data: *mut u8,w:u32,h:u32,icon:u32,ink:u32,degrees:f32) {
+    icon_rotated(data,w,h,icon,ink,if degrees.is_finite(){degrees}else{0.});
+}
+unsafe fn icon_rotated(data: *mut u8,w:u32,h:u32,icon:u32,ink:u32,degrees:f32) {
     if data.is_null() || w == 0 || h == 0 || w > 256 || h > 256 { return; }
     let bytes = std::slice::from_raw_parts_mut(data, w as usize * h as usize * 4);
     for pixel in bytes.chunks_exact_mut(4) { pixel.swap(0, 2); pixel[3] = 255; }
@@ -195,7 +203,7 @@ pub unsafe extern "C" fn tangos_icon(data: *mut u8, w: u32, h: u32, icon: u32, i
     if let Some(path) = path.finish() {
         let mut paint = Paint::default(); paint.set_color(color(ink));
         let stroke = Stroke { width: 2., line_cap: LineCap::Round, line_join: LineJoin::Round, ..Stroke::default() };
-        pixmap.stroke_path(&path, &paint, &stroke, Transform::from_scale(w as f32 / 24., h as f32 / 24.), None);
+        pixmap.stroke_path(&path, &paint, &stroke, Transform::from_scale(w as f32 / 24., h as f32 / 24.).pre_rotate_at(degrees,12.,12.), None);
     }
     for pixel in bytes.chunks_exact_mut(4) { pixel.swap(0, 2); }
 }
@@ -408,67 +416,67 @@ pub unsafe extern "C" fn tangos_mesh(data: *mut u8, w: u32, h: u32, seconds: f32
     }
     let mut dst = PixmapMut::from_bytes(bytes, w, h).unwrap();
     dst.fill(color(palette[0]));
-    let rect = Rect::from_xywh(0., 0., w as f32, h as f32).unwrap();
-    let homes = [
-        [(0.76, 0.26), (0.24, 0.74), (0.58, 0.84), (0.32, 0.42)],
-        [(0.715, 0.387), (0.679, 0.705), (0.325, 0.535), (0.385, 0.849)],
-        [(0.609, 0.341), (0.371, 0.761), (0.688, 0.724), (0.87, 0.485)],
-        [(0.715, 0.387), (0.679, 0.705), (0.325, 0.535), (0.385, 0.849)],
-        [(0.87, 0.528), (0.135, 0.47), (0.291, 0.803), (0., 0.)],
-    ][(theme as usize).min(4)];
-    for (i, (x, y)) in homes.iter().enumerate() {
-        if theme == 4 && i == 3 {
-            continue;
+
+    let (stops, bubbles) = background::movers(theme.min(4));
+    let speed = if theme == 4 { 0.22 } else { 0.35 };
+    let time = if seconds.is_finite() { f64::from(seconds.max(0.)) } else { 0. };
+    for (i, mover) in stops.iter().enumerate() {
+        let (x,y,_) = background::position(*mover,time,speed,false);
+        // The source gradient stage extends 15% beyond each viewport edge.
+        // Scroll ghosts repeat at +/-140% of that stage to avoid wrap flashes.
+        for offset in [-140.,0.,140.] {
+            if time == 0. && offset != 0. { continue; }
+            let center=Point::from_xy((((x+offset)/100.*1.3-0.15)*f64::from(w)) as f32,
+                                     ((y/100.*1.3-0.15)*f64::from(h)) as f32);
+            let c=palette[i+1];
+            let r=((c>>16)&255) as f32;let g=((c>>8)&255) as f32;let b=(c&255) as f32;
+            let gray=0.213*r+0.715*g+0.072*b;
+            let channel=|v:f32|(gray+1.15*(v-gray)).round().clamp(0.,255.) as u32;
+            let rgb=channel(r)<<16|channel(g)<<8|channel(b);
+            let radius=w.max(h) as f32 * 0.6 * std::f32::consts::SQRT_2 * 0.68;
+            let sigma=(if theme==4 {10.}else if theme==0 {50.}else{45.})*pixel_scale();
+            let extent=radius+3.*sigma;
+            if center.x+extent<=0. || center.y+extent<=0. || center.x-extent>=w as f32 || center.y-extent>=h as f32 {continue;}
+            let profile=background::blurred_profile(radius,sigma);
+            let stops=profile.into_iter().map(|(t,a)|GradientStop::new(t,color(rgb|((a*255.).round() as u32)<<24))).collect();
+            let mut paint=Paint::default();
+            paint.shader=RadialGradient::new(center,0.,center,extent,stops,
+                SpreadMode::Pad,Transform::identity()).unwrap();
+            if let Some(bounds)=Rect::from_ltrb((center.x-extent).max(0.),(center.y-extent).max(0.),
+                (center.x+extent).min(w as f32),(center.y+extent).min(h as f32)) {
+                dst.fill_rect(bounds,&paint,Transform::identity(),None);
+            }
         }
-        let t = seconds * 0.035 * (0.65 + i as f32 * 0.17);
-        let px = ((*x + 0.2 + t).rem_euclid(1.4) - 0.2) * w as f32;
-        let py = (*y + 0.05 * (t * 3. + i as f32).sin()) * h as f32;
-        let center = Point::from_xy(px, py);
-        let mut paint = Paint::default();
-        let c = palette[i + 1];
-        paint.shader = RadialGradient::new(
-            center,
-            0.,
-            center,
-            w.max(h) as f32 * 0.8,
-            vec![
-                GradientStop::new(0., color(c)),
-                GradientStop::new(1., color(c & 0x00ffffff)),
-            ],
-            SpreadMode::Pad,
-            Transform::identity(),
-        )
-        .unwrap();
-        dst.fill_rect(rect, &paint, Transform::identity(), None);
     }
-    for i in 0..3 {
-        let phase = i as f32 * 1.7;
-        let px = (0.2 + i as f32 * 0.27 + 0.04 * (seconds * 0.07 + phase).sin()) * w as f32;
-        let py = (1.15 - (seconds * 0.024 + i as f32 * 0.33).rem_euclid(1.4)) * h as f32;
-        let radius = w.min(h) as f32 * (0.045 + i as f32 * 0.012);
-        let mut path = PathBuilder::new();
-        path.push_circle(px, py, radius);
-        let path = path.finish().unwrap();
-        let mut paint = Paint::default();
-        paint.set_color_rgba8(255, 255, 255, 22);
-        dst.fill_path(
-            &path,
-            &paint,
-            FillRule::Winding,
-            Transform::identity(),
-            None,
-        );
-        paint.set_color_rgba8(255, 255, 255, 90);
-        dst.stroke_path(
-            &path,
-            &paint,
-            &Stroke {
-                width: 1.2,
-                ..Stroke::default()
-            },
-            Transform::identity(),
-            None,
-        );
+    let gloss=[0x00eaf4fd,0x00fad0ac,0x00142c46,0x00fcd6f0,0x00eeffc4][theme.min(4) as usize];
+    let opacity=if theme==2 {0.5}else{1.};
+    let tint=|alpha:f32| color(gloss|((alpha*opacity*255.).round() as u32)<<24);
+    for mover in bubbles {
+        let (x,y,rotation)=background::position(mover,time,0.41,true);
+        let radius=mover.size as f32*pixel_scale()/2.;
+        for offset in [-140.,0.,140.] {
+            if time==0. && offset!=0. {continue;}
+            let px=(x/100.*f64::from(w)) as f32;
+            let py=((y+offset)/100.*f64::from(h)) as f32;
+            let mut path=PathBuilder::new();path.push_circle(px,py,radius);
+            let path=path.finish().unwrap();
+            let center=Point::from_xy(px,py);
+            let mut paint=Paint::default();
+            paint.shader=RadialGradient::new(center,0.,center,radius*std::f32::consts::SQRT_2,
+                vec![GradientStop::new(0.,tint(0.)),GradientStop::new(0.60,tint(0.)),
+                     GradientStop::new(0.74,tint(0.10)),GradientStop::new(0.92,tint(0.55)),
+                     GradientStop::new(1.,tint(0.15))],SpreadMode::Pad,Transform::identity()).unwrap();
+            dst.fill_path(&path,&paint,FillRule::Winding,Transform::identity(),None);
+            let angle=(rotation as f32).to_radians();
+            let dx=-0.36*radius;let dy=-0.44*radius;
+            let highlight=Point::from_xy(px+dx*angle.cos()-dy*angle.sin(),
+                                         py+dx*angle.sin()+dy*angle.cos());
+            paint.shader=RadialGradient::new(highlight,0.,highlight,
+                radius*2.*(0.68f32.hypot(0.72))*0.09,
+                vec![GradientStop::new(0.,tint(0.95)),GradientStop::new(1.,tint(0.))],
+                SpreadMode::Pad,Transform::identity()).unwrap();
+            dst.fill_path(&path,&paint,FillRule::Winding,Transform::identity(),None);
+        }
     }
     for p in bytes.chunks_exact_mut(4) {
         p.swap(0, 2);
@@ -479,7 +487,18 @@ pub unsafe extern "C" fn tangos_mesh(data: *mut u8, w: u32, h: u32, seconds: f32
 mod tests {
     use super::*;
     #[test]
-    fn mesh_is_deterministic_and_moves() {
+    fn caret_rotation_keeps_endpoints_and_renders_intermediate_angles() {
+        let mut down=vec![255;24*24*4];let mut zero=down.clone();
+        let mut middle=down.clone();let mut up=down.clone();
+        unsafe {
+            tangos_icon(down.as_mut_ptr(),24,24,18,0xff123456);
+            tangos_icon_rotated(zero.as_mut_ptr(),24,24,18,0xff123456,0.);
+            tangos_icon_rotated(middle.as_mut_ptr(),24,24,18,0xff123456,90.);
+            tangos_icon_rotated(up.as_mut_ptr(),24,24,18,0xff123456,180.);
+        }
+        assert_eq!(down,zero);assert_ne!(down,middle);assert_ne!(middle,up);
+    }
+    #[test]    fn mesh_is_deterministic_and_moves() {
         let mut a = vec![0u8; 64 * 48 * 4];
         let mut b = a.clone();
         let mut c = a.clone();

@@ -56,6 +56,8 @@ foreach ($name in @('build-b', 'build-a')) {
   }
 }
 Assert-FreeSpace
+python "$source/tests/generate_background_reference.py" --check
+if ($LASTEXITCODE) { throw 'Original background motion fixtures changed' }
 ctest --test-dir "$out/build-a" --output-on-failure
 if ($LASTEXITCODE) { throw 'Tests failed' }
 python "$source/tests/test_agent_adapter.py"

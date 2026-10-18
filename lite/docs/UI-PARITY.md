@@ -409,3 +409,29 @@ feed/event/identity/progress cases. Native cache state is project/configuration/
 principal scoped; stale generation requires reviewed approval and fresh data is
 not regenerated repeatedly. These checks do not certify full frontend/backend
 parity or every user-configured external service.
+## Project popup and motion checkpoint — 2026-10-17
+
+The project picker now opens a native rounded, opaque, themed panel rather than a
+Windows system menu. It follows the source's 6-pixel padding, 2-pixel row gaps,
+36-pixel rows, glyph/status spacing, 200 ms opening and 160 ms closing scale
+curves, 120 ms opacity easing and 160 ms caret rotation. Keyboard navigation,
+long-list scrolling, outside/Escape dismissal, reduced motion, input-capture
+release and pointer mapping at 96/106/120/132/192/216/384 simulated DPI pass.
+Work-area placement keeps long menus usable. Import/discovery/local actions and
+the existing project-selection safety gates remain available.
+
+The native background now follows the selected source presets' home spacing,
+calm speed caps, sine offsets, 140-percent wrap copies, extended gradient stage,
+fixed 90–190 CSS-pixel bubble sizes and rotated highlights. A compact cached
+Gaussian radial profile implements per-blob blur/saturation without allocating
+viewport-sized blur layers. 272 fixtures extracted from original TypeScript
+verify all five theme presets across resting, short, long and wrapped travel.
+Native homes are seeded for reproducible captures; the source randomizes them.
+Theme changes restart the animation and owned popups retain foreground motion.
+Splash bubble rise/opacity uses the source's ease-in keyframes and bottom offset.
+Card shadow interpolation now follows its separate 150 ms ease transition.
+
+These checks establish the implemented project-menu and selected motion behavior.
+They do not establish pixel-exact browser/native blur or font rasterization,
+physical mixed-monitor transitions, or complete animation parity for every
+other auxiliary popup and splash highlight/wordmark composition.

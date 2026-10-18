@@ -243,3 +243,10 @@ limits, HTTPS/loopback-only URL policy, URL-credential/header-injection checks
 and redirect refusal. It adds no account credentials, external writes or Git
 permissions. User-configured connection approvals and cache redaction still
 apply. Ordinary tool/MCP transport was not switched to this cancellation policy.
+The native project popup returns a selected existing action ID to the original
+review/confirmation flow. It performs no Git or network operations itself. Mouse
+capture and timers are released on dismissal and window teardown; DPI changes
+dismiss the popup rather than combining scales. Capture compaction is confined
+to a freshly created synthetic GUI fixture, skips links and incomplete writes,
+writes PNGs atomically, and preserves the raw image required for pixel assertions.
+No production dependency, user credential, asset or ROM data was introduced.

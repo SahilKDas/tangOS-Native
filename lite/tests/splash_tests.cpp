@@ -76,6 +76,12 @@ int main(int argc, char **argv) {
     owner = CreateWindowW(wc.lpszClassName, L"Disposable splash fixture", WS_POPUP, 0, 0, 1200, 800,
                           nullptr, nullptr, wc.hInstance, nullptr);
     expect(owner != nullptr, "Cannot create hidden GUI fixture");
+    expect(!splashBubbleFrame(-.1).visible && !splashBubbleFrame(1.1).visible,
+           "splash bubble delay/expiry wrong");
+    expect(splashBubbleFrame(0).opacity == 0 && splashBubbleFrame(1).opacity == 0,
+           "splash bubble opacity endpoints wrong");
+    expect(splashBubbleFrame(.15).opacity == .9 && splashBubbleFrame(.5).rise < .5,
+           "splash bubble reference ease-in/keyframe peak missing");
     int swaps = 0;
     ULONGLONG elapsed = 0;
     auto start = GetTickCount64();
