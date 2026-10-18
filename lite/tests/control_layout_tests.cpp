@@ -360,10 +360,27 @@ int main(int argc, char **argv) {
       state["connectedClients"] = 2;
       state["requestsSeen"] = 7;
       state["url"] = "http://127.0.0.1:12345/mcp";
+      state["manualSetup"] = "Public stdio command; credentials stay in the local connection file.";
       SendMessageW(popup, WM_TIMER, 1, 0);
       expect(label(GetDlgItem(popup, 8202)) == L"2" &&
                  label(GetDlgItem(popup, 8203)).find(L"7 req") != std::wstring::npos,
              "MCP popup failed live client/traffic refresh");
+      expect(label(GetDlgItem(popup, 8106)) == L"Copy URL" &&
+                 label(GetDlgItem(popup, 8102)) == L"Copy configuration",
+             "MCP URL and private configuration actions must be distinct");
+      SendMessageW(popup, WM_COMMAND, MAKEWPARAM(8106, BN_CLICKED), 0);
+      expect(actions.back() == lite::McpPopoverAction::copyEndpoint,
+             "Copy URL uses only endpoint action");
+      expect(!GetDlgItem(popup, 8206), "Manual setup stays collapsed until requested");
+      SendMessageW(popup, WM_COMMAND, MAKEWPARAM(8108, BN_CLICKED), 0);
+      SendMessageW(popup, WM_COMMAND, MAKEWPARAM(8107, BN_CLICKED), 0);
+      expect(actions.back() == lite::McpPopoverAction::copyManualSetup &&
+                 label(GetDlgItem(popup, 8206)).find(L"Public stdio") != std::wstring::npos,
+             "Manual setup can be inspected and explicitly copied");
+      state["outcome"] = "Claude Code: unchanged\nExisting settings preserved; reload the client.";
+      SendMessageW(popup, WM_TIMER, 1, 0);
+      expect(label(GetDlgItem(popup, 8207)).find(L"unchanged") != std::wstring::npos,
+             "Registration outcomes remain inline");
       auto endpoint = GetDlgItem(popup, 8205), prompt = GetDlgItem(popup, 8204);
       expect(endpoint && label(endpoint) == L"http://127.0.0.1:12345/mcp",
              "MCP endpoint stayed stale after a live snapshot update");

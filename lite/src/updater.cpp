@@ -6,6 +6,19 @@
 #include <stdexcept>
 namespace lite {
 namespace {
+void saveUpdateStatus(const fs::path &data, const Json &value) {
+  auto target = data / "updates" / "last-result.json";
+  fs::create_directories(target.parent_path());
+  auto temporary = target.parent_path() / (uniqueId() + ".status.tmp");
+  write(temporary, value.dump(2));
+  if (!MoveFileExW(temporary.c_str(), target.c_str(),
+                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    std::error_code ignored;
+    fs::remove(temporary, ignored);
+    throw std::runtime_error(
+        "Cannot save update recovery status; inspect the retained update files.");
+  }
+}
 bool https(const std::string &url) {
   if (url.rfind("https://", 0) != 0 || url.find_first_of("\r\n\t ") != url.npos)
     return false;
@@ -40,7 +53,7 @@ Json readReceipt(const fs::path &data, const fs::path &receipt) {
     throw std::runtime_error("Update candidate is outside the local update store");
   return value;
 }
-void spawn(const fs::path &program, const Args &args, bool visible = false) {
+DWORD spawn(const fs::path &program, const Args &args, bool visible = false) {
   Args command{utf8(program.wstring())};
   command.insert(command.end(), args.begin(), args.end());
   auto line = commandLine(command);
@@ -54,6 +67,7 @@ void spawn(const fs::path &program, const Args &args, bool visible = false) {
     throw std::runtime_error("Cannot launch portable update process");
   CloseHandle(process.hThread);
   CloseHandle(process.hProcess);
+  return process.dwProcessId;
 }
 } // namespace
 Json stagePortableUpdate(const fs::path &data, const Json &release, const std::string &assetPrefix,
@@ -113,12 +127,40 @@ Json stagePortableUpdate(const fs::path &data, const Json &release, const std::s
              {"targetSha256", sha256File(target)},
              {"version", release.value("version", release.value("tag_name", std::string()))}};
   write(receipt, value.dump(2));
-  return {{"state", "downloaded"},
-          {"version", value.at("version")},
-          {"receipt", utf8(fs::absolute(receipt).wstring())},
-          {"target", value.at("target")},
-          {"sha256", expected},
-          {"bytes", response.body.size()}};
+  auto result = Json{{"state", "downloaded"},
+                     {"version", value.at("version")},
+                     {"receipt", utf8(fs::absolute(receipt).wstring())},
+                     {"target", value.at("target")},
+                     {"sha256", expected},
+                     {"bytes", response.body.size()}};
+  saveUpdateStatus(data, result);
+  return result;
+}
+Json portableUpdateStatus(const fs::path &data, const fs::path &target) {
+  auto status = data / "updates" / "last-result.json";
+  if (!fs::exists(status))
+    return Json::object();
+  try {
+    if (!fs::is_regular_file(status) || fs::file_size(status) > 65536)
+      throw std::runtime_error("Invalid update status file; review the update store and retry.");
+    auto result = Json::parse(read(status));
+    if (result.contains("target") &&
+        fs::weakly_canonical(fs::u8path(result.at("target").get<std::string>())) !=
+            fs::weakly_canonical(target))
+      return Json::object();
+    if (result.value("state", std::string()) == "downloaded") {
+      auto receipt = readReceipt(data, fs::u8path(result.at("receipt").get<std::string>()));
+      auto candidate = fs::u8path(receipt.at("candidate").get<std::string>());
+      if (sha256File(target) != receipt.at("targetSha256") ||
+          sha256File(candidate) != receipt.at("sha256"))
+        throw std::runtime_error("Staged update or installed executable changed. Preview and "
+                                 "download again; current executable was not replaced.");
+      executable(candidate);
+    }
+    return result;
+  } catch (const std::exception &error) {
+    return {{"state", "error"}, {"message", error.what()}};
+  }
 }
 Json applyPortableUpdate(const fs::path &data, const fs::path &receipt) {
   auto value = readReceipt(data, receipt);
@@ -164,23 +206,44 @@ void launchPortableUpdate(const fs::path &data, const fs::path &receipt, unsigne
                  restart ? "restart" : "quit"});
 }
 int runPortableUpdateHelper(const fs::path &receipt, unsigned long parent, bool restart) {
-  auto process = OpenProcess(SYNCHRONIZE, FALSE, parent);
-  if (process) {
-    auto status = WaitForSingleObject(process, 60000);
-    CloseHandle(process);
-    if (status != WAIT_OBJECT_0)
-      return 1;
-  }
-  auto data = localData();
+  auto data = fs::weakly_canonical(receipt).parent_path().parent_path();
+  Json result = {{"state", "installing"}, {"receipt", utf8(receipt.wstring())}};
   try {
-    auto result = applyPortableUpdate(data, receipt);
-    write(data / "updates" / "last-result.json", result.dump(2));
-    if (restart)
-      spawn(fs::u8path(result.at("target").get<std::string>()), {}, true);
+    auto plan = readReceipt(data, receipt);
+    result["target"] = plan.at("target");
+    saveUpdateStatus(data, result);
+    auto process = OpenProcess(SYNCHRONIZE, FALSE, parent);
+    if (process) {
+      auto status = WaitForSingleObject(process, 60000);
+      CloseHandle(process);
+      if (status != WAIT_OBJECT_0)
+        throw std::runtime_error("The original application did not exit. Close it and retry the "
+                                 "retained staged update.");
+    } else if (GetLastError() != ERROR_INVALID_PARAMETER) {
+      throw std::runtime_error(
+          "Cannot verify that the original application exited. Close it and retry.");
+    }
+    result = applyPortableUpdate(data, receipt);
+    if (restart) {
+      try {
+        result["restartPid"] = spawn(fs::u8path(result.at("target").get<std::string>()), {}, true);
+        result["restartState"] = "started";
+      } catch (const std::exception &error) {
+        result["restartState"] = "error";
+        result["message"] =
+            std::string(error.what()) +
+            ". The update is installed; launch the target manually. Recovery copy: " +
+            result.at("backup").get<std::string>();
+        saveUpdateStatus(data, result);
+        return 1;
+      }
+    }
+    saveUpdateStatus(data, result);
     return 0;
   } catch (const std::exception &error) {
-    write(data / "updates" / "last-result.json",
-          Json{{"state", "error"}, {"message", error.what()}}.dump(2));
+    result["state"] = "error";
+    result["message"] = error.what();
+    saveUpdateStatus(data, result);
     return 1;
   }
 }

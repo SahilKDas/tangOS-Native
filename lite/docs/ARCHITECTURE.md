@@ -93,8 +93,9 @@ the project descriptor. `updater` separates trusted download staging from the
 post-exit helper transaction; it validates publisher checksums and executable
 headers, rechecks the installation baseline and retains a rollback executable.
 UI code owns confirmation and restart scheduling, while replacement remains in
-the isolated native service. Project discovery, automatic downloads and provider
-traffic require separate local opt-ins. Dev-only MCP Inspector and reference
+the isolated native service. Project discovery/descriptor downloads and provider
+traffic require separate local opt-ins. Portable update download/install remain
+manual; an opted-in automatic check only reports availability. Dev-only MCP Inspector and reference
 browser dependencies stay outside the portable executable.
 
 Remote project selection resolves through `projects.open` in the backend. A validated descriptor becomes a confined metadata cache; the main window stores its registry ID separately from the local repository path. ConsoleUI receives a remote-mode flag and does not instantiate execution services. Published reads use the existing connection layer; injected read-only transport makes the native GUI regression independent of external credentials and services.
@@ -120,3 +121,23 @@ The current release-build and GUI-verification storage floor is 11 GiB, with
 additional build headroom. Builds are serial and disposable outputs are removed
 after retaining evidence. Original React reference tools use an installed browser
 only for offline comparison and are excluded from the executable.
+## Five-journey lifecycle (0.38)
+
+Root-window state publications carry a request generation. Repository/settings
+selection commits after preparation succeeds; obsolete messages are discarded.
+Fleet restore verifies repository ownership, parks interrupted phases and preserves
+pending reviews. Draft revisions prevent asynchronous edit/undo overwrite. UI
+preferences and update status use atomic same-directory replacement. Failed Atlas
+refresh retains the prior model and exposes a stale notice.
+
+MCP's popup separates public endpoint copy, explicit private configuration copy,
+and expandable public stdio setup. The active server owns its connection path.
+Registration remains reviewed and baseline-bound; outcomes survive modal setup.
+Git synchronization previews include repository/branch/ref/SHA, affected files,
+remotes and backup root. Backup manifests distinguish staged and working content.
+Cancellation after reset stops further deletion and retains a phase-specific log.
+
+Update checks never authorize downloads. Manual download persists its receipt;
+manual restart launches the existing post-exit helper. Durable results distinguish
+replacement failure from successful installation with restart failure. The helper
+uses its validated receipt's store so isolated portable copies can be tested.

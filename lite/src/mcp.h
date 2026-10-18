@@ -8,12 +8,14 @@ int runMcpStdio(const fs::path &connection, const std::string &agent);
 class McpServer {
   struct Impl;
   std::unique_ptr<Impl> impl;
+  fs::path connectionFile;
 
 public:
   McpServer(Fleet &fleet, Descriptor descriptor, fs::path config, unsigned short port = 0);
   ~McpServer();
   unsigned short port() const;
   std::string configuration() const;
+  fs::path configurationPath() const { return connectionFile; }
   Json state() const;
 };
 } // namespace lite

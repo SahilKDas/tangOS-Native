@@ -1070,7 +1070,25 @@ int main() {
         "atomic reservation refusal stops work");
     // Destructive synchronization is tested only in this disposable repository.
     Repository fixtureGit(git, repo, settings);
+    fs::create_directories(repo / "src");
+    fs::create_directories(repo / "port");
+    write(repo / "src/sync-rename-fixture.cpp", "protected disposable fixture");
+    fixtureGit.git({"add", "src/sync-rename-fixture.cpp"});
+    fixtureGit.git({"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit",
+                    "--only", "-m", "source rename guard fixture", "--",
+                    "src/sync-rename-fixture.cpp"});
     auto base = trim(fixtureGit.git({"rev-parse", "HEAD"}));
+    fixtureGit.git({"mv", "src/sync-rename-fixture.cpp", "port/sync-rename-fixture.cpp"});
+    auto renamePreview = backend.invoke("git.syncPreview", {{"ref", "HEAD"}});
+    bool originalProtected = false;
+    for (auto &path : renamePreview.at("blocked"))
+      if (path == "src/sync-rename-fixture.cpp")
+        originalProtected = true;
+    expect(originalProtected,
+           "sync detects a protected rename source even when destination is allowed");
+    reject([&] { confirmed("git.sync", {{"ref", "HEAD"}}); },
+           "port-only sync cannot restore a renamed protected source");
+    fixtureGit.git({"mv", "port/sync-rename-fixture.cpp", "src/sync-rename-fixture.cpp"});
     expect(git.run({{"git", "update-ref", "refs/remotes/origin/main", base}, repo}).code == 0,
            "fixture upstream ref");
     fs::create_directories(repo / "port");
@@ -1081,12 +1099,30 @@ int main() {
                     repo})
                    .code == 0,
            "fixture local work");
+    write(repo / "port/change.txt", "staged edit");
+    fixtureGit.git({"add", "port/change.txt"});
     write(repo / "port/change.txt", "local edit");
     write(repo / "scratch.txt", "temporary work");
     write(repo / "local-assets/keep.bin", "user-owned local fixture");
     auto syncPreview = backend.invoke("git.syncPreview", {{"ref", "origin/main"}});
     expect(syncPreview["target"] == base && !syncPreview["remove"].empty(),
            "sync concrete commit and deletion preview");
+    expect(syncPreview["branch"].is_string() && syncPreview["backupRoot"].is_string() &&
+               syncPreview["affectedFiles"].is_array(),
+           "sync preview includes destination/branch/file/recovery metadata");
+    auto staleSync = backend.invoke("git.sync", {{"ref", "origin/main"}});
+    auto syncTicket = Json::parse(
+        read(data / "confirmations" / (staleSync.at("confirmation").get<std::string>() + ".json")));
+    expect(syncTicket.at("reviewedTarget") == base,
+           "sync approval pins the displayed SHA independently of a moving ref");
+    fixtureGit.git({"update-ref", "refs/remotes/origin/main", "HEAD"});
+    reject(
+        [&] {
+          backend.invoke("git.sync",
+                         {{"ref", "origin/main"}, {"confirmation", staleSync.at("confirmation")}});
+        },
+        "moving upstream invalidates synchronization confirmation");
+    fixtureGit.git({"update-ref", "refs/remotes/origin/main", base});
     auto sync = confirmed("git.sync", {{"ref", "origin/main"}});
     expect(sync["exit"] == 0 && trim(fixtureGit.git({"rev-parse", "HEAD"})) == base,
            "confirmed sync resets to reviewed target");
@@ -1094,9 +1130,35 @@ int main() {
            "sync preserves protected assets and deletes only previewed allowed files");
     expect(fs::exists(fs::u8path(sync["backup"]["backup"].get<std::string>()) / "port/change.txt"),
            "sync local edits backed up before reset");
+    auto backupRoot = fs::u8path(sync["backup"]["backup"].get<std::string>());
+    auto manifest = Json::parse(read(backupRoot / "manifest.json"));
+    bool indexRetained = false;
+    for (auto &entry : manifest.at("files"))
+      if (entry.at("path") == "port/change.txt" && entry.contains("indexFile"))
+        indexRetained = read(backupRoot / fs::u8path(entry.at("indexFile").get<std::string>())) ==
+                        "staged edit";
+    expect(indexRetained, "sync backup preserves staged content separately from working edits");
     expect(trim(fixtureGit.git({"rev-parse", sync["backup"]["recoveryRef"].get<std::string>()})) !=
                base,
            "unpushed history pinned for recovery");
+    write(repo / "cancelled-untracked.txt", "preserved after cancellation");
+    Runner syncRunner;
+    Backend cancellableSync(repo, data, settings, {}, requestHttp, &syncRunner,
+                            [&](const std::string &line) {
+                              if (line.find("Synchronization reset completed") != std::string::npos)
+                                syncRunner.cancel();
+                            });
+    auto cancelledPreview = cancellableSync.invoke("git.sync", {{"ref", "origin/main"}});
+    auto cancelledSync =
+        cancellableSync.invoke("git.sync", {{"ref", "origin/main"},
+                                            {"confirmation", cancelledPreview.at("confirmation")}});
+    expect(cancelledSync["exit"] == 130 && cancelledSync.value("cancelled", false) &&
+               fs::exists(repo / "cancelled-untracked.txt"),
+           "sync cancellation after reset preserves remaining untracked files");
+    expect(
+        read(fs::u8path(cancelledSync["log"].get<std::string>())).find("Cancelled after reset") !=
+            std::string::npos,
+        "partial sync cancellation retains actionable complete log");
     std::cout << count << " backend assertions passed; fixture=" << utf8(dir.wstring()) << "\n";
     return 0;
   } catch (const std::exception &e) {

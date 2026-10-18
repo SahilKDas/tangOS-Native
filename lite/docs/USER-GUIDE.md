@@ -185,8 +185,9 @@ release with a `TangOSLite.exe` asset and its `sha256:` digest. No connection or
 publisher is silently enabled.
 
 Help and updates can check releases, preview and confirm a download, then restart
-to install it. The separate automatic option stages an available update at
-startup and installs it when the application exits. The helper keeps a
+to install it. The automatic option checks availability only; downloading and
+installation remain separate manual actions. Ordinary quit does not install a
+staged download. The helper keeps a
 `.previous-…` executable beside the installation for manual rollback. Installation
 results remain in the local `updates/last-result.json`. Close other application
 copies if Windows prevents replacement. A failed checksum or changed executable
@@ -204,3 +205,35 @@ Controller. Start/stop the server there, copy its connection or AI prompt, or
 open full connection details. Add to Claude previews the local client change
 and retains a backup; an idle MCP profile may be created after confirmation.
 Assign its work separately. Provider accounts and credentials remain your own.
+
+## Recovery, MCP setup, synchronization and manual updates
+
+If a previous run was interrupted, inspect the preserved worktree and complete
+log before explicitly restarting it. Pending reviews and drafts remain local.
+A corrupt or mismatched Fleet file is retained and opens a recovery view: restore
+a valid copy at the displayed path and choose Retry. Viewer/help remain available.
+Failed Viewer refreshes retain usable data with a stale notice. An invalid
+project descriptor reload leaves the working configuration intact.
+
+In the MCP popup, Copy URL copies only the displayed public endpoint. Copy
+configuration explicitly copies private connection configuration. Manual setup
+expands a stdio server entry referencing the active local connection file; create
+an MCP agent with the specified name, configure your client, then reload it.
+Registration shows added/updated/unchanged or failure outcomes and backup paths.
+No API key is supplied by this application or its repository.
+
+Open synchronization from Settings. Enter a target ref or leave it blank for the
+configured upstream, then choose Preview sync or Create backup. Review the exact
+SHA, affected files, outgoing history, preserved assets and backup root before
+confirming. The Pull / push / PR tools button opens the existing reviewed Git tools. The resulting manifest includes
+separate staged content when it differs from working files. A cancelled reset may
+already have changed HEAD: inspect status and the retained backup before retrying.
+Push and rolling-PR operations continue through the reviewed Git tools.
+
+Updates are manual. An enabled automatic check only announces availability.
+In Help, check the source, preview/confirm a trusted checksum-verified download,
+then explicitly choose Restart and update. Ordinary quit does not install it.
+Reopening Help restores staged status or the previous helper result. If replacement
+fails, inspect the retained receipt/candidate and close other copies before retrying.
+If installation succeeds but restart fails, launch the displayed target manually;
+the previous executable remains at the reported recovery path.

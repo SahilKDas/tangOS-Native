@@ -405,8 +405,27 @@ void Fleet::enqueueDraft(const std::string &id) {
     batchBook.setDraft({{"title", "Batch draft"}, {"prompt", ""}, {"items", Json::array()}});
   saveLocked();
 }
-void Fleet::handoff(const std::string &batchId, const std::string &destination) {
-  auto claims = backend("claims.read", Json::object());
+void Fleet::handoff(const std::string &batchId, const std::string &destination,
+                    std::atomic<bool> *stop) {
+  auto cancelled = [&] {
+    if (stop && stop->load())
+      throw std::runtime_error("Handoff cancelled; ownership and queues were not changed.");
+  };
+  cancelled();
+  Settings prefs;
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    prefs = settings;
+  }
+  Transport transport = stop ? Transport([stop](const auto &url, const auto &method,
+                                                const auto &body, const auto &headers) {
+    return requestHttpCancelable(url, method, body, headers, *stop);
+  })
+                             : Transport(requestHttp);
+  auto claims =
+      Backend(repository, directory.parent_path().parent_path(), prefs, vault.values(), transport)
+          .invoke("claims.read", Json::object(), 1000);
+  cancelled();
   std::lock_guard<std::mutex> lock(mutex);
   auto batches = batchBook.snapshot();
   auto found = std::find_if(batches.begin(), batches.end(),
@@ -434,6 +453,7 @@ void Fleet::handoff(const std::string &batchId, const std::string &destination) 
       for (auto &row : job.second->state.queue)
         if (moving.count(batchTarget(row)))
           throw std::runtime_error("Handoff would duplicate a reserved target");
+  cancelled();
   auto previousBook = batchBook;
   auto previousFrom = from ? from->state : AgentState{};
   auto previousTo = to ? to->state : AgentState{};

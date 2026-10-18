@@ -15,6 +15,7 @@ struct HelperState {
 Json currentAnnouncement();
 Json richTextRuns(const std::string &text);
 Json updateStatus(const std::string &current, const Json &release);
+std::string gitServiceText(const std::string &method, const Json &result);
 std::string supportResultText(const Json &result);
 Json updatePresentation(const Json &downloaded, const Json &current);
 Json parseGuide(std::string text, bool tour);

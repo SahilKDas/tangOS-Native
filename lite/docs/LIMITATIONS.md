@@ -19,3 +19,19 @@ Backend services and user-owned connection configuration are documented in BACKE
 
 - Remote registry discovery, descriptor downloading with offline cache, safe ZIP import and clone-to-project switching are implemented. Discovery and network downloads are opt-in. Published database availability depends on the project endpoint or the user's enabled `atlas.live` connection. Remote source/disassembly and work assignment require a checkout. Full Console parity remains incomplete.
 - The official MCP Inspector CLI has exercised the native stdio bridge. Request cancellation and concurrent stdio input are tested, including cross-session isolation and EOF cleanup. Modern 2026-07-28 discovery and per-request metadata now have HTTP and stdio integration coverage. This does not establish interoperability with every desktop client or paid provider, or every optional MCP capability.
+
+## Five-journey scope — 0.38
+
+The native recovery, MCP, batch/review, synchronization and manual-update journeys
+have additional implementation and automated coverage. This does not certify all
+133 Console public contracts or whole-screen pixel parity. New differential cases
+cover original updater eligibility and packaged UI preference transitions; native
+fault cases cover corruption, cancellation, interrupted work and update restart.
+Physical mixed-monitor, unavailable hosted clients/providers and ROM/compiler
+coverage remain separate unresolved validation. Conflict editing stays external.
+The v0.38 development candidate includes the five journey implementations, but
+final runtime validation is paused by explicit user instruction while C: is below
+11 GiB free. A compiled deferred-control-rebuild fix still requires its GUI
+regression run. Final preference comparisons, packaged journeys and reproducible
+release builds are pending. Keep using the verified v0.37 portable package until
+these gates pass; the candidate does not establish full parity.

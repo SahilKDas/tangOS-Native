@@ -418,7 +418,7 @@ struct McpServer::Impl {
                            : supported.front();
         result = {{"protocolVersion", version},
                   {"capabilities", {{"tools", Json::object()}}},
-                  {"serverInfo", {{"name", "TangOS Lite"}, {"version", "0.37.0"}}},
+                  {"serverInfo", {{"name", "TangOS Lite"}, {"version", "0.38.0"}}},
                   {"instructions", "Pull next_batch and follow its scoped AGENTS.md instructions. "
                                    "Work only in the assigned worktree."}};
       } else if (method == "ping")
@@ -565,7 +565,7 @@ struct McpServer::Impl {
       if (modern) {
         result["resultType"] = "complete";
         result["_meta"]["io.modelcontextprotocol/serverInfo"] = {{"name", "TangOS Lite"},
-                                                                 {"version", "0.37.0"}};
+                                                                 {"version", "0.38.0"}};
         if (method == "tools/list") {
           result["ttlMs"] = 0;
           result["cacheScope"] = "private";
@@ -766,7 +766,7 @@ struct McpServer::Impl {
   }
 };
 McpServer::McpServer(Fleet &fleet, Descriptor descriptor, fs::path config, unsigned short port)
-    : impl(std::make_unique<Impl>(fleet, std::move(descriptor))) {
+    : impl(std::make_unique<Impl>(fleet, std::move(descriptor))), connectionFile(std::move(config)) {
   WSADATA data;
   if (WSAStartup(MAKEWORD(2, 2), &data))
     throw std::runtime_error("Winsock startup failed");
@@ -787,7 +787,7 @@ McpServer::McpServer(Fleet &fleet, Descriptor descriptor, fs::path config, unsig
   int size = sizeof(addr);
   getsockname(impl->listener, (sockaddr *)&addr, &size);
   impl->boundPort = ntohs(addr.sin_port);
-  write(config, configuration());
+  write(connectionFile, configuration());
   impl->server = std::thread([this] {
     while (!impl->stopping) {
       auto client = accept(impl->listener, nullptr, nullptr);

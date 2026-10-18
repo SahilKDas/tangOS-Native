@@ -70,6 +70,10 @@ python "$source/tests/test_remote_confirmation.py" --exe "$out/build-a/TangOSLit
 if ($LASTEXITCODE) { throw 'Remote confirmation safety tests failed' }
 python "$source/tests/test_backend_cli.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Packaged backend tests failed' }
+python "$source/tests/test_update_reference.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Original updater comparisons failed' }
+python "$source/tests/test_update_journey.py" --exe "$out/build-a/TangOSLite.exe"
+if ($LASTEXITCODE) { throw 'Actual portable update/restart journey failed' }
 python "$source/tests/test_workflows_cli.py" --exe "$out/build-a/TangOSLite.exe"
 if ($LASTEXITCODE) { throw 'Packaged Git workflow tests failed' }
 python "$source/tests/test_project_import_cli.py" --exe "$out/build-a/TangOSLite.exe"
@@ -131,15 +135,23 @@ $evidence = Join-Path $out 'verification-evidence'
 New-Item -ItemType Directory -Force $evidence | Out-Null
 foreach ($scenario in @('gui-fixture', 'gui-descriptor-missing', 'gui-descriptor-invalid')) {
   & "$source/scripts/gui-smoke.ps1" -Executable "$out/TangOSLite.exe" -FixtureDir "$out/$scenario" -MinimumFreeGiB $MinimumFreeGiB -MissingDescriptor:($scenario -eq 'gui-descriptor-missing') -InvalidDescriptor:($scenario -eq 'gui-descriptor-invalid')
+  if ($scenario -eq 'gui-fixture') {
+    python "$source/tests/test_preference_state_reference.py" --trace "$out/$scenario/preference-state-trace.json"
+    if ($LASTEXITCODE) { throw 'Original preference state comparisons failed' }
+  }
   $destination = Join-Path $evidence $scenario
   New-Item -ItemType Directory -Force $destination | Out-Null
   Get-ChildItem -LiteralPath "$out/$scenario" -File -Filter '*report.txt' | Copy-Item -Destination $destination
+  foreach ($name in @("preference-state-trace.json", "display-validation.json", "viewer-large-database.json")) {
+    $file = Join-Path "$out/$scenario" $name
+    if ((Test-Path -LiteralPath $file) -and (Get-Item -LiteralPath $file).Length -lt 262144) { Copy-Item -LiteralPath $file -Destination $destination }
+  }
   if (-not $KeepBuildArtifacts) { Remove-GeneratedDirectory "$out/$scenario" }
 }
 $imports = & objdump -p "$out/TangOSLite.exe" | Select-String 'DLL Name:' | ForEach-Object { $_.Line.Trim() }
 $compiler = (& g++ --version | Select-Object -First 1)
 $cmake = (& cmake --version | Select-Object -First 1)
-$report = "TangOS Lite 0.37.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
+$report = "TangOS Lite 0.38.0 Windows x64`nBytes: $size`nDecimal MB: $([math]::Round($size / 1000000, 3))`nSHA256: $hash`nTwo clean builds: identical`n$compiler`n$cmake`nImports:`n$($imports -join "`n")`n"
 Set-Content -LiteralPath "$out/SIZE.txt" -Value $report -Encoding utf8
 Copy-Item -LiteralPath "$source/README.md" -Destination "$out/README.md"
 Copy-Item -LiteralPath "$source/../LICENSE" -Destination "$out/LICENSE"

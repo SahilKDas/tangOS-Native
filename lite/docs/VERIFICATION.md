@@ -827,3 +827,31 @@ This release does not establish full parity. UI composition/interaction differen
 physical mixed-monitor transitions, exhaustive client/provider compatibility and
 ROM/compiler-dependent validation remain open. Earlier real-check failures remain
 failures; fixture passes do not replace them. See LIMITATIONS.md and UI-PARITY.md.
+## 0.38 development validation
+
+The first combined development pass passed all ten native suites (187.67 seconds),
+146 Fleet assertions, 252 backend assertions, all six actual disposable helper
+cases (including native GUI restart and execute-denied restart failure), nine
+original updater eligibility comparisons and the native GUI workflow at 120 DPI
+with 12 responsive ticks. Source inspection then added cancellable asynchronous
+handoff, an explicit sync form, original preference-state traces and a further
+sync cancellation boundary. Final source validation and reproducible release
+packaging remain pending; the verified default executable remains 0.37.
+### Validation paused at the user's 11 GiB storage floor
+
+The final backend safety suite passed with 258 assertions, including protected
+rename sources and synchronization pinned to the reviewed target SHA. A later GUI
+run exposed a COMCTL32 crash when a combo-box notification rebuilt its own parent.
+The candidate now defers rebuilding controls until the native notification returns
+and the combo closes. That fix compiled successfully, but its GUI rerun was blocked
+by the storage guard; it has not been verified at runtime.
+
+On 2026-10-18, C: fell below the 11 GiB floor (about 9.15 GiB after owned fixture
+cleanup). The user explicitly requested keeping that floor and pausing runtime
+validation. No further builds, executable tests or GUI scenarios will run while
+that pause applies. Final preference-state comparisons, the complete final-source
+five-journey scenarios and two byte-identical clean release builds remain pending.
+The v0.38 source checkpoint is a development candidate, not a verified release.
+The default portable executable remains the verified v0.37 package above.
+Compact failure reports and debugger evidence remain under
+lite/out/evidence-038-development; completed disposable fixtures were removed.

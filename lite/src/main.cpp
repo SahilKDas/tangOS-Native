@@ -22,7 +22,7 @@
 #include <windows.h>
 using namespace lite;
 namespace {
-constexpr UINT OUTPUT = WM_APP + 1, DONE = WM_APP + 2, REVIEW = WM_APP + 3, STATE = WM_APP + 4;
+constexpr UINT OUTPUT = WM_APP + 1, DONE = WM_APP + 2, REVIEW = WM_APP + 3, STATE = WM_APP + 4, UPDATE_NOTICE = WM_APP + 5;
 HWND window, repoEdit, statusEdit, logEdit, checkCombo, actionCombo, remoteEdit, refEdit,
     detailsEdit, runButton, actionButton, cancelButton, activityLabel;
 HFONT uiFont, monoFont;
@@ -34,8 +34,10 @@ Settings settings;
 fs::path config, repo, logPath, dataDir, consoleRepository;
 std::thread worker;
 std::atomic<bool> busy{false};
+uint64_t stateGeneration = 0;
+thread_local uint64_t publicationGeneration = 0;
 std::mutex outputMutex;
-std::string pending;
+std::string pending, updateNotice;
 std::vector<Check> checks;
 bool smoke = false;
 int smokePhase = 0, smokeExit = 0, smokeTicks = 0;
@@ -209,7 +211,7 @@ std::string resourceText(int id) {
 }
 void about() {
   reviewDialog(
-      "TangOS Lite 0.37.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
+      "TangOS Lite 0.38.0\nPortable native Windows repository workbench.\nUse Encyclopedia "
       "for checks and Git; Repository for status.\nAlways read AGENTS.md and review "
       "changes before publication.\n\n" +
           resourceText(204) + "\n\nMinGW-w64 libwinpthread\n" + resourceText(202) +
@@ -239,7 +241,9 @@ void start(const std::function<void()> &job, bool projectSwitch = false) {
   EnableWindow(cancelButton, TRUE);
   set(activityLabel, "Running - output saved continuously. Cancel stops the process tree.");
   InvalidateRect(window, nullptr, FALSE);
-  worker = std::thread([job] {
+  auto generation = ++stateGeneration;
+  worker = std::thread([job, generation] {
+    publicationGeneration = generation;
     try {
       job();
     } catch (const std::exception &e) {
@@ -247,7 +251,7 @@ void start(const std::function<void()> &job, bool projectSwitch = false) {
       if (smoke)
         smokeExit = 1;
     }
-    PostMessageW(window, DONE, 0, 0);
+    PostMessageW(window, DONE, WPARAM(generation), 0);
   });
 }
 void selectRepo(std::string projectId = {}) {
@@ -255,29 +259,29 @@ void selectRepo(std::string projectId = {}) {
     throw std::runtime_error("Stop agents before switching repositories");
   auto selected = fs::u8path(value(repoEdit));
   start([selected, projectId] {
-    Repository r(runner, selected, settings);
-    repo = r.root;
-    workspaceRemote = false;
-    settings.repository = utf8(repo.wstring());
-    settings.activeProject = projectId.empty() ? settings.repository : projectId;
-    saveSettings(config, settings);
-    Json entry{{"id", settings.activeProject},
-               {"repository", settings.repository},
-               {"title", utf8(repo.filename().wstring())}};
+    auto next = settings;
+    Repository r(runner, selected, next);
+    auto selectedRoot = r.root;
+    next.repository = utf8(selectedRoot.wstring());
+    next.activeProject = projectId.empty() ? next.repository : projectId;
+    Json entry{{"id", next.activeProject}, {"repository", next.repository},
+               {"title", utf8(selectedRoot.filename().wstring())}};
     try {
-      auto descriptor = loadDescriptor(repo);
+      auto descriptor = loadDescriptor(selectedRoot);
       entry["title"] = descriptor.title;
       entry["descriptor"] = descriptor.document;
-    } catch (...) {
-      // Repositories without a descriptor can still be remembered and set up.
-    }
-    Backend registry(repo, dataDir, settings);
-    // Selecting a local repository authorizes remembering it in local settings.
+    } catch (...) { /* Descriptor setup remains available for a new checkout. */ }
+    auto status = r.status();
+    Backend registry(selectedRoot, dataDir, next);
     auto preview = registry.invoke("projects.register", entry);
     entry["confirmation"] = preview.at("confirmation");
     registry.invoke("projects.register", entry);
-    auto s = new std::string(r.status());
-    PostMessageW(window, STATE, 0, (LPARAM)s);
+    if (runner.isCancelled()) throw std::runtime_error("Project switch cancelled; previous selection retained");
+    saveSettings(config, next);
+    repo = selectedRoot;
+    workspaceRemote = false;
+    settings = std::move(next);
+    PostMessageW(window, STATE, WPARAM(publicationGeneration), reinterpret_cast<LPARAM>(new std::string(status)));
   });
 }
 void openProjectState(const std::string &id) {
@@ -286,15 +290,19 @@ void openProjectState(const std::string &id) {
   auto preview = backend.invoke("projects.open", args);
   args["confirmation"] = preview.at("confirmation");
   auto opened = backend.invoke("projects.open", args);
-  repo = fs::u8path(opened.at("path").get<std::string>());
-  workspaceRemote = !opened.at("cloned").get<bool>();
-  settings.activeProject = id;
-  settings.repository = workspaceRemote ? std::string() : utf8(repo.wstring());
-  saveSettings(config, settings);
-  auto status = workspaceRemote ? "Viewer-only project: " + opened.value("title", id) +
-                                      "\nNo checkout, tools or agents are running."
-                                : Repository(runner, repo, settings).status();
-  PostMessageW(window, STATE, 0, (LPARAM) new std::string(status));
+  auto selectedRoot = fs::u8path(opened.at("path").get<std::string>());
+  bool remote = !opened.at("cloned").get<bool>();
+  auto next = settings;
+  next.activeProject = id;
+  next.repository = remote ? std::string() : utf8(selectedRoot.wstring());
+  auto status = remote ? "Viewer-only project: " + opened.value("title", id) + "\nNo checkout, tools or agents are running."
+                       : Repository(runner, selectedRoot, next).status();
+  if (runner.isCancelled()) throw std::runtime_error("Project switch cancelled; previous selection retained");
+  saveSettings(config, next);
+  repo = selectedRoot;
+  workspaceRemote = remote;
+  settings = std::move(next);
+  PostMessageW(window, STATE, WPARAM(publicationGeneration), reinterpret_cast<LPARAM>(new std::string(status)));
 }
 void selectProject(const std::string &id) {
   if (busy || projectSwitchPending)
@@ -390,7 +398,7 @@ void refresh() {
   start([] {
     Repository r(runner, repo, settings);
     auto s = new std::string(r.status());
-    PostMessageW(window, STATE, 0, (LPARAM)s);
+    PostMessageW(window, STATE, WPARAM(publicationGeneration), (LPARAM)s);
   });
 }
 void runCheck() {
@@ -652,7 +660,7 @@ void paintChrome(HDC dc, int w, int h) {
     skin::label(dc, L"Repository status", rail + 16, 345, 308, 24, 14, true);
   skin::label(dc, L"Port-only  ·  Review before push", rail + 16, h - 139, 300, 23, 12, true, true);
   skin::mascot(dc, w - 137, h - 127, 96);
-  skin::label(dc, L"v0.37.0", w - 74, h - 27, 60, 18, 10, false, true);
+  skin::label(dc, L"v0.38.0", w - 74, h - 27, 60, 18, 10, false, true);
 }
 void snapshot(const fs::path &path) {
   dpi::Scope scale(dpi::forWindow(window));
@@ -701,7 +709,7 @@ fs::path saveDebugSnapshot() {
   fs::create_directories(folder);
   snapshot(folder / "window.bmp");
   Json state = {{"app", "TangOS Lite"},
-                {"version", "0.37.0"},
+                {"version", "0.38.0"},
                 {"capturedAt", activityNow()},
                 {"toolboxOpen", toolboxOpen},
                 {"repositoryView", repositoryView},
@@ -861,20 +869,15 @@ void automaticUpdate() {
   if (!profiles.contains("update.check"))
     return;
   auto profile = profiles["update.check"];
-  if (!profile.value("enabled", false) || !profile.value("automatic", false) ||
-      !profile.value("allowUpdateDownloads", false))
+  if (!profile.value("enabled", false) || !profile.value("automatic", false))
     return;
   start([] {
     Backend backend(repo, dataDir, settings, Vault(dataDir / "vault").values(), requestHttp,
                     &runner, output);
-    auto args = Json::object();
-    auto ticket = backend.invoke("update.stage", args);
-    args["confirmation"] = ticket.at("confirmation");
-    auto result = backend.invoke("update.stage", args);
-    if (result.value("state", std::string()) == "downloaded")
-      PostMessageW(
-          window, CONSOLE_UPDATE_STAGED, 0,
-          reinterpret_cast<LPARAM>(new std::string(result.at("receipt").get<std::string>())));
+    auto result = backend.invoke("update.check", Json::object());
+    auto update = result.value("update", Json::object());
+    if (update.value("state", std::string()) == "available")
+      PostMessageW(window, UPDATE_NOTICE, 0, reinterpret_cast<LPARAM>(new std::string("Update " + update.value("version", std::string()) + " available. Open Help to preview a manual download.")));
   });
 }
 void automaticDiscovery() {
@@ -919,6 +922,11 @@ void automaticDiscovery() {
 }
 LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   switch (m) {
+  case UPDATE_NOTICE: {
+    std::unique_ptr<std::string> notice(reinterpret_cast<std::string *>(l));
+    if (notice) { updateNotice = *notice; set(activityLabel, updateNotice); }
+    return 0;
+  }
   case CONSOLE_UPDATE_STAGED:
   case CONSOLE_UPDATE_INSTALL: {
     std::unique_ptr<std::string> receipt(reinterpret_cast<std::string *>(l));
@@ -928,6 +936,10 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         (busy || projectSwitchPending || (consoleUI && consoleUI->running()))) {
       MessageBoxW(h, L"Stop active checks and agents before restarting into the update.", L"Update",
                   MB_OK | MB_ICONINFORMATION);
+      return 0;
+    }
+    if (m == CONSOLE_UPDATE_STAGED) {
+      set(activityLabel, "Update downloaded. Choose Restart and update to install; ordinary quit will not install it.");
       return 0;
     }
     pendingUpdateReceipt = fs::u8path(*receipt);
@@ -1337,8 +1349,17 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return 0;
   }
   case CONSOLE_RELOAD:
-    consoleRepository.clear();
-    refresh();
+    try {
+      if (busy || (consoleUI && consoleUI->running()))
+        throw std::runtime_error("Stop active operations before reloading the descriptor.");
+      // Validate completely before invalidating the working UI and its Fleet.
+      loadDescriptor(repo);
+      consoleRepository.clear();
+      refresh();
+    } catch (const std::exception &error) {
+      output("\nDescriptor reload rejected; active configuration preserved.\n" + std::string(error.what()) + "\n");
+      set(activityLabel, "Descriptor reload failed; active configuration preserved. Inspect the log and retry.");
+    }
     return 0;
   case CONSOLE_OPEN_REPO: {
     std::unique_ptr<std::string> path(reinterpret_cast<std::string *>(l));
@@ -1367,9 +1388,9 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     dpi::sendMessage(h, WM_COMMAND, MAKEWPARAM(REPOSITORY_TAB, BN_CLICKED), 0);
     return 0;
   case STATE: {
-    auto *s = (std::string *)l;
+    std::unique_ptr<std::string> s(reinterpret_cast<std::string *>(l));
+    if (w != stateGeneration) return 0;
     set(statusEdit, *s);
-    delete s;
     set(repoEdit, settings.repository);
     if (!workspaceRemote)
       fillChecks();
@@ -1414,8 +1435,8 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             layout(r.right, r.bottom);
           },
           [](const Settings &next) {
+            saveSettings(config, next);
             settings = next;
-            saveSettings(config, settings);
           },
           false, std::string(), std::function<void(Json)>(), workspaceRemote);
     }
@@ -1431,6 +1452,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       return 0;
     }
   case DONE:
+    if (w && w != stateGeneration) return 0;
     if (worker.joinable())
       worker.join();
     busy = false;
@@ -1451,8 +1473,7 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     EnableWindow(runButton, TRUE);
     EnableWindow(actionButton, TRUE);
     EnableWindow(cancelButton, FALSE);
-    set(activityLabel, "Finished - inspect output and full log. Refresh status "
-                       "after Git changes.");
+    set(activityLabel, updateNotice.empty() ? "Finished - inspect output and full log. Refresh status after Git changes." : updateNotice);
     if (smoke) {
       if (smokePhase == 1 && !repo.empty() && !smokeExit) {
         auto remembered = Backend(repo, dataDir, settings).invoke("projects.list");
@@ -1536,6 +1557,9 @@ LRESULT CALLBACK WindowProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (smoke && smokePhase == 2)
       ++smokeTicks;
     if (smoke && smokePhase == 0) {
+      auto before = value(statusEdit);
+      SendMessageW(h, STATE, WPARAM(stateGeneration + 1), reinterpret_cast<LPARAM>(new std::string("obsolete project result")));
+      if (value(statusEdit) != before) smokeExit = 1;
       set(activityLabel, "Previous status to replace completely.");
       UpdateWindow(activityLabel);
       set(activityLabel, "Ready - port-only safety is enabled by default.");

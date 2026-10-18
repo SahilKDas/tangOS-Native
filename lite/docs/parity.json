@@ -428,8 +428,10 @@
     },
     {
       "contract": "setRepo",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/src/main.cpp; transactional selection and generation-tagged GUI smoke publication"
+      ],
       "kind": "api"
     },
     {
@@ -534,8 +536,10 @@
     },
     {
       "contract": "connect",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/control_layout_tests.cpp; native MCP popup clipboard/manual setup and client setup fixtures"
+      ],
       "kind": "api"
     },
     {
@@ -612,20 +616,26 @@
     },
     {
       "contract": "checkAppUpdate",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/test_update_reference.py; original Console numeric eligibility oracle"
+      ],
       "kind": "api"
     },
     {
       "contract": "quitAndInstall",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/test_update_journey.py; actual helper/restarted native window and failure cases"
+      ],
       "kind": "api"
     },
     {
       "contract": "onAppUpdate",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/test_update_journey.py; durable native status, manual-policy adaptation; exact Electron event shape unverified"
+      ],
       "kind": "api"
     },
     {
@@ -899,20 +909,26 @@
     },
     {
       "contract": "repoSyncPreview",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/backend_tests.cpp; exact target, affected files and recovery metadata"
+      ],
       "kind": "api"
     },
     {
       "contract": "repoBackup",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/backend_tests.cpp; separately retained staged and working content"
+      ],
       "kind": "api"
     },
     {
       "contract": "repoSync",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/tests/backend_tests.cpp; stale ref rejection, backup and cancellation boundary"
+      ],
       "kind": "api"
     },
     {
@@ -1008,8 +1024,10 @@
     },
     {
       "contract": "onState",
-      "state": "unverified",
-      "evidence": [],
+      "state": "partial",
+      "evidence": [
+        "lite/src/main.cpp; native generation rejection only; full reference snapshot/event equivalence unverified"
+      ],
       "kind": "api"
     }
   ],

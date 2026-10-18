@@ -414,6 +414,10 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
       reject([&] { fleet.enqueue(first, Json::array({{{"id", "global-only"}}})); },
              "global reservation prevents duplicate assignment");
       auto beforeHandoff = fleet.batches();
+      std::atomic<bool> cancelHandoff{true};
+      reject([&] { fleet.handoff(global, first, &cancelHandoff); },
+             "cancelled handoff does not execute");
+      expect(fleet.batches() == beforeHandoff, "cancelled handoff preserves global ownership");
       auto lockedHandoff = CreateFileW(statePath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
                                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
       expect(lockedHandoff != INVALID_HANDLE_VALUE, "handoff persistence lock fixture");

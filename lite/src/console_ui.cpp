@@ -2,6 +2,7 @@
 #include "popover_motion.h"
 #include "vault_popover.h"
 #include "mcp_popover.h"
+#include "updater.h"
 #include <cctype>
 #include "console_ui.h"
 #include "help.h"
@@ -157,8 +158,11 @@ enum class Screen {
   remoteGate,
   clone,
   support,
-  reference
+  reference,
+  recovery,
+  gitSync
 };
+constexpr int SYNC_REF=4660, SYNC_PREVIEW=4661, SYNC_CONFIRM=4662, SYNC_BACKUP=4663, SYNC_TOOLS=4664, SYNC_CANCEL=4665;
 constexpr int REQUIREMENTS = 4480, REQ_REFRESH = 4481, REQ_TERMINAL = 4482, REQ_GITHUB = 4483,
               REQ_COPY = 4484;
 constexpr int QUEUE = 4470, QUEUE_UP = 4471, QUEUE_DOWN = 4472, QUEUE_REMOVE = 4473,
@@ -227,6 +231,24 @@ struct ConsoleUI::Impl {
   std::vector<AgentState> agents;
   std::string selectedId, profileId, toolId;
   bool allowWrites = false, advancedMode = false, runDock = false, rebuilding = false;
+  int nativeNotificationDepth = 0;
+  bool deferredBuild = false, deferredSettingsBuild = false;
+  struct NativeNotification {
+    int &depth;
+    explicit NativeNotification(int &value) : depth(value) { ++depth; }
+    ~NativeNotification() { --depth; }
+  };
+  static bool hasOpenCombo(HWND parent) {
+    bool found = false;
+    if (parent) EnumChildWindows(parent, [](HWND child, LPARAM context) -> BOOL {
+      wchar_t kind[32]{}; GetClassNameW(child, kind, 32);
+      if (std::wstring(kind) == L"ComboBox" && SendMessageW(child, CB_GETDROPPEDSTATE, 0, 0)) {
+        *reinterpret_cast<bool *>(context) = true; return FALSE;
+      }
+      return TRUE;
+    }, reinterpret_cast<LPARAM>(&found));
+    return found;
+  }
   int width = 800, height = 720, tourStep = 0, scroll = 0;
   bool tipsMode = false;
   Json guideSteps = Json::array();
@@ -266,7 +288,7 @@ struct ConsoleUI::Impl {
   size_t pickedFunction = SIZE_MAX;
   HWND batchList = nullptr, batchTitle = nullptr, batchPrompt = nullptr;
   Json batchRows = Json::array(), draftRows = Json::array();
-  std::atomic<bool> draftReady{false};
+  std::atomic<bool> draftReady{false}, stopHandoff{false};
   std::string draftError;
   Json statsBaseline = Json::object();
   Json presence = Json::array();
@@ -362,6 +384,7 @@ struct ConsoleUI::Impl {
   std::string supportDescription;
   Json portableUpdate = Json::object();
   Json clientInstallResult = Json::object();
+  std::string recoveryError, syncRef;
 
   std::vector<Tile> tiles;
   std::string atlasQuery, atlasMode = "ov", atlasFilter = "all", cachedLayout;
@@ -437,6 +460,7 @@ struct ConsoleUI::Impl {
       }
       if (!viewerOnly && !remoteOnly) {
         auto project = data / "projects" / fs::u8path(std::to_string(hash));
+        try {
         fleet = std::make_unique<Fleet>(repository, project, descriptor, settings,
                                         [this](const std::string &s) {
                                           std::lock_guard<std::mutex> lock(outputMutex);
@@ -448,6 +472,11 @@ struct ConsoleUI::Impl {
         fs::create_directories(data / "vault");
         if (mcpDesired)
           mcp = std::make_unique<McpServer>(*fleet, descriptor, project / "mcp-client.json");
+        } catch (const std::exception &error) {
+          recoveryError = "Fleet recovery is blocked. The saved state and worktrees were retained.\n" + utf8((project / "fleet.json").wstring()) + "\n\n" + error.what() + "\n\nRestore a valid state copy, then choose Retry. Viewer and help remain available.";
+          fleet.reset();
+          screen = Screen::recovery;
+        }
       }
       atlasReady = true;
       if (!remoteOnly)
@@ -503,6 +532,7 @@ struct ConsoleUI::Impl {
       atlasEventWorker.join();
     if (atlasRefreshWorker.joinable())
       atlasRefreshWorker.join();
+    stopHandoff = true;
     manualRunner.cancel();
     serviceRunner.cancel();
     if (manualWorker.joinable())
@@ -613,6 +643,8 @@ struct ConsoleUI::Impl {
       selectedId = agents[0].id;
   }
   void navigate(Screen next) {
+    if (!recoveryError.empty() && next == Screen::controller)
+      next = Screen::recovery;
     if (remoteOnly && next == Screen::controller)
       next = Screen::remoteGate;
     if (remoteOnly && next == Screen::atlas && !remoteAtlasStarted) {
@@ -620,6 +652,7 @@ struct ConsoleUI::Impl {
       liveAtlas = true;
       loadAtlas();
     }
+    if (screen == Screen::gitSync && next != screen) syncRef = text(GetDlgItem(window, SYNC_REF));
     if (screen == Screen::batches && next != screen && batchTitle)
       storeBatchDraft();
     screen = next;
@@ -739,6 +772,11 @@ struct ConsoleUI::Impl {
                     std::max(0, width - 180 - occupied));
   }
   void build() {
+    if (nativeNotificationDepth) {
+      // COMCTL32 may still be using the notifying control/subclass chain.
+      refreshAgents(); deferredBuild = true; return;
+    }
+    deferredBuild = false;
     skin::invalidateBackdrop(window);
     struct BuildGuard {
       bool &flag;
@@ -750,7 +788,13 @@ struct ConsoleUI::Impl {
     int cw = screen == Screen::remoteGate || (screen == Screen::atlas && fullAtlas) ? width
              : screen == Screen::controller ? controllerWidth()
                                             : width - 356;
-    if (screen == Screen::remoteGate) {
+    if (screen == Screen::recovery) {
+      label("Recover saved Controller state", 28, 70, cw - 56, 36);
+      body = edit(recoveryError, 0, 28, 122, cw - 56, height - 245, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
+      button("Retry", DESC_RELOAD, 28, height - 100, 110);
+      button("Viewer", ATLAS, 150, height - 100, 110);
+      button("Help", SUPPORT, 272, height - 100, 110);
+    } else if (screen == Screen::remoteGate) {
       label(descriptor.title + " isn't on this machine", 50, 96, width - 100, 46);
       label("Browse the project's published progress in Chaos Viewer. Running tools and agents "
             "needs a local Git checkout.",
@@ -1176,7 +1220,7 @@ struct ConsoleUI::Impl {
       y += 40;
       for (auto entry : std::vector<std::pair<std::string, std::string>>{
                {"Enabled", "Enable this connection"},
-               {"Automatic", "Allow automatic leases / discovery / updates"},
+               {"Automatic", "Allow automatic leases / discovery / update checks"},
                {"Descriptors", "Allow public descriptors / portable update downloads"}}) {
         profileFields[entry.first] =
             control(L"BUTTON", entry.second, 0, 214, y, cw - 232, 30, BS_AUTOCHECKBOX);
@@ -1197,6 +1241,21 @@ struct ConsoleUI::Impl {
           "Remote leases require claims.acquire, claims.heartbeat and claims.release.\n\nNo keys "
           "belong in these fields. Review the complete configuration before saving.",
           0, width - 332, 62, 310, height - 132, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
+    } else if (screen == Screen::gitSync) {
+      label("Synchronize and recover Git work", 18, 60, cw - 36, 32);
+      label("Target ref (blank uses the configured upstream; fetch first)", 18, 106, cw - 36);
+      edit(syncRef, SYNC_REF, 18, 136, cw - 36);
+      button("Preview sync", SYNC_PREVIEW, 18, 184, 132);
+      button("Create backup", SYNC_BACKUP, 160, 184, 132);
+      button("Cancel", SYNC_CANCEL, 302, 184, 90);
+      button(activeServiceMethod == "git.backup" ? "Confirm backup" : "Confirm sync", SYNC_CONFIRM, 18, 228, 164);
+      EnableWindow(GetDlgItem(window, SYNC_CONFIRM), serviceResult.value("requiresConfirmation", false));
+      body = edit(gitServiceText(serviceMethod, serviceResult), 0, 18, 272, cw - 36, std::max(80, height - 455), ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_HSCROLL);
+      logBox = edit("Complete operation output is retained in the reported log.", 0, 18, height - 171, cw - 36, 94, ES_MULTILINE | ES_READONLY | WS_VSCROLL);
+      label("Review the exact branch/ref/SHA, affected files, outgoing commits, preserved assets and backup location. Sync changes nothing until you confirm.\n\nCancellation after reset preserves remaining untracked files; inspect status and the retained backup before retrying.", width - 332, 62, 310, 235);
+      button("Pull / push / PR tools", SYNC_TOOLS, width - 332, 318, 230);
+      button("Controller", HOME, 18, height - 48, 110);
+      button("Settings", SETTINGS, 136, height - 48, 108);
     } else if (screen == Screen::services) {
       std::vector<std::string> methods = {
           "preflight",       "preflight.fix",       "atlas.recentAdds",
@@ -1333,9 +1392,9 @@ struct ConsoleUI::Impl {
           dpi::sendMessage(batchList, LB_SETCURSEL, index, 0);
       }
       label("Draft title", 291, 62, cw - 309);
-      batchTitle = edit(staged.value("title", std::string("Batch draft")), 0, 291, 90, cw - 309);
+      batchTitle = edit(staged.value("title", std::string("Batch draft")), 4644, 291, 90, cw - 309);
       label("Instructions", 291, 130, cw - 309);
-      batchPrompt = edit(staged.value("prompt", std::string()), 0, 291, 158, cw - 309, 110,
+      batchPrompt = edit(staged.value("prompt", std::string()), 4645, 291, 158, cw - 309, 110,
                          ES_MULTILINE | WS_VSCROLL);
       label(std::to_string(draftRows.size()) + " targets in saved draft", 291, 276, cw - 309);
       body = edit("Select a queued or completed batch. Worked targets still require independent "
@@ -1697,6 +1756,8 @@ struct ConsoleUI::Impl {
       if (i < atlas.size())
         retainedCart.push_back(atlas[i].id);
     retainedSelection = pickedFunction < atlas.size() ? atlas[pickedFunction].id : std::string();
+    auto previousAtlas = std::move(atlas);
+    auto previousExtras = atlasExtras;
     atlas.clear();
     tiles.clear();
     cachedLayout.clear();
@@ -1709,7 +1770,8 @@ struct ConsoleUI::Impl {
     bool published = liveAtlas, force = forceLiveReload;
     forceLiveReload = false;
     stopAtlasLoad = false;
-    loader = std::thread([this, keys, prefs, published, force, cacheOnly] {
+    loader = std::thread([this, keys, prefs, published, force, cacheOnly,
+                          previousAtlas = std::move(previousAtlas), previousExtras = std::move(previousExtras)]() mutable {
       cacheNotice.clear();
       try {
         auto loaderTransport = transport;
@@ -1777,6 +1839,12 @@ struct ConsoleUI::Impl {
             f.row["claim"] = {{"status", "active"}};
       } catch (const std::exception &e) {
         atlasError = e.what();
+        if (!previousAtlas.empty()) {
+          atlas = std::move(previousAtlas);
+          atlasExtras = std::move(previousExtras);
+          cacheNotice = "Stale data retained; refresh failed: " + atlasError;
+          atlasError.clear();
+        }
       }
       atlasPublished = true;
       atlasReady = true;
@@ -1952,7 +2020,8 @@ struct ConsoleUI::Impl {
                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
       return 0;
     }
-    case WM_COMMAND:
+    case WM_COMMAND: {
+      NativeNotification notification(self->nativeNotificationDepth);
       if (self->settingsBuilding)
         return 0;
       try {
@@ -1963,6 +2032,7 @@ struct ConsoleUI::Impl {
         self->buildSettingsPopover();
       }
       return 0;
+    }
     case WM_TIMER:
       if (h == self->settingsPopover && self->settingsContent) {
         auto title = self->settingsClearPending() ? "Clearing…"
@@ -2005,6 +2075,8 @@ struct ConsoleUI::Impl {
     return DefWindowProcW(h, msg, w, l);
   }
   void buildSettingsPopover() {
+    if (nativeNotificationDepth) { deferredSettingsBuild = true; return; }
+    deferredSettingsBuild = false;
     if (!settingsPopover)
       return;
     settingsBuilding = true;
@@ -2189,15 +2261,17 @@ struct ConsoleUI::Impl {
         PostMessageW(parent, CONSOLE_PICK_REPO, 0, 0);
         break;
       case 7002:
-        serviceMethod = "git.syncPreview";
-        navigate(Screen::services);
+        serviceMethod = "git.sync";
+        serviceResult = Json::object();
+        navigate(Screen::gitSync);
         break;
       case 7003: {
-        advancedMode = !advancedMode;
+        auto nextMode = !advancedMode;
         auto path = data / "console-ui.json";
         auto ui = fs::exists(path) ? Json::parse(read(path)) : Json::object();
-        ui["advanced"] = advancedMode;
-        write(path, ui.dump(2));
+        ui["advanced"] = nextMode;
+        atomicWrite(path, ui.dump(2));
+        advancedMode = nextMode;
         build();
         buildSettingsPopover();
         break;
@@ -2343,11 +2417,16 @@ struct ConsoleUI::Impl {
       "Never commit or push without review, modify src/ in port-only mode, or include ROMs, Nintendo assets or credentials.\n\n"
       "Copy prompt includes the private local connection configuration when the server is running. "
       "Accounts and provider credentials remain user-configured.";
+    if(mcp && !mcpBusy)
+      state["manualSetup"]=mcpClientConfiguration("Claude Code", fs::u8path(selfExecutable()), mcp->configurationPath(), "Claude Code").dump(2);
     if(!clientInstallResult.empty())
       state["outcome"]=clientInstallResult.value("target",std::string("Client"))+": "+
                        clientInstallResult.value("action",std::string("configured"));
     if(clientInstallResult.contains("path"))
       state["outcome"]=state.value("outcome",std::string())+"\n"+clientInstallResult["path"].get<std::string>();
+    for (auto key : {"message", "backup"})
+      if(clientInstallResult.contains(key) && clientInstallResult[key].is_string())
+        state["outcome"]=state.value("outcome",std::string())+"\n"+clientInstallResult[key].get<std::string>();
     return state;
   }
   void connectMcpClient(const std::string &client) {
@@ -2396,6 +2475,11 @@ struct ConsoleUI::Impl {
         [this](McpPopoverAction command) {
           switch(command) {
           case McpPopoverAction::toggle:toggleMcp();break;
+          case McpPopoverAction::copyEndpoint:
+            if(!mcp || mcpBusy)throw std::runtime_error("Start MCP first");
+            copyText(window,mcp->state().at("url").get<std::string>());break;
+          case McpPopoverAction::copyManualSetup:
+            copyText(window,publicMcpState().value("manualSetup",std::string()));break;
           case McpPopoverAction::copyConfiguration:
             if(!mcp || mcpBusy)throw std::runtime_error("Start MCP first");
             copyText(window,mcp->configuration());break;
@@ -2633,6 +2717,12 @@ struct ConsoleUI::Impl {
       serviceReady = true;
       serviceBusy = false;
     });
+    if (screen == Screen::support && (method == "update.check" || method == "update.stage"))
+      setText(body, method == "update.check" ? "Checking your configured update source…" : args.contains("confirmation") ? "Downloading and checksum-verifying the update. Installation remains manual." : "Preparing the download preview…");
+    if (screen == Screen::gitSync) {
+      setText(body, "Preparing or running the reviewed Git operation. Complete logs are retained.");
+      EnableWindow(GetDlgItem(window, SYNC_CONFIRM), FALSE);
+    }
     if (screen == Screen::services) {
       setText(body, "Working...");
       EnableWindow(GetDlgItem(window, SERVICE_CONFIRM), FALSE);
@@ -3154,7 +3244,7 @@ struct ConsoleUI::Impl {
         };
         progress(18, "Functions", matched, totalFunctions);
         progress(36 + half, "Code", matchedBytes, bytes);
-        skin::label(dc, wide(liveAtlas ? cacheNotice : "local"), 90, 20, 300, 24, 13, false, true);
+        skin::label(dc, wide(cacheNotice.empty() ? "local" : cacheNotice), 90, 20, 300, 24, 13, false, true);
       }
       int left = 18, top = mapTop(), w = mapWidth(), h = mapHeight();
       std::string key = needle + "|" + atlasMode + "|" + functionSortKey + "|" + atlasFilter + "|" +
@@ -3596,7 +3686,7 @@ struct ConsoleUI::Impl {
       auto path = data / "console-ui.json";
       auto preferences = fs::exists(path) ? Json::parse(read(path)) : Json::object();
       preferences["writes"] = !allowWrites;
-      write(path, preferences.dump(2));
+      atomicWrite(path, preferences.dump(2));
       allowWrites = !allowWrites;
       build();
       return;
@@ -3773,7 +3863,7 @@ struct ConsoleUI::Impl {
         prefs = Json::object();
       prefs["atlasColorBy"] = atlasColorBy;
       prefs["atlasDrafts"] = atlasDrafts;
-      write(path, prefs.dump(2));
+      atomicWrite(path, prefs.dump(2));
       InvalidateRect(window, nullptr, FALSE);
       return;
     }
@@ -3786,7 +3876,7 @@ struct ConsoleUI::Impl {
       if (!prefs.is_object())
         prefs = Json::object();
       prefs["functionSort"] = functionSortKey;
-      write(path, prefs.dump(2));
+      atomicWrite(path, prefs.dump(2));
       cachedLayout.clear();
       InvalidateRect(window, nullptr, FALSE);
       return;
@@ -3816,6 +3906,10 @@ struct ConsoleUI::Impl {
     }
     if (id == BATCH_LIST && notification == LBN_SELCHANGE) {
       selectBatch();
+      return;
+    }
+    if ((id == 4644 || id == 4645) && notification == EN_CHANGE && screen == Screen::batches) {
+      storeBatchDraft();
       return;
     }
     if (id == SEARCH && notification == EN_CHANGE) {
@@ -3961,6 +4055,29 @@ struct ConsoleUI::Impl {
       serviceCall(serviceMethod, serviceRequest);
       break;
     }
+    case SYNC_TOOLS:
+      if (serviceBusy || serviceReady) throw std::runtime_error("Wait for or cancel the active synchronization operation first");
+      if (remoteOnly) throw std::runtime_error("Choose a local checkout first");
+      syncRef = text(GetDlgItem(window, SYNC_REF));
+      gitTools();
+      break;
+    case SYNC_PREVIEW:
+    case SYNC_BACKUP:
+      if (serviceBusy || serviceReady) throw std::runtime_error("Wait for the active Git operation first");
+      syncRef = text(GetDlgItem(window, SYNC_REF));
+      serviceMethod = id == SYNC_BACKUP ? "git.backup" : "git.sync";
+      serviceRequest = serviceMethod == "git.sync" && !syncRef.empty() ? Json{{"ref", syncRef}} : Json::object();
+      serviceCall(serviceMethod, serviceRequest);
+      break;
+    case SYNC_CONFIRM: {
+      if (!serviceResult.value("requiresConfirmation", false) || (serviceMethod != "git.sync" && serviceMethod != "git.backup")) throw std::runtime_error("Preview sync or backup first");
+      if (serviceMethod == "git.sync" && text(GetDlgItem(window, SYNC_REF)) != syncRef) throw std::runtime_error("Target changed; preview again");
+      auto args = serviceRequest;
+      args["confirmation"] = serviceResult.at("confirmation");
+      serviceCall(serviceMethod, args);
+      break;
+    }
+    case SYNC_CANCEL:
     case SERVICE_CANCEL:
       serviceRunner.cancel();
       break;
@@ -4041,7 +4158,8 @@ struct ConsoleUI::Impl {
       serviceRunner.cancel();
       break;
     case SUPPORT:
-      serviceResult = Json::object();
+      portableUpdate = portableUpdateStatus(data, fs::u8path(selfExecutable()));
+      serviceResult = portableUpdate;
       navigate(Screen::support);
       break;
     case SUPPORT_REFERENCE:
@@ -4309,7 +4427,7 @@ struct ConsoleUI::Impl {
       auto uiPrefs = fs::exists(uiPath) ? Json::parse(read(uiPath)) : Json::object();
       uiPrefs["advanced"] = advancedMode;
       uiPrefs["writes"] = allowWrites;
-      write(uiPath, uiPrefs.dump(2));
+      atomicWrite(uiPath, uiPrefs.dump(2));
       navigate(Screen::controller);
       break;
     }
@@ -4352,14 +4470,26 @@ struct ConsoleUI::Impl {
                                                    : agents.at(size_t(choice(agentChoice) - 1)).id);
       build();
       break;
-    case BATCH_HANDOFF:
+    case BATCH_HANDOFF: {
+      if (manualBusy || draftReady) throw std::runtime_error("Wait for the active draft/handoff operation");
       if (choice(agentChoice) < 0 || size_t(choice(agentChoice)) > agents.size())
         throw std::runtime_error("Select a destination");
-      fleet->handoff(selectedBatch, choice(agentChoice) == 0
-                                        ? std::string()
-                                        : agents.at(size_t(choice(agentChoice) - 1)).id);
-      build();
+      storeBatchDraft();
+      if (manualWorker.joinable()) manualWorker.join();
+      auto destination = choice(agentChoice) == 0 ? std::string() : agents.at(size_t(choice(agentChoice) - 1)).id;
+      auto batch = selectedBatch;
+      stopHandoff = false;
+      manualBusy = true;
+      draftError.clear();
+      manualWorker = std::thread([this, batch, destination] {
+        try { fleet->handoff(batch, destination, &stopHandoff); }
+        catch (const std::exception &error) { draftError = error.what(); }
+        draftReady = true;
+        manualBusy = false;
+      });
+      setText(body, "Checking claims and handing off the batch. Cancel stops preparation; ownership changes atomically only after validation.");
       break;
+    }
     case BATCH_GENERATE: {
       storeBatchDraft();
       if (manualBusy || draftReady)
@@ -4388,6 +4518,7 @@ struct ConsoleUI::Impl {
       break;
     }
     case BATCH_CANCEL_GEN:
+      stopHandoff = true;
       manualRunner.cancel();
       break;
     case BATCH_IMPORT: {
@@ -4625,13 +4756,17 @@ struct ConsoleUI::Impl {
       if (!prefs.is_object())
         prefs = Json::object();
       prefs["tourSeen"] = true;
-      write(path, prefs.dump(2));
+      atomicWrite(path, prefs.dump(2));
       navigate(Screen::controller);
       break;
     }
     }
   }
   void tick() {
+    if (!nativeNotificationDepth && !hasOpenCombo(window) && !hasOpenCombo(settingsPopover)) {
+      if (deferredBuild) build();
+      if (deferredSettingsBuild) buildSettingsPopover();
+    }
     advanceSettingsChanges();
     updateAtlasWorkers();
     POINT cursor{};
@@ -4686,7 +4821,7 @@ struct ConsoleUI::Impl {
       if (!prefs.is_object())
         prefs = Json::object();
       prefs["mcpDesired"] = mcpDesired;
-      write(path, prefs.dump(2));
+      atomicWrite(path, prefs.dump(2));
       if (screen == Screen::mcpConnection)
         build();
     }
@@ -4812,9 +4947,14 @@ struct ConsoleUI::Impl {
       }
       if (screen == Screen::requirements)
         setText(body, preflightSummary(serviceResult));
+      if (screen == Screen::gitSync) {
+        setText(body, gitServiceText(activeServiceMethod, serviceResult));
+        SetWindowTextW(GetDlgItem(window, SYNC_CONFIRM), activeServiceMethod == "git.backup" ? L"Confirm backup" : L"Confirm sync");
+        EnableWindow(GetDlgItem(window, SYNC_CONFIRM), serviceResult.value("requiresConfirmation", false));
+      }
       if (screen == Screen::services) {
         std::lock_guard<std::mutex> lock(outputMutex);
-        setText(body, serviceResult.dump(2));
+        setText(body, gitServiceText(activeServiceMethod, serviceResult));
         EnableWindow(GetDlgItem(window, SERVICE_CONFIRM),
                      serviceResult.value("requiresConfirmation", false));
       }
@@ -5137,9 +5277,11 @@ struct ConsoleUI::Impl {
         self->hoveredFunction = SIZE_MAX;
         InvalidateRect(h, nullptr, FALSE);
         return 0;
-      case WM_COMMAND:
+      case WM_COMMAND: {
+        NativeNotification notification(self->nativeNotificationDepth);
         self->action(LOWORD(w), HIWORD(w));
         return 0;
+      }
       case WM_TIMER:
         self->tick();
         return 0;
@@ -5499,6 +5641,7 @@ bool ConsoleUI::running() const {
 void ConsoleUI::stop() {
   if (impl->report)
     impl->report->stop();
+  impl->stopHandoff = true;
   impl->manualRunner.cancel();
   impl->serviceRunner.cancel();
   if (impl->fleet)
@@ -6088,6 +6231,8 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
       if (keyboardBounds.bottom - keyboardBounds.top != 26)
         throw std::runtime_error("Compact role field must keep the measured 26-pixel height");
       dpi::sendMessage(keyboardRole, WM_KEYDOWN, VK_DOWN, 1);
+      if (!IsWindow(keyboardRole)) throw std::runtime_error("Combo destroyed inside its native selection notification");
+      impl->tick();
       if (assignedRoles(impl->activeAgent()->spec) != Args{"Hard matcher"})
         throw std::runtime_error("Compact role field lost native arrow-key selection");
       impl->action(5010, BN_CLICKED);
@@ -6358,6 +6503,40 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
       }
       if(!impl->settingsWriteError.empty())throw std::runtime_error(impl->settingsWriteError);
     };
+    Json preferenceTrace;
+    preferenceTrace["initialMode"] = impl->advancedMode ? "advanced" : "simple";
+    preferenceTrace["modeRequests"] = Json::array();
+    preferenceTrace["modeStates"] = Json::array();
+    auto uiFile = impl->data / "console-ui.json";
+    auto uiBefore = fs::exists(uiFile) ? Json::parse(read(uiFile)) : Json::object();
+    uiBefore["futureFixture"] = true;
+    atomicWrite(uiFile, uiBefore.dump(2));
+    for (int i = 0; i < 2; ++i) {
+      auto desired = impl->advancedMode ? "simple" : "advanced";
+      preferenceTrace["modeRequests"].push_back(desired);
+      impl->settingsAction(7003, BN_CLICKED);
+      auto saved = Json::parse(read(uiFile));
+      preferenceTrace["modeStates"].push_back(saved.value("advanced", false) ? "advanced" : "simple");
+      if (!saved.value("futureFixture", false)) throw std::runtime_error("Mode update lost unrelated UI preferences");
+    }
+    auto enabledBefore = impl->policy.value("animateBackground", true);
+    preferenceTrace["initialBackground"] = enabledBefore;
+    preferenceTrace["backgroundRequests"] = Json::array();
+    preferenceTrace["backgroundStates"] = Json::array();
+    for (bool value : {!enabledBefore, enabledBefore}) {
+      preferenceTrace["backgroundRequests"].push_back(value);
+      dpi::sendMessage(GetDlgItem(impl->settingsContent, 7011), BM_SETCHECK, value ? BST_CHECKED : BST_UNCHECKED, 0);
+      impl->settingsAction(7011, BN_CLICKED);
+      flushSettings();
+      preferenceTrace["backgroundStates"].push_back(impl->policy.value("animateBackground", true));
+    }
+    {
+      auto reopened = std::make_unique<Impl>(impl->parent, impl->font, impl->repository, impl->data,
+          impl->settings, [] {}, std::function<void(const Settings &)>(), true, std::string(),
+          std::function<void(Json)>(), false, impl->transport);
+      if (reopened->advancedMode != impl->advancedMode) throw std::runtime_error("Reopened native UI lost its saved mode");
+    }
+    write(directory / "preference-state-trace.json", preferenceTrace.dump(2));
     auto delegated = impl->policy.value("useAgents", false);
     dpi::sendMessage(GetDlgItem(impl->settingsContent, 7012), BM_SETCHECK, !delegated, 0);
     auto held=CreateFileW((impl->data/"backend.lock").c_str(),GENERIC_READ,FILE_SHARE_READ,
@@ -6616,6 +6795,44 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
     }
     impl->tick();
   };
+  {
+    impl->settingsAction(7002, BN_CLICKED);
+    if (impl->screen != Screen::gitSync) throw std::runtime_error("Settings sync did not open the native recovery form");
+    setText(GetDlgItem(impl->window, SYNC_REF), "HEAD");
+    impl->action(SYNC_PREVIEW, BN_CLICKED);
+    waitFor([&] { return impl->serviceBusy.load() || impl->serviceReady.load(); });
+    if (!impl->serviceResult.value("requiresConfirmation", false) || !impl->serviceResult.at("details").contains("target")) throw std::runtime_error("Native sync lacks exact target review");
+    setText(GetDlgItem(impl->window, SYNC_REF), "changed-after-review");
+    bool refused = false;
+    try { impl->action(SYNC_CONFIRM, BN_CLICKED); } catch (...) { refused = true; }
+    if (!refused) throw std::runtime_error("Sync form accepted a target edited after review");
+    setText(GetDlgItem(impl->window, SYNC_REF), "HEAD");
+    capture(directory / "git-sync-preview.bmp");
+    impl->action(SYNC_BACKUP, BN_CLICKED);
+    waitFor([&] { return impl->serviceBusy.load() || impl->serviceReady.load(); });
+    if (!impl->serviceResult.value("requiresConfirmation", false)) throw std::runtime_error("Native backup bypassed its review");
+    write(directory / "git-journey-report.txt", "PASS: dedicated sync form, exact target review, changed-ref rejection, backup preview and existing Git tools access\n");
+  }
+  {
+    auto descriptorFile = impl->repository / "tangos.json";
+    auto savedDescriptor = read(descriptorFile);
+    auto activeDescriptor = impl->descriptor.document;
+    write(descriptorFile, "{invalid");
+    SendMessageW(impl->parent, CONSOLE_RELOAD, 0, 0);
+    write(descriptorFile, savedDescriptor);
+    if (!IsWindow(impl->window) || impl->descriptor.document != activeDescriptor)
+      throw std::runtime_error("Invalid descriptor reload destroyed working state");
+    auto database = confinedPath(impl->repository, impl->descriptor.database);
+    auto savedDatabase = read(database);
+    auto count = impl->atlas.size();
+    write(database, "{invalid");
+    impl->loadAtlas();
+    waitFor([&] { return !impl->atlasReady.load(); });
+    write(database, savedDatabase);
+    if (impl->atlas.size() != count || !impl->atlasError.empty() || impl->cacheNotice.find("Stale data retained") == std::string::npos)
+      throw std::runtime_error("Failed refresh did not preserve usable Viewer data");
+    write(directory / "state-recovery-report.txt", "PASS: stale root publication rejected; invalid descriptor preserves active configuration; failed Atlas refresh retains usable stale data\n");
+  }
   impl->navigate(Screen::mcpConnection);
   if (!impl->mcp) {
     impl->action(MCP_TOGGLE, BN_CLICKED);
@@ -6631,6 +6848,28 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
   auto authorization=Json::parse(impl->mcp->configuration()).at("mcpServers").at("tangos-lite").at("headers").at("Authorization").get<std::string>();
   if(impl->publicMcpState().dump().find(authorization.substr(7))!=std::string::npos)
     throw std::runtime_error("MCP popup public state exposed its bearer token");
+  auto clipboardText = [&]() {
+    if (!OpenClipboard(impl->window)) throw std::runtime_error("Clipboard unavailable in MCP fixture");
+    auto data = GetClipboardData(CF_UNICODETEXT);
+    auto text = data ? static_cast<const wchar_t *>(GlobalLock(data)) : nullptr;
+    std::string value = text ? utf8(text) : std::string();
+    if (text) GlobalUnlock(data);
+    CloseClipboard();
+    return value;
+  };
+  auto mcpPopup = impl->mcpPopover->window();
+  SendMessageW(mcpPopup, WM_COMMAND, MAKEWPARAM(8106, BN_CLICKED), 0);
+  if (clipboardText() != impl->mcp->state().at("url").get<std::string>())
+    throw std::runtime_error("MCP Copy URL copied configuration instead of the public endpoint");
+  SendMessageW(mcpPopup, WM_COMMAND, MAKEWPARAM(8102, BN_CLICKED), 0);
+  if (clipboardText() != impl->mcp->configuration())
+    throw std::runtime_error("Explicit private MCP configuration copy failed");
+  SendMessageW(mcpPopup, WM_COMMAND, MAKEWPARAM(8108, BN_CLICKED), 0);
+  SendMessageW(mcpPopup, WM_COMMAND, MAKEWPARAM(8107, BN_CLICKED), 0);
+  auto manualSetup = clipboardText();
+  if (manualSetup.find(authorization.substr(7)) != std::string::npos ||
+      !fs::is_regular_file(fs::u8path(Json::parse(manualSetup).at("mcpServers").at("tangos-lite").at("args").at(1).get<std::string>())))
+    throw std::runtime_error("Manual MCP setup exposed a token or referenced a missing connection file");
   DestroyWindow(impl->mcpPopover->window());
   impl->navigate(Screen::mcpConnection);
   write(directory/"mcp-popup-report.txt","PASS: MCP overlay preserves Controller and excludes bearer tokens from public preview\n");
@@ -6648,6 +6887,8 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
       Json::array({{{"id", "draft-gui-target"}, {"name", "draft_gui_target"}, {"module", "port"}}});
   setText(impl->batchTitle, "GUI saved draft");
   setText(impl->batchPrompt, "Preserve repository rules and report verification failures.");
+  if (impl->fleet->draft().at("title") != "GUI saved draft")
+    throw std::runtime_error("Live draft edits were not persisted before completion/rebuild");
   impl->action(BATCH_SAVE_DRAFT, BN_CLICKED);
   if (impl->fleet->draft().at("title") != "GUI saved draft")
     throw std::runtime_error("Draft editor did not save");
@@ -6660,10 +6901,14 @@ void ConsoleUI::smokeScreens(const fs::path &directory,
   capture(directory / "batch-history.bmp");
   dpi::sendMessage(impl->agentChoice, CB_SETCURSEL, 0, 0);
   impl->action(BATCH_HANDOFF, BN_CLICKED);
+  waitFor([&] { return impl->manualBusy.load() || impl->draftReady.load(); });
+  if (!impl->draftError.empty()) throw std::runtime_error(impl->draftError);
   if (impl->fleet->batches().back().at("agentId") != "")
     throw std::runtime_error("Native global handoff failed");
   dpi::sendMessage(impl->agentChoice, CB_SETCURSEL, 1, 0);
   impl->action(BATCH_HANDOFF, BN_CLICKED);
+  waitFor([&] { return impl->manualBusy.load() || impl->draftReady.load(); });
+  if (!impl->draftError.empty()) throw std::runtime_error(impl->draftError);
   if (impl->fleet->batches().back().at("agentId") == "")
     throw std::runtime_error("Native agent handoff failed");
   impl->action(BATCH_REMOVE, BN_CLICKED);

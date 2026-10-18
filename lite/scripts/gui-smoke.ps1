@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable, [string]$FixtureDir = "$PSScriptRoot/../out/gui-fixture", [switch]$MissingDescriptor, [switch]$InvalidDescriptor, [double]$MinimumFreeGiB = 11, [switch]$CompactCaptures = $true)
+param([Parameter(Mandatory)][string]$Executable, [string]$FixtureDir = "$PSScriptRoot/../out/gui-fixture", [switch]$MissingDescriptor, [switch]$InvalidDescriptor, [double]$MinimumFreeGiB = 11, [switch]$CompactCaptures = $true, [string]$Debugger = "")
 $ErrorActionPreference = 'Stop'
 $fixture = [IO.Path]::GetFullPath($FixtureDir)
 if (Test-Path -LiteralPath $fixture) { throw "Use a fresh fixture directory: $fixture" }
@@ -70,7 +70,12 @@ try {
     if ($sseServer.HasExited -or (Get-Date) -gt $deadline) { throw 'Loopback SSE fixture did not start; inspect sse-control/server-error.log' }
     Start-Sleep -Milliseconds 50
   }
-  $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru -WindowStyle Hidden
+  if ($Debugger) {
+    $debugArguments = '--batch -ex "set pagination off" -ex run -ex "thread apply all bt" --args "{0}" {1}' -f $exe, $arguments
+    $process = Start-Process -FilePath $Debugger -ArgumentList $debugArguments -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $fixture 'debugger.log') -RedirectStandardError (Join-Path $fixture 'debugger-error.log')
+  } else {
+    $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru -WindowStyle Hidden
+  }
   $null = $process.Handle
   $deadline = (Get-Date).AddSeconds(240)
   while (-not $process.WaitForExit(250)) {
@@ -152,6 +157,8 @@ if (-not (Get-Content -LiteralPath (Join-Path $fixture 'report-overlay-report.tx
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'remote-viewer-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Remote viewer workflow failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'fleet-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Packaged fleet workflow failed' }
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'viewer-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Native viewer parity workflow failed' }
+if (-not (Get-Content -LiteralPath (Join-Path $fixture 'state-recovery-report.txt') -Raw).StartsWith('PASS')) { throw 'State/recovery journey failed' }
+if (-not (Get-Content -LiteralPath (Join-Path $fixture 'git-journey-report.txt') -Raw).StartsWith('PASS')) { throw 'Native Git journey failed' }
 } else {
 if (-not (Get-Content -LiteralPath (Join-Path $fixture 'descriptor-gui-report.txt') -Raw).StartsWith('PASS')) { throw 'Descriptor gate workflow failed' }
 }

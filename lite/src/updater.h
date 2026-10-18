@@ -8,6 +8,7 @@ using UpdateFetch =
                                const std::map<std::string, std::string> &)>;
 Json stagePortableUpdate(const fs::path &data, const Json &release, const std::string &assetPrefix,
                          const fs::path &target, const UpdateFetch &fetch);
+Json portableUpdateStatus(const fs::path &data, const fs::path &target);
 Json applyPortableUpdate(const fs::path &data, const fs::path &receipt);
 void launchPortableUpdate(const fs::path &data, const fs::path &receipt, unsigned long parent,
                           bool restart);

@@ -66,6 +66,30 @@ void HelperState::next(int direction) {
   if (count)
     index = direction < 0 ? (index + count - 1) % count : (index + 1) % count;
 }
+std::string gitServiceText(const std::string &method, const Json &result) {
+  if (method.rfind("git.", 0) != 0)
+    return result.dump(2);
+  auto details = result.value("requiresConfirmation", false)
+                     ? result.value("details", Json::object())
+                     : result;
+  std::string text = method == "git.sync" || method == "git.syncPreview"
+                         ? "Synchronize repository\n"
+                         : "Git operation\n";
+  for (auto key : {"repository", "branch", "ref", "target", "remotes", "backupRoot"})
+    if (details.contains(key) && details[key].is_string())
+      text += std::string(key) + ": " + details[key].get<std::string>() + "\n";
+  if (result.contains("error"))
+    text += "Failed. Complete logs and backups are retained. Fix the reported problem and preview "
+            "again.\n";
+  else if (result.value("requiresConfirmation", false))
+    text += "Review the exact target, affected files, outgoing commits and preserved assets below. "
+            "Confirm this preview to proceed.\n";
+  else if (result.contains("exit"))
+    text += result.value("exit", -1) == 0 ? "Completed. Recovery details are below.\n"
+                                          : "Failed or cancelled. Inspect the complete log and "
+                                            "retained backup before retrying.\n";
+  return text + "\n" + result.dump(2);
+}
 Json updatePresentation(const Json &downloaded, const Json &current) {
   auto update = current.value("update", Json::object());
   if (downloaded.value("state", std::string()) == "downloaded" && downloaded.contains("receipt") &&
@@ -78,6 +102,15 @@ std::string supportResultText(const Json &result) {
   if (result.empty())
     return "Check for updates, read the complete reference, or describe a bug to prepare a local "
            "report.";
+  if (result.value("state", std::string()) == "error")
+    return "Update failed:\n" +
+           result.value("message", std::string("Inspect the update store and retry."));
+  if (result.value("state", std::string()) == "installing")
+    return "The previous update was interrupted during installation. Inspect the target and "
+           "retained update files before retrying.";
+  if (result.value("state", std::string()) == "installed")
+    return "Update installed.\nRecovery copy: " + result.value("backup", std::string()) + "\n" +
+           result.value("message", std::string());
   if (result.contains("error"))
     return "Operation failed:\n" + result.at("error").dump() +
            "\n\nReview your Connections and local requirements, then retry.";

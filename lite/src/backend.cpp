@@ -851,7 +851,8 @@ Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
                 {"args", a},
                 {"repository", utf8(repository.wstring())},
                 {"baseline", baseline},
-                {"created", std::time(nullptr)}});
+                {"created", std::time(nullptr)},
+                {"reviewedTarget", m == "git.sync" ? details.value("target", std::string()) : std::string()}});
       return {{"requiresConfirmation", true},
               {"confirmation", nonce},
               {"method", m},
@@ -870,6 +871,12 @@ Json Backend::invoke(const std::string &m, Json a, unsigned lockWaitMs) {
         preview.value("baseline", std::string()) != baseline ||
         std::time(nullptr) - preview.value("created", int64_t(0)) > 600)
       throw std::runtime_error("Preview expired or operation/repository changed; preview again");
+    if (m == "git.sync") {
+      auto approved = preview.value("reviewedTarget", std::string());
+      if (!std::regex_match(approved, std::regex("[0-9a-f]{40,64}")))
+        throw std::runtime_error("This synchronization preview lacks a pinned target. Preview again.");
+      a["_reviewedTarget"] = approved;
+    }
     fs::remove(path);
   }
   if (m == "bug.report")
@@ -2111,7 +2118,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
       args["connection"] = m;
     auto result = execute("network.read", args);
     if (result.value("ok", false))
-      result["update"] = updateStatus("0.37.0", result.at("data"));
+      result["update"] = updateStatus("0.38.0", result.at("data"));
     return result;
   }
   if (m == "git.clone") {
@@ -2210,7 +2217,7 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto folder = directory / "exports" / ("bug-report-" + uniqueId());
     fs::create_directories(folder);
     Json debug = {{"app", "TangOS Lite"},
-                  {"version", "0.37.0"},
+                  {"version", "0.38.0"},
                   {"portOnly", settings.portOnly},
                   {"project", settings.activeProject},
                   {"connections", Json::array()},
@@ -2689,6 +2696,8 @@ Json Backend::execute(const std::string &m, const Json &a) {
     auto target = trim(repo.git({"rev-parse", "--verify", ref + "^{commit}"}));
     if (!std::regex_match(target, std::regex("[0-9a-f]{40,64}")))
       throw std::runtime_error("Cannot resolve synchronization target");
+    if (m == "git.sync" && target != a.value("_reviewedTarget", std::string()))
+      throw std::runtime_error("Synchronization target changed after review. Preview again.");
     Json remove = Json::array(), kept = Json::array(), blocked = Json::array();
     for (auto &path : split(repo.git({"diff", "--name-only", "-z", "HEAD", target}), '\0'))
       if (!path.empty() && !blockedPath(path, settings).empty())
@@ -2696,6 +2705,13 @@ Json Backend::execute(const std::string &m, const Json &a) {
     for (auto &change :
          parseStatus(repo.git({"status", "--porcelain=v1", "-z", "--untracked-files=all"}))) {
       auto reason = blockedPath(change.path, settings);
+      if (!change.original.empty()) {
+        auto originalReason = blockedPath(change.original, settings);
+        if (!originalReason.empty()) {
+          blocked.push_back(change.original);
+          if (reason.empty()) reason = originalReason;
+        }
+      }
       if (change.xy == "??") {
         if (!reason.empty())
           kept.push_back(change.path);
@@ -2708,6 +2724,11 @@ Json Backend::execute(const std::string &m, const Json &a) {
     }
     auto preview =
         Json{{"ref", ref},
+             {"repository", utf8(repository.wstring())},
+             {"branch", trim(repo.git({"branch", "--show-current"}))},
+             {"remotes", repo.git({"remote", "-v"})},
+             {"backupRoot", utf8((directory / "backups").wstring())},
+             {"affectedFiles", split(repo.git({"diff", "--name-only", "HEAD", target}), '\n')},
              {"target", target},
              {"status", repo.status()},
              {"diff", repo.git({"diff", "--binary", "HEAD", target})},
@@ -2731,11 +2752,22 @@ Json Backend::execute(const std::string &m, const Json &a) {
               {"output", result.output},
               {"backup", backup},
               {"log", utf8(log.wstring())}};
+    auto record = [&](const std::string &text) {
+      { std::ofstream durable(log, std::ios::binary | std::ios::app); durable << text; }
+      if (progressSink) progressSink(text);
+    };
+    record("Synchronization reset completed. Backup: " + backup.at("backup").get<std::string>() + "\n");
     for (auto &name : remove) {
+      if (runner.isCancelled()) {
+        record("Cancelled after reset; remaining untracked files preserved. Inspect status and the retained backup before retrying.\n");
+        return {{"exit", 130}, {"cancelled", true}, {"target", target}, {"backup", backup}, {"log", utf8(log.wstring())}};
+      }
       auto path = confinedPath(repository, name.get<std::string>());
       // Only remove the concrete files shown in the preview, never recursively clean a directory.
-      if (fs::is_regular_file(path) && !fs::is_symlink(fs::symlink_status(path)))
+      if (fs::is_regular_file(path) && !fs::is_symlink(fs::symlink_status(path))) {
         fs::remove(path);
+        record("Removed previewed untracked file: " + name.get<std::string>() + "\n");
+      }
     }
     return {{"exit", 0},
             {"target", target},
@@ -2767,8 +2799,17 @@ Json Backend::execute(const std::string &m, const Json &a) {
         fs::create_directories(to.parent_path());
         write(to, content);
       }
-      files.push_back(
-          {{"path", change.path}, {"status", change.xy}, {"deleted", !fs::exists(path)}});
+      Json entry{{"path", change.path}, {"status", change.xy}, {"deleted", !fs::exists(path)}};
+      if (!change.original.empty()) entry["original"] = change.original;
+      if (!change.xy.empty() && change.xy[0] != ' ' && change.xy[0] != '?' && change.xy[0] != 'D') {
+        auto indexed = repo.git({"show", ":" + change.path});
+        if (indexed.size() > 16 * 1024 * 1024 || !blockedBlob(indexed).empty())
+          throw std::runtime_error("Cannot safely back up staged content at " + change.path + "; remove excluded/credential content and review again.");
+        auto indexFile = ".staged-" + uniqueId();
+        write(dest / indexFile, indexed);
+        entry["indexFile"] = indexFile;
+      }
+      files.push_back(std::move(entry));
     }
     auto recoveryRef = "refs/tangos/backups/" + utf8(dest.filename().wstring());
     repo.git({"update-ref", recoveryRef, "HEAD"});

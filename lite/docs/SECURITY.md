@@ -151,8 +151,9 @@ the new folder for inspection; it never recursively deletes user data.
 ## Portable update boundary (0.16.0)
 
 Updates require a user-enabled `update.check` connection, a trusted HTTPS
-`assetPrefix`, and `allowUpdateDownloads`. Automatic startup staging additionally
-requires `automatic`. The publisher must supply a SHA256 digest. Downloads never
+`assetPrefix`, and `allowUpdateDownloads`. An opted-in `automatic` startup check
+only reports availability; it never authorizes a download or installation. The
+publisher must supply a SHA256 digest. Downloads never
 receive registry or provider credentials; redirects are limited to the configured
 prefix and GitHub release asset hosts. The digest establishes integrity relative
 to the configured publisher, not an independent publisher signature.
@@ -287,3 +288,29 @@ Only the concrete user-selected preference/stat-clear request is queued, with a
 three-second deadline; Git actions are not auto-confirmed by this queue.
 Queued writes survive popup closure and are drained during application shutdown.
 Pre-clear statistics snapshots cannot repopulate cleared counters.
+
+## 0.38 lifecycle review
+
+Recovery refuses another checkout's Fleet state and duplicate agent identities;
+corrupt state is retained rather than reset. Interrupted execution never resumes
+a provider or repository command automatically. Draft revisions protect edit/undo
+races, and failed handoff persistence restores in-memory reservations. Obsolete
+root publications cannot replace a newer selection. Preference writes are atomic.
+
+MCP endpoint copy contains no bearer header. Private configuration copy remains
+an explicit action; public manual setup references a local stdio connection file.
+Registration keeps existing confirmation/baseline/backup safeguards and shows only
+sanitized outcomes. No new provider credentials or external service were added.
+
+Sync backup retains separately scanned staged content as well as working files.
+Changed refs/remotes/content invalidate confirmation. Cancellation after reset
+preserves remaining untracked files, the backup and an explicit partial-operation
+log. No force push, broad clean, unreviewed commit or protected-source permission
+was introduced.
+
+Automatic update checks no longer download. Staging and installation require
+separate user actions. Atomic status records retain the validated receipt/target,
+installation result and recovery location; process creation is reported separately
+from replacement success. Integration tests operate only on disposable executable
+copies with isolated LOCALAPPDATA. A restart-failure fixture denies execute access
+only on its own temporary target; it does not change the installed application ACL.

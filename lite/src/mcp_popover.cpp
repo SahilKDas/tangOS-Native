@@ -24,6 +24,7 @@ struct McpPopover::Impl {
   std::string shape, localError;
   int scroll = 0, contentHeight = 0, maximumHeight = 600;
   ULONGLONG copiedUntil = 0;
+  bool performingAction = false, manualExpanded = false;
   Impl(HWND root, std::function<Json()> read, std::function<void(McpPopoverAction)> perform)
       : owner(root), snapshot(std::move(read)), action(std::move(perform)) {
     field = CreateSolidBrush(skin::field());
@@ -133,7 +134,9 @@ struct McpPopover::Impl {
                           8101, 16, y, 112, 30, BS_OWNERDRAW | WS_TABSTOP);
     EnableWindow(toggle, !busy);
     if (running) {
-      control(L"BUTTON", "Copy config", 8102, 136, y, 100, 30, BS_OWNERDRAW | WS_TABSTOP);
+      auto copyUrl =
+          control(L"BUTTON", "Copy URL", 8106, 136, y, 100, 30, BS_OWNERDRAW | WS_TABSTOP);
+      EnableWindow(copyUrl, !busy);
       auto connect =
           control(L"BUTTON", "Add to Claude", 8103, 16, y + 38, 152, 30, BS_OWNERDRAW | WS_TABSTOP);
       EnableWindow(connect, !busy);
@@ -142,8 +145,33 @@ struct McpPopover::Impl {
     y += 44;
     auto outcome = model.value("outcome", std::string());
     if (!outcome.empty()) {
-      control(L"STATIC", outcome, 0, 16, y, 294, 60);
-      y += 68;
+      control(L"EDIT", outcome, 8207, 16, y, 294, 96,
+              ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_TABSTOP);
+      y += 104;
+    }
+    if (running) {
+      auto config =
+          control(L"BUTTON", "Copy configuration", 8102, 16, y, 190, 30, BS_OWNERDRAW | WS_TABSTOP);
+      EnableWindow(config, !busy);
+      control(L"BUTTON", manualExpanded ? "Hide setup" : "Manual setup", 8108, 214, y, 96, 30,
+              BS_OWNERDRAW | WS_TABSTOP);
+      y += 42;
+      if (manualExpanded) {
+        control(L"STATIC", "Or add it yourself", 0, 16, y, 294, 24);
+        y += 28;
+        control(L"STATIC",
+                "Create an MCP agent named Claude Code in Controller. Add this server entry to "
+                "your client settings, then reload the client. Accounts remain user-configured.",
+                0, 16, y, 294, 84);
+        y += 90;
+        control(L"EDIT", model.value("manualSetup", std::string()), 8206, 16, y, 294, 112,
+                ES_MULTILINE | ES_READONLY | WS_VSCROLL | WS_TABSTOP);
+        y += 120;
+        auto manual = control(L"BUTTON", "Copy manual setup", 8107, 16, y, 180, 30,
+                              BS_OWNERDRAW | WS_TABSTOP);
+        EnableWindow(manual, !busy);
+        y += 40;
+      }
     }
     control(L"STATIC", "Prompt for your AI", 0, 16, y, 294, 24);
     y += 28;
@@ -217,6 +245,7 @@ struct McpPopover::Impl {
     };
     update(8205, model.value("url", std::string()));
     update(8204, prompt(model));
+    update(8206, model.value("manualSetup", std::string()));
     if (clients)
       SetWindowTextW(clients, wide(std::to_string(model.value("connectedClients", 0))).c_str());
     if (traffic) {
@@ -275,7 +304,7 @@ struct McpPopover::Impl {
       self->status = self->clients = self->traffic = nullptr;
       break;
     case WM_ACTIVATE:
-      if (LOWORD(w) == WA_INACTIVE)
+      if (LOWORD(w) == WA_INACTIVE && !self->performingAction)
         PostMessageW(h, WM_CLOSE, 0, 0);
       break;
     case WM_TIMER:
@@ -285,10 +314,21 @@ struct McpPopover::Impl {
         self->refresh();
       return 0;
     case WM_COMMAND:
-      if (HIWORD(w) == BN_CLICKED && LOWORD(w) >= 8101 && LOWORD(w) <= 8105) {
+      if (HIWORD(w) == BN_CLICKED && LOWORD(w) == 8108) {
+        self->manualExpanded = !self->manualExpanded;
+        self->refresh(true);
+        SetFocus(GetDlgItem(h, 8108));
+        return 0;
+      }
+      if (HIWORD(w) == BN_CLICKED && LOWORD(w) >= 8101 && LOWORD(w) <= 8107) {
         auto action = static_cast<McpPopoverAction>(LOWORD(w));
         if (action == McpPopoverAction::advanced)
           PostMessageW(h, WM_CLOSE, 0, 0);
+        struct ActionGuard {
+          bool &flag;
+          ActionGuard(bool &value) : flag(value) { flag = true; }
+          ~ActionGuard() { flag = false; }
+        } actionGuard(self->performingAction);
         try {
           {
             dpi::Scope scale(dpi::forWindow(self->owner));
@@ -302,10 +342,11 @@ struct McpPopover::Impl {
         } catch (...) {
           self->localError = "Could not complete this action. Check full connection details and "
                              "local client permissions.";
-          MessageBoxW(self->owner, wide(self->localError).c_str(), L"MCP action",
-                      MB_OK | MB_ICONERROR);
+          // Keep recovery guidance inline so setup errors do not dismiss the popup.
         }
         self->refresh();
+        if (action != McpPopoverAction::advanced && self->window)
+          SetForegroundWindow(self->window);
         return 0;
       }
       break;

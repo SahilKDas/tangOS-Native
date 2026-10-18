@@ -9,7 +9,9 @@ enum class McpPopoverAction {
   copyConfiguration,
   connectClaude,
   copyPrompt,
-  advanced
+  advanced,
+  copyEndpoint,
+  copyManualSetup
 };
 std::string mcpContactAge(int64_t now, int64_t timestamp);
 class McpPopover {

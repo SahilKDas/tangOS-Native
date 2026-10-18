@@ -40,6 +40,8 @@ int main(int argc, char **argv) {
     };
     auto staged = stage();
     require(sha256File(target) == original, "Staging modified the running target");
+    require(portableUpdateStatus(root / "state", target).at("receipt") == staged.at("receipt"),
+            "Staged manual update must survive reopening");
     auto installed =
         applyPortableUpdate(root / "state", fs::u8path(staged.at("receipt").get<std::string>()));
     require(sha256File(target) == hash, "Replacement did not install the verified executable");
@@ -50,6 +52,8 @@ int main(int argc, char **argv) {
     });
     auto pending = stage();
     write(target, read(target) + "changed");
+    require(portableUpdateStatus(root / "state", target).at("state") == "error",
+            "Changed target invalidates restored staged update");
     rejected([&] {
       applyPortableUpdate(root / "state", fs::u8path(pending.at("receipt").get<std::string>()));
     });
