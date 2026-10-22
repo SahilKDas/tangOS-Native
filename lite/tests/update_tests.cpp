@@ -1,5 +1,6 @@
 #include "updater.h"
 #include "platform.h"
+#include <windows.h>
 #include <iostream>
 #include <stdexcept>
 using namespace lite;
@@ -50,6 +51,24 @@ int main(int argc, char **argv) {
     rejected([&] {
       applyPortableUpdate(root / "state", fs::u8path(staged.at("receipt").get<std::string>()));
     });
+    auto lockedStage = stage();
+    auto lockedReceipt = fs::u8path(lockedStage.at("receipt").get<std::string>());
+    auto receiptLock = CreateFileW(lockedReceipt.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    require(receiptLock != INVALID_HANDLE_VALUE, "Cannot lock staged receipt fixture");
+    Json cleanupResult;
+    try {
+      cleanupResult = applyPortableUpdate(root / "state", lockedReceipt);
+    } catch (...) {
+      CloseHandle(receiptLock);
+      throw;
+    }
+    CloseHandle(receiptLock);
+    require(cleanupResult.at("state") == "installed" && cleanupResult.contains("message") &&
+                sha256File(target) == hash && fs::exists(lockedReceipt) &&
+                fs::exists(fs::u8path(cleanupResult.at("backup").get<std::string>())),
+            "Receipt cleanup failure hid a successful install or lost recovery paths");
+    fs::remove(lockedReceipt);
     auto pending = stage();
     write(target, read(target) + "changed");
     require(portableUpdateStatus(root / "state", target).at("state") == "error",

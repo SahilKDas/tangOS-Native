@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <commctrl.h>
+#include <vector>
 namespace lite {
 std::string mcpContactAge(int64_t now, int64_t timestamp) {
   auto seconds =
@@ -209,12 +210,14 @@ struct McpPopover::Impl {
     if (!window)
       return;
     try {
-      model = snapshot();
-      if (!model.is_object())
+      auto fresh = snapshot();
+      if (!fresh.is_object())
         throw std::runtime_error("Invalid local status");
+      model = std::move(fresh);
     } catch (...) {
-      model = {{"running", false},
-               {"error", "Connection status is unavailable. Open full connection details."}};
+      // A transient read failure must not erase the last usable public snapshot.
+      model["error"] = "Connection status is stale; showing the last available data. "
+                       "Refresh retries automatically. Open full connection details if it persists.";
     }
     auto next = Json::array({model.value("running", false), model.value("busy", false),
                              model.value("connectedClients", 0) == 0 &&
@@ -225,10 +228,42 @@ struct McpPopover::Impl {
     if (force || next != shape) {
       auto focused = GetFocus();
       int focusId = IsChild(window, focused) ? GetDlgCtrlID(focused) : 0;
+      struct EditState {
+        int id;
+        std::wstring text;
+        DWORD start = 0, end = 0;
+        LRESULT firstLine = 0;
+      };
+      std::vector<EditState> edits;
+      for (int id : {8204, 8205, 8206, 8207}) {
+        auto child = GetDlgItem(window, id);
+        if (!child)
+          continue;
+        EditState saved{id, std::wstring(GetWindowTextLengthW(child) + 1, L'\0')};
+        saved.text.resize(GetWindowTextW(child, saved.text.data(), int(saved.text.size())));
+        SendMessageW(child, EM_GETSEL, reinterpret_cast<WPARAM>(&saved.start),
+                     reinterpret_cast<LPARAM>(&saved.end));
+        saved.firstLine = SendMessageW(child, EM_GETFIRSTVISIBLELINE, 0, 0);
+        edits.push_back(std::move(saved));
+      }
       shape = next;
       build();
       if (focusId && IsWindowEnabled(GetDlgItem(window, focusId)))
         SetFocus(GetDlgItem(window, focusId));
+      // Only restore offsets against unchanged text. A new endpoint or outcome
+      // must not inherit selection offsets from a different value.
+      for (auto &saved : edits) {
+        auto child = GetDlgItem(window, saved.id);
+        if (!child)
+          continue;
+        std::wstring text(GetWindowTextLengthW(child) + 1, L'\0');
+        text.resize(GetWindowTextW(child, text.data(), int(text.size())));
+        if (text != saved.text)
+          continue;
+        SendMessageW(child, EM_SETSEL, saved.start, saved.end);
+        auto first = SendMessageW(child, EM_GETFIRSTVISIBLELINE, 0, 0);
+        SendMessageW(child, EM_LINESCROLL, 0, saved.firstLine - first);
+      }
     }
     // Update changing endpoint/prompt text without rebuilding controls or resetting
     // selection and scroll position when the public snapshot is unchanged.

@@ -237,3 +237,9 @@ Reopening Help restores staged status or the previous helper result. If replacem
 fails, inspect the retained receipt/candidate and close other copies before retrying.
 If installation succeeds but restart fails, launch the displayed target manually;
 the previous executable remains at the reported recovery path.
+In the v0.38 development candidate, a temporarily unavailable MCP status feed
+keeps the last connection details visible with a stale-data message and retries
+automatically. Failed draft or queue saves retain the previous saved state for
+retry. If an update installs successfully but cannot remove its staging receipt,
+the result remains installed and shows the retained recovery copy and cleanup
+guidance. These source-only follow-up behaviors await runtime validation.

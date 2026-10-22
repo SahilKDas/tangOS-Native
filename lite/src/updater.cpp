@@ -193,17 +193,31 @@ Json applyPortableUpdate(const fs::path &data, const fs::path &receipt) {
                              std::to_string(error) +
                              "); close other copies and inspect the retained candidate");
   }
-  fs::remove(receipt);
-  return {
+  Json installed = {
       {"state", "installed"}, {"target", value.at("target")}, {"backup", utf8(backup.wstring())}};
+  std::error_code receiptError;
+  fs::remove(receipt, receiptError);
+  if (receiptError) {
+    installed["receipt"] = utf8(receipt.wstring());
+    installed["message"] = "The update is installed. Could not remove its stale staging receipt; "
+                           "close programs locking the update store before cleaning it. "
+                           "Recovery copy: " + utf8(backup.wstring());
+  }
+  return installed;
 }
 void launchPortableUpdate(const fs::path &data, const fs::path &receipt, unsigned long parent,
                           bool restart) {
   readReceipt(data, receipt);
   auto helper = data / "updates" / fs::u8path("helper-" + uniqueId() + ".exe");
   fs::copy_file(fs::u8path(selfExecutable()), helper, fs::copy_options::none);
-  spawn(helper, {"--apply-portable-update", utf8(receipt.wstring()), std::to_string(parent),
-                 restart ? "restart" : "quit"});
+  try {
+    spawn(helper, {"--apply-portable-update", utf8(receipt.wstring()), std::to_string(parent),
+                   restart ? "restart" : "quit"});
+  } catch (...) {
+    std::error_code ignored;
+    fs::remove(helper, ignored);
+    throw;
+  }
 }
 int runPortableUpdateHelper(const fs::path &receipt, unsigned long parent, bool restart) {
   auto data = fs::weakly_canonical(receipt).parent_path().parent_path();

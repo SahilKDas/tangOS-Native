@@ -855,3 +855,21 @@ The v0.38 source checkpoint is a development candidate, not a verified release.
 The default portable executable remains the verified v0.37 package above.
 Compact failure reports and debugger evidence remain under
 lite/out/evidence-038-development; completed disposable fixtures were removed.
+## Source-only recovery follow-up — 2026-10-21
+
+Runtime validation remains paused by user instruction. Source review found and
+addressed three additional recovery gaps: MCP status read failures now retain the
+last public snapshot and report staleness, structural MCP refreshes preserve
+unchanged edit selection/scroll and focus, and failed Fleet draft/queue writes
+restore the prior in-memory state. Generated drafts use the same rollback rule.
+A successful portable replacement now remains installed if receipt cleanup fails,
+with a warning and retained receipt/backup paths. Failed helper launch attempts
+remove their unused copied helper when possible.
+
+Added native regression scenarios cover stale MCP recovery, selection across
+layout changes, locked draft/enqueue persistence, and locked update receipt
+cleanup. These additions have not been compiled or executed. Only source review
+and git diff --check were performed. C: measured approximately 11.27 GiB free;
+no build was started and the verified v0.37 package remains unchanged. The
+existing v0.38 final-source GUI, preference comparison and reproducibility gates
+remain pending; no parity contract was promoted to verified.

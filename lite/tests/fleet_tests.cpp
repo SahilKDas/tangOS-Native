@@ -422,6 +422,16 @@ pathlib.Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forev
                                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
       expect(lockedHandoff != INVALID_HANDLE_VALUE, "handoff persistence lock fixture");
       reject([&] { fleet.handoff(global, first); }, "failed handoff persistence is reported");
+      auto beforeDraft = fleet.draft();
+      reject([&] {
+        fleet.saveDraft({{"title", "Cannot persist"}, {"items", Json::array()}});
+      }, "failed draft persistence is reported");
+      expect(fleet.draft() == beforeDraft, "failed draft save retains last durable value");
+      reject([&] {
+        fleet.enqueue(first, Json::array({{{"id", "retry-after-save-failure"}}}));
+      }, "failed enqueue persistence is reported");
+      expect(fleet.batches() == beforeHandoff,
+             "failed enqueue restores history so retries cannot duplicate batches");
       CloseHandle(lockedHandoff);
       expect(fleet.batches() == beforeHandoff, "failed handoff restores batch ownership in memory");
       for (auto &agent : fleet.snapshot())

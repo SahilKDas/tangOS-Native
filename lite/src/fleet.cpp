@@ -371,6 +371,8 @@ void Fleet::enqueue(const std::string &id, const Json &rows, const std::string &
       throw std::runtime_error("Target already claimed: " + ref);
     fresh.push_back(row);
   }
+  auto previousBook = batchBook;
+  auto previousState = job ? job->state : AgentState{};
   batchBook.add(uniqueId(), id, job ? job->state.spec.name : "Unassigned", fresh,
                 std::time(nullptr) * int64_t(1000), title, prompt);
   if (job) {
@@ -378,7 +380,14 @@ void Fleet::enqueue(const std::string &id, const Json &rows, const std::string &
       job->state.queue.push_back(row);
     job->state.total = job->state.completed + (int)job->state.queue.size();
   }
-  saveLocked();
+  try {
+    saveLocked();
+  } catch (...) {
+    batchBook = std::move(previousBook);
+    if (job)
+      job->state = std::move(previousState);
+    throw;
+  }
 }
 Json Fleet::batches() const {
   std::lock_guard<std::mutex> lock(mutex);
@@ -390,8 +399,14 @@ Json Fleet::draft() const {
 }
 void Fleet::saveDraft(const Json &draft) {
   std::lock_guard<std::mutex> lock(mutex);
+  auto previousBook = batchBook;
   batchBook.setDraft(draft);
-  saveLocked();
+  try {
+    saveLocked();
+  } catch (...) {
+    batchBook = std::move(previousBook);
+    throw;
+  }
 }
 void Fleet::enqueueDraft(const std::string &id) {
   auto staged = draft();
@@ -401,9 +416,17 @@ void Fleet::enqueueDraft(const std::string &id) {
           staged.value("prompt", std::string()));
   // Do not erase a draft edited concurrently while claims were checked.
   std::lock_guard<std::mutex> lock(mutex);
+  auto previousBook = batchBook;
   if (batchBook.draft() == staged)
     batchBook.setDraft({{"title", "Batch draft"}, {"prompt", ""}, {"items", Json::array()}});
-  saveLocked();
+  try {
+    saveLocked();
+  } catch (...) {
+    // Enqueue was already saved. Retain both that durable batch and its draft
+    // rather than silently publishing a cleared draft that reopening cannot see.
+    batchBook = std::move(previousBook);
+    throw;
+  }
 }
 void Fleet::handoff(const std::string &batchId, const std::string &destination,
                     std::atomic<bool> *stop) {
@@ -578,8 +601,14 @@ Json Fleet::generateDraft(const std::string &role, int count, Runner &runner, Si
     throw std::runtime_error(
         "Generated targets were reserved during generation; refresh and retry");
   draft["items"] = available;
+  auto previousBook = batchBook;
   batchBook.setDraft(draft);
-  saveLocked();
+  try {
+    saveLocked();
+  } catch (...) {
+    batchBook = std::move(previousBook);
+    throw;
+  }
   return draft;
 }
 void Fleet::clearDoneBatches() {

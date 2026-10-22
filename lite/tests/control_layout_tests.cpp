@@ -337,8 +337,13 @@ int main(int argc, char **argv) {
                        {"busy", false},
                        {"promptPreview", "Follow AGENTS.md. Public fixture only."}};
       std::vector<lite::McpPopoverAction> actions;
+      bool snapshotUnavailable = false;
       lite::McpPopover mcp(
-          parent, [&] { return state; },
+          parent, [&] {
+            if (snapshotUnavailable)
+              throw std::runtime_error("Temporary status read failure");
+            return state;
+          },
           [&](lite::McpPopoverAction action) {
             actions.push_back(action);
             if (action == lite::McpPopoverAction::toggle)
@@ -377,10 +382,28 @@ int main(int argc, char **argv) {
       expect(actions.back() == lite::McpPopoverAction::copyManualSetup &&
                  label(GetDlgItem(popup, 8206)).find(L"Public stdio") != std::wstring::npos,
              "Manual setup can be inspected and explicitly copied");
+      auto beforeOutcome = GetDlgItem(popup, 8204);
+      SetFocus(beforeOutcome);
+      SendMessageW(beforeOutcome, EM_SETSEL, 2, 8);
       state["outcome"] = "Claude Code: unchanged\nExisting settings preserved; reload the client.";
       SendMessageW(popup, WM_TIMER, 1, 0);
       expect(label(GetDlgItem(popup, 8207)).find(L"unchanged") != std::wstring::npos,
              "Registration outcomes remain inline");
+      DWORD preservedStart = 0, preservedEnd = 0;
+      SendMessageW(GetDlgItem(popup, 8204), EM_GETSEL, WPARAM(&preservedStart), LPARAM(&preservedEnd));
+      expect(preservedStart == 2 && preservedEnd == 8 && GetFocus() == GetDlgItem(popup, 8204),
+             "MCP structural refresh lost unchanged selection or keyboard focus");
+      snapshotUnavailable = true;
+      SendMessageW(popup, WM_TIMER, 1, 0);
+      expect(label(GetDlgItem(popup, 8201)) == L"running" &&
+                 label(GetDlgItem(popup, 8205)) == L"http://127.0.0.1:12345/mcp" &&
+                 label(GetDlgItem(popup, 8207)).find(L"unchanged") != std::wstring::npos,
+             "MCP transient status failure discarded usable cached connection state");
+      snapshotUnavailable = false;
+      SendMessageW(popup, WM_TIMER, 1, 0);
+      SendMessageW(GetDlgItem(popup, 8204), EM_GETSEL, WPARAM(&preservedStart), LPARAM(&preservedEnd));
+      expect(preservedStart == 2 && preservedEnd == 8,
+             "MCP stale reconnect lost the selected public instructions");
       auto endpoint = GetDlgItem(popup, 8205), prompt = GetDlgItem(popup, 8204);
       expect(endpoint && label(endpoint) == L"http://127.0.0.1:12345/mcp",
              "MCP endpoint stayed stale after a live snapshot update");
